@@ -1,0 +1,18 @@
+%% granularity: master
+%% files: app/orchestrator.py app/agents/runner.py app/validators.py app/ccs.py app/agents/mock.py
+flowchart TD
+    U[User submits context form + uploads] --> IN["AGENT intake (haiku; sonnet if files)\nin: form+uploads → out: CreatorContext"]
+    IN --> RET["FUNCTION retrieval via RAG contract :8787\nin: niche/query → out: assets, chunks, stats, trends"]
+    RET --> P1["AGENT planner pass 1 (sonnet)\nin: context+refs → out: Plan (concepts + proposed ratings + evidence)"]
+    P1 --> V1{"FUNCTION validators\nschema ok? citations resolve? slots match cadence?"}
+    V1 -- "invalid (≤2 retries)" --> P1
+    V1 -- "still invalid" --> HF["Hard fail surfaced to user\n(never silently accepted)"]
+    V1 -- valid --> FB["AGENT feedback / red-team (sonnet, dynamic persona)\nin: Plan → out: verdict per element + 4 lenses + kill flags + fixes"]
+    FB --> CCS["FUNCTION server recomputes CCS\nH=3 M=2 L=1 ×weights /3 · hook=L → rework gate"]
+    CCS --> FLAG{"flagged concepts?\n(kill flag or CCS ≤ 70)"}
+    FLAG -- "yes (max 1 loop)" --> P2["AGENT planner refine\nonly flagged concepts — diff-checked byte-identical elsewhere"]
+    P2 --> FB2["AGENT feedback re-judge (flagged only)"] --> CCS
+    FLAG -- no --> OPT["AGENT planner options pass\nexactly 3 distinct angles per concept with CCS > 70"]
+    OPT --> DB[("FUNCTION SQLite persist\nplan + feedback + options + concept_state")]
+    DB --> UI["UI: timeline of concept cards\napprove / feedback+regenerate / reorder"]
+    UI -- "regenerate w/ user feedback" --> P2

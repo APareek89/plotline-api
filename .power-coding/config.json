@@ -1,0 +1,79 @@
+{
+  "version": "1.0.0",
+  "consent": {
+    "git_checkpoints": "auto",
+    "fmea_full_scan": "ask",
+    "paid_evals": "ask"
+  },
+  "modules": {
+    "fmea": {
+      "enabled": true,
+      "pin_to_commit": true,
+      "note": "user preference (memory): report all, FIX P0 only unless asked",
+      "triggers": {
+        "on_feature_complete": false,
+        "on_pre_commit": false,
+        "smart_suggest": true,
+        "manual_only": false
+      },
+      "smart_suggest_signals": [
+        "diff_exceeds_lines:200",
+        "new_external_api_integration",
+        "payment_billing_logic_touched",
+        "async_queue_worker_modified",
+        "error_handling_changed",
+        "auth_access_control_touched",
+        "database_migration_added",
+        "environment_config_changed",
+        "new_webhook_handler",
+        "retry_logic_modified"
+      ],
+      "scoring": {
+        "p0_threshold": 200,
+        "p1_threshold": 100,
+        "p2_threshold": 0
+      },
+      "failure_categories": [
+        "unhandled_error_paths",
+        "external_dependency_failures",
+        "race_conditions_and_state",
+        "resource_exhaustion",
+        "security_access_control",
+        "data_integrity_partial_writes",
+        "observability_gaps",
+        "scale_and_load_failures",
+        "billing_credit_mismatches",
+        "retry_idempotency_issues",
+        "config_feature_flag_drift",
+        "edge_cases_from_prd"
+      ],
+      "context_sources": {
+        "prd_path": "docs/PRD-v1.txt",
+        "architecture_doc": "docs/mermaid/",
+        "known_incidents": "Learning.MD",
+        "infra_constraints": "Phase-1 dev: local-only (SQLite, dev RAG stub); no AWS in this lane; free tier only"
+      },
+      "output": {
+        "format": "markdown_table",
+        "include_rpn": true,
+        "include_recommended_actions": true,
+        "include_priority_badges": true,
+        "max_failure_modes": 25
+      }
+    },
+    "sentinel": {
+      "enabled": true,
+      "manual_only": false,
+      "unconfirmed_default": true
+    },
+    "session_pulse": {
+      "enabled": true,
+      "unconfirmed_default": true
+    },
+    "security_baseline": {
+      "done": true,
+      "date": "2026-08-21",
+      "notes": "secret scans clean both repos; .env* gitignored; SQL parameterized; upload filenames sanitized; no auth/money surfaces in Phase 1 (local single-user)"
+    }
+  }
+}

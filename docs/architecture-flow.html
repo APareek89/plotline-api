@@ -1,0 +1,64 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Architecture Flow</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:1100px;margin:0 auto;padding:24px 20px 80px;color:#1f2937;background:#fafafa}
+ h1{border-bottom:2px solid #e5e7eb;padding-bottom:8px}
+ h2{margin-top:36px;border-top:1px solid #e5e7eb;padding-top:18px;color:#111827}
+ pre.mermaid{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:14px 0 28px;overflow:auto;text-align:center}
+ .hint{position:sticky;top:0;background:#fff8e1;border:1px solid #f0d264;border-radius:6px;padding:8px 12px;font-size:13px;color:#5a4a00;margin-bottom:16px}
+ .mermaid svg{max-width:100%;height:auto}
+</style></head><body>
+<div class="hint">Tip: use Ctrl/Cmd + scroll or browser zoom to enlarge a diagram.</div>
+<h1>Architecture Flow</h1>
+<h2>granularity: master</h2>
+<pre class="mermaid">%% granularity: master
+%% files: app/orchestrator.py app/agents/runner.py app/validators.py app/ccs.py app/agents/mock.py
+flowchart TD
+    U[User submits context form + uploads] --&gt; IN["AGENT intake (haiku; sonnet if files)\nin: form+uploads → out: CreatorContext"]
+    IN --&gt; RET["FUNCTION retrieval via RAG contract :8787\nin: niche/query → out: assets, chunks, stats, trends"]
+    RET --&gt; P1["AGENT planner pass 1 (sonnet)\nin: context+refs → out: Plan (concepts + proposed ratings + evidence)"]
+    P1 --&gt; V1{"FUNCTION validators\nschema ok? citations resolve? slots match cadence?"}
+    V1 -- "invalid (≤2 retries)" --&gt; P1
+    V1 -- "still invalid" --&gt; HF["Hard fail surfaced to user\n(never silently accepted)"]
+    V1 -- valid --&gt; FB["AGENT feedback / red-team (sonnet, dynamic persona)\nin: Plan → out: verdict per element + 4 lenses + kill flags + fixes"]
+    FB --&gt; CCS["FUNCTION server recomputes CCS\nH=3 M=2 L=1 ×weights /3 · hook=L → rework gate"]
+    CCS --&gt; FLAG{"flagged concepts?\n(kill flag or CCS ≤ 70)"}
+    FLAG -- "yes (max 1 loop)" --&gt; P2["AGENT planner refine\nonly flagged concepts — diff-checked byte-identical elsewhere"]
+    P2 --&gt; FB2["AGENT feedback re-judge (flagged only)"] --&gt; CCS
+    FLAG -- no --&gt; OPT["AGENT planner options pass\nexactly 3 distinct angles per concept with CCS &gt; 70"]
+    OPT --&gt; DB[("FUNCTION SQLite persist\nplan + feedback + options + concept_state")]
+    DB --&gt; UI["UI: timeline of concept cards\napprove / feedback+regenerate / reorder"]
+    UI -- "regenerate w/ user feedback" --&gt; P2
+</pre>
+<h2>granularity: master</h2>
+<pre class="mermaid">%% granularity: master
+%% files: app/main.py app/rag_client.py devrag/server.py app/config.py
+flowchart LR
+    subgraph browser [Browser]
+        WEB["plotline-web · Next.js :3100\nContent Studio · Plans · My Space"]
+    end
+    subgraph api [plotline-api · FastAPI :8600]
+        ROUTES["REST + SSE routes"]
+        ORCH["Orchestrator state machine\ncontext→retrieve→plan→critique→refine→await-approval"]
+        VAL["Server-side validators\n(CCS recompute · citation resolution · diff-check)"]
+        SQL[("SQLite data/plotline.db\nprofile · series · plans · concept_state · performance · runs")]
+    end
+    subgraph rag [RAG service :8787 — frozen contract]
+        STUB["DEV STUB (sample data)\nPOST /search_corpus · /resolve_source_ids\n→ swap: Codex's plotline-rag, same port"]
+    end
+    ANTH["Anthropic API\nsonnet-4-6 / haiku-4-5\n(MOCK_LLM=1 → deterministic mocks)"]
+    WEB --&gt;|"fetch + EventSource"| ROUTES --&gt; ORCH
+    ORCH --&gt; VAL
+    ORCH --&gt;|"retrieval tools ONLY\n(no network tools ever)"| STUB
+    VAL --&gt;|resolve_source_ids| STUB
+    ORCH --&gt;|"tool-use loop"| ANTH
+    ORCH --&gt; SQL
+</pre>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad:false, securityLevel:"loose", theme:"base",
+  themeVariables:{ fontFamily:"-apple-system, Segoe UI, Roboto, sans-serif", fontSize:"14px" } });
+await mermaid.run({ querySelector:"pre.mermaid" });
+</script>
+</body></html>

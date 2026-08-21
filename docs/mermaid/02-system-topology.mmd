@@ -1,0 +1,22 @@
+%% granularity: master
+%% files: app/main.py app/rag_client.py devrag/server.py app/config.py
+flowchart LR
+    subgraph browser [Browser]
+        WEB["plotline-web · Next.js :3100\nContent Studio · Plans · My Space"]
+    end
+    subgraph api [plotline-api · FastAPI :8600]
+        ROUTES["REST + SSE routes"]
+        ORCH["Orchestrator state machine\ncontext→retrieve→plan→critique→refine→await-approval"]
+        VAL["Server-side validators\n(CCS recompute · citation resolution · diff-check)"]
+        SQL[("SQLite data/plotline.db\nprofile · series · plans · concept_state · performance · runs")]
+    end
+    subgraph rag [RAG service :8787 — frozen contract]
+        STUB["DEV STUB (sample data)\nPOST /search_corpus · /resolve_source_ids\n→ swap: Codex's plotline-rag, same port"]
+    end
+    ANTH["Anthropic API\nsonnet-4-6 / haiku-4-5\n(MOCK_LLM=1 → deterministic mocks)"]
+    WEB -->|"fetch + EventSource"| ROUTES --> ORCH
+    ORCH --> VAL
+    ORCH -->|"retrieval tools ONLY\n(no network tools ever)"| STUB
+    VAL -->|resolve_source_ids| STUB
+    ORCH -->|"tool-use loop"| ANTH
+    ORCH --> SQL
