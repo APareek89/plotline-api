@@ -19,12 +19,25 @@ if Path(_CA_BUNDLE).exists():
     for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
         os.environ.setdefault(var, _CA_BUNDLE)
 
+def _truthy(name: str, default: str) -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 # --- services ---------------------------------------------------------------
 API_HOST = os.environ.get("PLOTLINE_API_HOST", "127.0.0.1")
 API_PORT = int(os.environ.get("PLOTLINE_API_PORT", "8600"))
-# Frozen interface (§7): Codex's plotline-rag serves this contract. The dev
-# stub in devrag/ serves the same contract on the same port until it lands.
+# Frozen interface (§7): Codex's plotline-rag serves this contract (contract
+# default port 8787; locally it runs on 8788 while devrag holds 8787).
 RAG_BASE_URL = os.environ.get("PLOTLINE_RAG_URL", "http://127.0.0.1:8787")
+RAG_TIMEOUT = float(os.environ.get("PLOTLINE_RAG_TIMEOUT_SECONDS", "10"))
+RAG_ENABLED = _truthy("PLOTLINE_RAG_ENABLED", "1")
+# plotline-rag's corpus currently ships 10 dev-only tier="seed" chunks.
+# Seed evidence must never read as official/expert guidance, so it is
+# rejected unless explicitly allowed (local integration testing only).
+ALLOW_SEED_EVIDENCE = _truthy("PLOTLINE_ALLOW_SEED_EVIDENCE", "0")
+# devrag keeps serving the corpora plotline-rag doesn't host yet
+# (asset:/stat:/trend: sample fixtures). Empty = those corpora are absent.
+AUX_RAG_URL = os.environ.get("PLOTLINE_AUX_RAG_URL", "")
 
 # --- models (PRD §7: Sonnet = plan/critique/studio, Haiku = intake/ingest) ---
 PLANNER_MODEL = os.environ.get("PLOTLINE_PLANNER_MODEL", "claude-sonnet-4-6")

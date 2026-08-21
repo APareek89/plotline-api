@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Optional
 
-from app.rag_client import RagClient
+from app.rag_client import RoutingRag
 
 
 TOOL_DEFS: list[dict[str, Any]] = [
@@ -89,11 +89,18 @@ class ToolDispatcher:
     """Executes tool calls against the RAG service + local profile memory,
     and records every call + every source_id surfaced (for run logging)."""
 
-    def __init__(self, rag: RagClient, get_profile: Callable[[], dict[str, Any]]):
+    def __init__(
+        self,
+        rag: RoutingRag,
+        get_profile: Callable[[], dict[str, Any]],
+        surfaced_ids: Optional[set[str]] = None,
+    ):
         self.rag = rag
         self._get_profile = get_profile
         self.calls: list[dict[str, Any]] = []
-        self.surfaced_ids: set[str] = set()
+        # Shared across every agent in one pipeline run — the citation
+        # allowlist for the local subset check (cite only what THIS run saw).
+        self.surfaced_ids: set[str] = surfaced_ids if surfaced_ids is not None else set()
 
     def dispatch(self, name: str, tool_input: dict[str, Any]) -> str:
         result = self._run(name, tool_input)

@@ -16,7 +16,7 @@ from app import ccs as ccs_mod
 from app import config, store
 from app.agents import mock as mock_agents
 from app.agents.runner import AgentHardFail, run_agent
-from app.rag_client import RagClient, rag
+from app.rag_client import rag
 from app.schemas import (
     CreatorContext,
     Feedback,
@@ -57,8 +57,8 @@ class RunEvents:
 run_events = RunEvents()
 
 
-def _dispatcher() -> ToolDispatcher:
-    return ToolDispatcher(rag, store.get_profile)
+def _dispatcher(surfaced_ids: Optional[set[str]] = None) -> ToolDispatcher:
+    return ToolDispatcher(rag, store.get_profile, surfaced_ids=surfaced_ids)
 
 
 # ------------------------------------------------------------------- intake
@@ -134,11 +134,15 @@ def generate_plan(series_id: str, run_id: str) -> None:
         store.set_series_status(series_id, "planning")
 
         run_events.emit(run_id, "retrieve", "Pulling inspiration references + benchmarks…")
+        rag.ensure_ready()  # dependency-unavailable surfaces here, before any agent call
         payload = {"context": context.model_dump(mode="json")}
+        # One citation allowlist for the whole pipeline run: agents may cite
+        # only source_ids their retrieval tools surfaced within THIS run.
+        run_retrieved: set[str] = set()
 
         # ---- planner pass 1
         run_events.emit(run_id, "plan", "Planner drafting concepts with evidence…")
-        dispatcher = _dispatcher()
+        dispatcher = _dispatcher(run_retrieved)
         plan, _ = run_agent(
             agent="planner.concepts",
             prompt_name="planner",
@@ -146,7 +150,7 @@ def generate_plan(series_id: str, run_id: str) -> None:
             user_payload={**payload, "pass": "concepts"},
             schema=Plan,
             dispatcher=dispatcher,
-            validate=lambda p: validate_plan(p, context, rag),
+            validate=lambda p: validate_plan(p, context, rag, retrieved_ids=run_retrieved),
             mock_fn=mock_agents.mock_planner_concepts,
         )
 
@@ -158,8 +162,8 @@ def generate_plan(series_id: str, run_id: str) -> None:
             model=config.FEEDBACK_MODEL,
             user_payload={**payload, "plan": plan.model_dump(mode="json")},
             schema=Feedback,
-            dispatcher=_dispatcher(),
-            validate=lambda f: validate_feedback(f, plan, context, rag),
+            dispatcher=_dispatcher(run_retrieved),
+            validate=lambda f: validate_feedback(f, plan, context, rag, retrieved_ids=run_retrieved),
             prompt_replacements={"dynamic_persona": _persona_for(context)},
             mock_fn=mock_agents.mock_feedback,
         )
@@ -180,9 +184,10 @@ def generate_plan(series_id: str, run_id: str) -> None:
                     "flagged_concept_ids": sorted(flagged),
                 },
                 schema=Plan,
-                dispatcher=_dispatcher(),
+                dispatcher=_dispatcher(run_retrieved),
                 validate=lambda p: validate_plan(
-                    p, context, rag, previous_plan=plan, flagged_concept_ids=flagged
+                    p, context, rag, previous_plan=plan, flagged_concept_ids=flagged,
+                    retrieved_ids=run_retrieved,
                 ),
                 mock_fn=mock_agents.mock_planner_refine,
             )
@@ -200,9 +205,9 @@ def generate_plan(series_id: str, run_id: str) -> None:
                     "refined": True,
                 },
                 schema=Feedback,
-                dispatcher=_dispatcher(),
+                dispatcher=_dispatcher(run_retrieved),
                 validate=lambda f: validate_feedback(
-                    f, _subset_plan(plan, flagged), context, rag
+                    f, _subset_plan(plan, flagged), context, rag, retrieved_ids=run_retrieved
                 ),
                 prompt_replacements={"dynamic_persona": _persona_for(context)},
                 mock_fn=mock_agents.mock_feedback,
@@ -227,7 +232,7 @@ def generate_plan(series_id: str, run_id: str) -> None:
                 model=config.PLANNER_MODEL,
                 user_payload={**payload, "pass": "options", "concepts": qualified_concepts},
                 schema=OptionsOutput,
-                dispatcher=_dispatcher(),
+                dispatcher=_dispatcher(run_retrieved),
                 validate=lambda o: validate_options(o, qualified),
                 mock_fn=mock_agents.mock_planner_options,
             )
@@ -261,6 +266,14 @@ def regenerate_concept(series_id: str, concept_id: str, user_feedback: str, run_
         options = OptionsOutput.model_validate(stored["options"] or {"concept_options": []})
         flagged = {concept_id}
         payload = {"context": context.model_dump(mode="json")}
+        rag.ensure_ready()
+        # Citation allowlist for this run, seeded with the stored plan's ids:
+        # a refine agent may legitimately keep citations that already passed
+        # both checks when authored — anything beyond those + what it
+        # retrieves NOW is an invented citation.
+        from app.agents.runner import _cited_ids
+
+        run_retrieved: set[str] = _cited_ids(plan) | _cited_ids(feedback)
 
         run_events.emit(run_id, "refine", f"Regenerating {concept_id} with your feedback…")
         plan_new, _ = run_agent(
@@ -276,8 +289,11 @@ def regenerate_concept(series_id: str, concept_id: str, user_feedback: str, run_
                 "user_feedback": user_feedback,
             },
             schema=Plan,
-            dispatcher=_dispatcher(),
-            validate=lambda p: validate_plan(p, context, rag, previous_plan=plan, flagged_concept_ids=flagged),
+            dispatcher=_dispatcher(run_retrieved),
+            validate=lambda p: validate_plan(
+                p, context, rag, previous_plan=plan, flagged_concept_ids=flagged,
+                retrieved_ids=run_retrieved,
+            ),
             mock_fn=mock_agents.mock_planner_refine,
         )
 
@@ -293,8 +309,10 @@ def regenerate_concept(series_id: str, concept_id: str, user_feedback: str, run_
                 "refined": True,
             },
             schema=Feedback,
-            dispatcher=_dispatcher(),
-            validate=lambda f: validate_feedback(f, _subset_plan(plan_new, flagged), context, rag),
+            dispatcher=_dispatcher(run_retrieved),
+            validate=lambda f: validate_feedback(
+                f, _subset_plan(plan_new, flagged), context, rag, retrieved_ids=run_retrieved
+            ),
             prompt_replacements={"dynamic_persona": _persona_for(context)},
             mock_fn=mock_agents.mock_feedback,
         )
@@ -315,7 +333,7 @@ def regenerate_concept(series_id: str, concept_id: str, user_feedback: str, run_
                     "concepts": [{**concept.model_dump(mode="json"), "ccs_final": state["ccs"]}],
                 },
                 schema=OptionsOutput,
-                dispatcher=_dispatcher(),
+                dispatcher=_dispatcher(run_retrieved),
                 validate=lambda o: validate_options(o, {concept_id}),
                 mock_fn=mock_agents.mock_planner_options,
             )

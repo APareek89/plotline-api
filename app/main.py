@@ -22,6 +22,23 @@ from app.schemas import CreatorContext
 
 app = FastAPI(title="plotline-api", version="0.1.0")
 
+
+@app.on_event("startup")
+def _rag_startup_check() -> None:
+    """Log the RAG manifest at boot. Non-fatal here — evidence-requiring flows
+    re-check via rag.ensure_ready() and fail loudly if the service is down."""
+    import logging
+
+    if not config.RAG_ENABLED:
+        logging.getLogger("plotline.rag").warning(
+            "retrieval DISABLED (PLOTLINE_RAG_ENABLED=0) — plan generation will refuse to run"
+        )
+        return
+    try:
+        rag.ensure_ready()
+    except RagUnavailable as exc:
+        logging.getLogger("plotline.rag").warning("plotline-rag not reachable at startup: %s", exc)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3100", "http://127.0.0.1:3100"],
@@ -37,6 +54,8 @@ def health() -> dict[str, Any]:
         rag_status = rag.health()
     except RagUnavailable as exc:
         rag_status = {"error": str(exc)}
+    rag_status["enabled"] = config.RAG_ENABLED
+    rag_status["allow_seed_evidence"] = config.ALLOW_SEED_EVIDENCE
     return {
         "service": "plotline-api",
         "mock_llm": config.MOCK_LLM,

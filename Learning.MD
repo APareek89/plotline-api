@@ -11,3 +11,19 @@
 **Deepest why type:** `knowledge-gap`
 **Action taken:** Picked hook M + diff M + retention M (82) for the qualified band. (Why 1 level.)
 **Preventive action:** When writing threshold tests against weighted scores, compute the score first — don't eyeball rating combos.
+
+### 2026-08-21 — Real plotline-rag wired in; two contract drifts caught
+
+**Symptom:** Codex's plotline-rag landed with a contract that differs from devrag in two
+ways: `/resolve_source_ids` returns `{resolved:[], unresolved:[]}` lists (devrag used a
+`{id: bool}` dict), and it hosts ONLY the best_practice chunk corpus (no asset/stat/trend).
+**Why 1:** devrag was written from the §7 contract sketch before the real schema existed.
+**Deepest why type:** `knowledge-gap` (frozen contract wasn't frozen in wire-shape detail)
+**Action taken:** RagClient normalizes both resolver shapes; RoutingRag fans out — chunk:*
+→ plotline-rag (:8788, DynamoDB resolver), asset:/stat:/trend:* → devrag aux (:8787) until
+plotline-kb lands. Citation validation is now two-layer: local subset (cited ⊆ retrieved
+THIS run; regen runs seed the allowlist with the stored plan's validated ids) + remote
+resolve, both fail closed. tier="seed" evidence rejected unless PLOTLINE_ALLOW_SEED_EVIDENCE.
+**Preventive action:** When two repos share a "frozen" contract, freeze it as executable
+fixtures (recorded request/response pairs), not prose — the normalizer in rag_client.py
+now tolerates both shapes so the next drift degrades gracefully.

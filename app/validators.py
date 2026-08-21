@@ -10,7 +10,7 @@ import json
 from typing import Iterable, Optional
 
 from app import ccs as ccs_mod
-from app.rag_client import RagClient
+from app.rag_client import RoutingRag
 from app.schemas import (
     Concept,
     CreatorContext,
@@ -41,10 +41,36 @@ def _resolvable_ids(evidence: list[Evidence]) -> list[str]:
     return [e.source_id for e in evidence if e.source_id != "model"]
 
 
-def resolve_or_fail(evidence: list[Evidence], rag: RagClient, errors: list[str], where: str) -> None:
+def resolve_or_fail(
+    evidence: list[Evidence],
+    rag: RoutingRag,
+    errors: list[str],
+    where: str,
+    retrieved_ids: Optional[set[str]] = None,
+) -> None:
+    """Two independent layers, both mandatory (an id passing the DB check is
+    NOT enough if it was never retrieved this run):
+
+      1. local subset — every cited id ∈ ids surfaced by retrieval tools in
+         THIS pipeline run (catches invented-but-real ids)
+      2. remote existence — /resolve_source_ids against the RAG service
+         (catches retrieved-then-rotted ids); unreachable resolver = reject
+    """
     ids = sorted(set(_resolvable_ids(evidence)))
     if not ids:
         return
+    if retrieved_ids is not None:
+        invented = [i for i in ids if i not in retrieved_ids]
+        if invented:
+            errors.append(
+                f"{where}: source_id(s) {invented} were NOT returned by any retrieval "
+                "tool in this run — you may only cite ids your tools surfaced here; "
+                'if evidence is insufficient, say so ("no evidence in DB", '
+                "addressed=false / evidence_gap=true) instead of inventing a source"
+            )
+            ids = [i for i in ids if i in retrieved_ids]
+            if not ids:
+                return
     resolved = rag.resolve_source_ids(ids)
     dead = [i for i in ids if not resolved.get(i, False)]
     if dead:
@@ -74,10 +100,11 @@ def validate_intake(context: CreatorContext) -> CreatorContext:
 def validate_plan(
     plan: Plan,
     context: CreatorContext,
-    rag: RagClient,
+    rag: RoutingRag,
     *,
     previous_plan: Optional[Plan] = None,
     flagged_concept_ids: Optional[set[str]] = None,
+    retrieved_ids: Optional[set[str]] = None,
 ) -> Plan:
     errors: list[str] = []
     family = ccs_mod.WEIGHTS.keys()  # noqa: F841  (families validated below)
@@ -111,7 +138,14 @@ def validate_plan(
                 f"objective family {fam.value}"
             )
         evidence = _collect_evidence(e for s in concept.element_scores for e in s.evidence)
-        resolve_or_fail(evidence, rag, errors, f"concept {concept.id}")
+        # Subset check applies to concepts authored THIS run: all of them on a
+        # fresh plan, only flagged ones on a refine (untouched concepts are
+        # byte-identical and their citations were checked when first written).
+        authored_now = previous_plan is None or concept.id in (flagged_concept_ids or set())
+        resolve_or_fail(
+            evidence, rag, errors, f"concept {concept.id}",
+            retrieved_ids=retrieved_ids if authored_now else None,
+        )
 
     # Refine pass: may touch only flagged concepts — untouched must be byte-identical.
     if previous_plan is not None:
@@ -152,7 +186,8 @@ def validate_feedback(
     feedback: Feedback,
     plan: Plan,
     context: CreatorContext,
-    rag: RagClient,
+    rag: RoutingRag,
+    retrieved_ids: Optional[set[str]] = None,
 ) -> Feedback:
     errors: list[str] = []
     fam = _family_of(context)
@@ -210,7 +245,10 @@ def validate_feedback(
             evidence = evidence + [
                 Evidence(tag="REF", source_id=sat.source_id, claim="saturation check", as_of=None)
             ]
-        resolve_or_fail(evidence, rag, errors, f"feedback for concept {verdict.concept_id}")
+        resolve_or_fail(
+            evidence, rag, errors, f"feedback for concept {verdict.concept_id}",
+            retrieved_ids=retrieved_ids,
+        )
 
         # Server recomputes CCS — model arithmetic is advisory only.
         server_ccs = ccs_mod.compute_ccs(fam, ccs_mod.final_ratings_of(verdict))

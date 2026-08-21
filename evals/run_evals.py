@@ -78,7 +78,10 @@ def run() -> dict[str, Any]:
     try:
         rag.health()
     except Exception as exc:
-        raise SystemExit(f"RAG service not reachable on {rag.base_url} — start devrag first: {exc}")
+        raise SystemExit(
+            f"RAG service not reachable on {rag.base_url} — start plotline-rag "
+            f"(make serve-s3 PORT=8788) and devrag (:8787) first: {exc}"
+        )
 
     results = []
     for i, form in enumerate(SEEDS, 1):

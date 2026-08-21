@@ -17,14 +17,19 @@ reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/2
 
 ## Current state
 - ✅ Shipped: full Phase-1 planning product, both repos (see git log & Learning.MD)
-- ▶ Runs in MOCK_LLM=1. Servers: devrag :8787 + api :8600 (`bash run.sh` or launch.json) · web :3100 (`npm run dev`)
+- ✅ Codex's plotline-rag (~/Documents/plotline-rag, S3+DynamoDB, ap-south-1) wired in:
+  RoutingRag routes chunk:* → plotline-rag :8788, asset:/stat:/trend:* → devrag aux :8787.
+  Two-layer citation validation (local subset + remote resolve), seed-tier gate, bounded
+  retries. 41 tests, 20/20 evals, live-verified (plan cited chunk:C0001 via DynamoDB).
+- ▶ Runs in MOCK_LLM=1. Servers: `bash run.sh` (starts plotline-rag :8788 + devrag :8787 + api :8600) · web :3100 (`npm run dev`)
 - ▶ Loop.MD status: offered (awaiting user's answer)
 
 ## Pending points
 - 🧑 USER: copy the ANTHROPIC_API_KEY line into plotline-api/.env yourself; set MOCK_LLM=0 to go live, then run one real plan + the golden set
 - 🧑 USER: answer the Loop offer; edit Loop.MD goal/evals to make them yours
 - 🧑 USER: PRD open calls — trademark check on "Plotline"; pricing currency INR vs USD
-- 🤖 AGENT: when Codex's plotline-rag lands, stop devrag and point PLOTLINE_RAG_URL at it (contract-compatible, no code change)
+- 🤖 AGENT: when plotline-kb's validated corpus replaces the 10 seed chunks (Codex: make index/eval/sync), set PLOTLINE_ALLOW_SEED_EVIDENCE=0 in .env and re-run evals
+- 🤖 AGENT: when plotline-rag hosts asset:/stat:/trend: corpora, drop devrag + PLOTLINE_AUX_RAG_URL (routing collapses to one backend)
 - 🤖 AGENT: exit-gate instrumentation — approval-within-≤2-regens report from concept_state.regen_count
 
 ## Decisions

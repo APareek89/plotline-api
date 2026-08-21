@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from app import config, store
-from app.rag_client import RagClient
+from app.rag_client import RagClient, RoutingRag
+
+# Originals, for tests that exercise the real HTTP plumbing via MockTransport
+# (the autouse local_rag fixture patches these class-wide).
+REAL_REQUEST = RagClient._request
+REAL_HEALTH = RagClient.health
 
 
 @pytest.fixture(autouse=True)
@@ -21,10 +26,11 @@ def mock_llm(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def local_rag(monkeypatch):
-    """Route the RagClient at the devrag stub in-process — same fixtures, same
-    contract, no server needed."""
+    """Zero-network: RagClient hits the devrag stub in-process (same fixtures,
+    same contract), and the app-wide RoutingRag gets devrag as BOTH primary and
+    aux so every corpus + every id prefix resolves like before."""
 
-    def _post(self, path, payload):
+    def _request(self, method, path, payload=None):
         from devrag import server
 
         if path == "/search_corpus":
@@ -33,4 +39,15 @@ def local_rag(monkeypatch):
             return server.resolve_source_ids(server.ResolveRequest(**payload))
         raise AssertionError(f"unexpected RAG path {path}")
 
-    monkeypatch.setattr(RagClient, "_post", _post)
+    def _health(self):
+        from devrag import server
+
+        return server.health()
+
+    monkeypatch.setattr(RagClient, "_request", _request)
+    monkeypatch.setattr(RagClient, "health", _health)
+
+    routing = RoutingRag(primary=RagClient("http://test"), aux=RagClient("http://test"), enabled=True)
+    for module in ("app.rag_client", "app.orchestrator", "app.main"):
+        monkeypatch.setattr(f"{module}.rag", routing, raising=False)
+    return routing
