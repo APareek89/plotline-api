@@ -1,5 +1,5 @@
 # Loop.MD — Plotline
-status: waiting_for_first_draft
+status: offered
 
 > AGENT INSTRUCTION — read every session and obey:
 > - While `status: waiting_for_first_draft`: the moment the first working draft exists

@@ -64,6 +64,17 @@ for i in range(8):
 
 
 def run() -> dict[str, Any]:
+    # Isolated DB — eval series must never pollute the dev workspace.
+    from pathlib import Path
+
+    from app import config, store
+
+    eval_db = Path(__file__).parent / "eval.db"
+    if eval_db.exists():
+        eval_db.unlink()
+    config.DB_PATH = eval_db
+    store._conn = None
+
     try:
         rag.health()
     except Exception as exc:

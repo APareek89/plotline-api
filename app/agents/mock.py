@@ -110,7 +110,7 @@ _CONCEPT_SEEDS = [
         "angle": "cost-slasher listicle",
         "title": '"{area}: I replaced a {price} workflow with 3 free tools"',
         "format": "listicle_demo",
-        "hook_verbal": "I cancelled a {price} subscription — these 3 free {area} tools do it better",
+        "hook_verbal": "I cancelled a {price} subscription — three free tools do it better",
         "first_frame": "printed invoice torn in half on camera, two objects, readable on mute",
         "cta": "Save this list before you pay again",
         "strength": "strong",

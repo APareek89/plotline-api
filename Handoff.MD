@@ -10,21 +10,22 @@ last-synced: `f770d06` (plotline-api) · plotline-web: `no commits yet`
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
 
 ## Compact summary of previous session
-Built Phase 1 from the PRD (docs/PRD-v1.txt): plotline-api complete (schemas, CCS
-engine anchored to PRD worked examples, server-side validators, agent pipeline with
-mock mode, dev RAG stub on the frozen :8787 contract, 23 tests green, 20-seed evals
-green). plotline-web ~60% (tokens, layout, home, context form, concept cards, SSE).
+Phase 1 built from the PRD (docs/PRD-v1.txt) and verified end-to-end in the browser:
+context form → intake → inspiration cards (sample-data label) → plan pipeline (plan →
+red-team → refine → options) → concept cards with CCF scoresheets → approve/regenerate/
+reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/20 evals.
 
 ## Current state
-- ✅ plotline-api: full plan pipeline works in MOCK_LLM=1 (`.venv/bin/pytest`, `python -m evals.run_evals`)
-- ✅ Dev RAG stub serves sample fixtures via the frozen contract (uvicorn devrag.server:app --port 8787)
-- ▶ plotline-web: remaining — studio/[seriesId] shell, plans page, my-space, phase-2 stubs; then e2e browser verify
+- ✅ Shipped: full Phase-1 planning product, both repos (see git log & Learning.MD)
+- ▶ Runs in MOCK_LLM=1. Servers: devrag :8787 + api :8600 (`bash run.sh` or launch.json) · web :3100 (`npm run dev`)
+- ▶ Loop.MD status: offered (awaiting user's answer)
 
 ## Pending points
-- 🧑 USER: copy ANTHROPIC_API_KEY line into plotline-api/.env yourself; set MOCK_LLM=0 to go live
-- 🧑 USER: edit Loop.MD goal + evals to make them yours
-- 🤖 AGENT: finish plotline-web pages → verify e2e in browser → offer the Loop (first working draft)
-- 🤖 AGENT: Phase-1 exit gate needs ≥55% of test users approving a plan in ≤2 regenerations — instrument regen counts (data exists in concept_state)
+- 🧑 USER: copy the ANTHROPIC_API_KEY line into plotline-api/.env yourself; set MOCK_LLM=0 to go live, then run one real plan + the golden set
+- 🧑 USER: answer the Loop offer; edit Loop.MD goal/evals to make them yours
+- 🧑 USER: PRD open calls — trademark check on "Plotline"; pricing currency INR vs USD
+- 🤖 AGENT: when Codex's plotline-rag lands, stop devrag and point PLOTLINE_RAG_URL at it (contract-compatible, no code change)
+- 🤖 AGENT: exit-gate instrumentation — approval-within-≤2-regens report from concept_state.regen_count
 
 ## Decisions
 - 2026-08-21 — SQLite + local files for Phase-1 dev (no RDS/AWS in Claude Code lane) — PRD §7 env override; Codex owns plotline_* AWS

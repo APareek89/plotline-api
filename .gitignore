@@ -6,3 +6,4 @@ data/
 .pytest_cache/
 .DS_Store
 evals/report.json
+evals/eval.db
