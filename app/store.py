@@ -1,0 +1,348 @@
+"""SQLite persistence — Phase-1 dev environment override (§7): no RDS, local
+processes only. Postgres+pgvector is the documented scale-up target."""
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import time
+import uuid
+from typing import Any, Optional
+
+from app import config
+
+_lock = threading.Lock()
+_conn: Optional[sqlite3.Connection] = None
+
+
+def get_conn() -> sqlite3.Connection:
+    global _conn
+    if _conn is None:
+        _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
+        _conn.row_factory = sqlite3.Row
+        _init(_conn)
+    return _conn
+
+
+def _init(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            data TEXT NOT NULL DEFAULT '{}'
+        );
+        INSERT OR IGNORE INTO profile (id, data) VALUES (1, '{}');
+
+        CREATE TABLE IF NOT EXISTS series (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'context_ready',
+            context TEXT NOT NULL,
+            created_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS series_plan (
+            series_id TEXT PRIMARY KEY,
+            version INTEGER NOT NULL DEFAULT 1,
+            plan TEXT,
+            feedback TEXT,
+            options TEXT,
+            updated_at REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS concept_state (
+            series_id TEXT NOT NULL,
+            concept_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            ccs INTEGER,
+            order_idx INTEGER NOT NULL,
+            regen_count INTEGER NOT NULL DEFAULT 0,
+            approved INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (series_id, concept_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            id TEXT PRIMARY KEY,
+            series_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error TEXT,
+            created_at REAL NOT NULL,
+            finished_at REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS performance_log (
+            id TEXT PRIMARY KEY,
+            series_id TEXT,
+            concept_id TEXT,
+            platform TEXT,
+            metrics TEXT NOT NULL,
+            pasted_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS uploads (
+            id TEXT PRIMARY KEY,
+            filename TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL,
+            content_type TEXT,
+            series_id TEXT,
+            created_at REAL NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
+def _now() -> float:
+    return time.time()
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:10]}"
+
+
+# ----------------------------------------------------------------- profile --
+
+
+def get_profile() -> dict[str, Any]:
+    with _lock:
+        row = get_conn().execute("SELECT data FROM profile WHERE id = 1").fetchone()
+    return json.loads(row["data"]) if row else {}
+
+
+def save_profile(data: dict[str, Any]) -> None:
+    with _lock:
+        get_conn().execute("UPDATE profile SET data = ? WHERE id = 1", (json.dumps(data),))
+        get_conn().commit()
+
+
+# ------------------------------------------------------------------ series --
+
+
+def create_series(context: dict[str, Any]) -> str:
+    series_id = new_id("srs")
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO series (id, name, status, context, created_at) VALUES (?,?,?,?,?)",
+            (series_id, context.get("name", "Untitled"), "context_ready", json.dumps(context), _now()),
+        )
+        get_conn().commit()
+    return series_id
+
+
+def update_series_context(series_id: str, context: dict[str, Any]) -> None:
+    with _lock:
+        get_conn().execute(
+            "UPDATE series SET context = ?, name = ? WHERE id = ?",
+            (json.dumps(context), context.get("name", "Untitled"), series_id),
+        )
+        get_conn().commit()
+
+
+def set_series_status(series_id: str, status: str) -> None:
+    with _lock:
+        get_conn().execute("UPDATE series SET status = ? WHERE id = ?", (status, series_id))
+        get_conn().commit()
+
+
+def get_series(series_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute("SELECT * FROM series WHERE id = ?", (series_id,)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "status": row["status"],
+        "context": json.loads(row["context"]),
+        "created_at": row["created_at"],
+    }
+
+
+def list_series() -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute("SELECT * FROM series ORDER BY created_at DESC").fetchall()
+    out = []
+    for row in rows:
+        states = get_concept_states(row["id"])
+        out.append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "status": row["status"],
+                "context": json.loads(row["context"]),
+                "created_at": row["created_at"],
+                "concept_total": len(states),
+                "concept_approved": sum(1 for s in states if s["approved"]),
+            }
+        )
+    return out
+
+
+# -------------------------------------------------------------------- plan --
+
+
+def save_plan(series_id: str, plan: dict, feedback: dict, options: dict) -> None:
+    with _lock:
+        get_conn().execute(
+            """INSERT INTO series_plan (series_id, version, plan, feedback, options, updated_at)
+               VALUES (?, 1, ?, ?, ?, ?)
+               ON CONFLICT(series_id) DO UPDATE SET
+                 version = version + 1, plan = excluded.plan, feedback = excluded.feedback,
+                 options = excluded.options, updated_at = excluded.updated_at""",
+            (series_id, json.dumps(plan), json.dumps(feedback), json.dumps(options), _now()),
+        )
+        get_conn().commit()
+
+
+def get_plan(series_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute("SELECT * FROM series_plan WHERE series_id = ?", (series_id,)).fetchone()
+    if not row or not row["plan"]:
+        return None
+    return {
+        "version": row["version"],
+        "plan": json.loads(row["plan"]),
+        "feedback": json.loads(row["feedback"]) if row["feedback"] else None,
+        "options": json.loads(row["options"]) if row["options"] else None,
+        "updated_at": row["updated_at"],
+    }
+
+
+def upsert_concept_state(series_id: str, concept_id: str, status: str, ccs: int, order_idx: int) -> None:
+    with _lock:
+        get_conn().execute(
+            """INSERT INTO concept_state (series_id, concept_id, status, ccs, order_idx)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(series_id, concept_id) DO UPDATE SET
+                 status = excluded.status, ccs = excluded.ccs""",
+            (series_id, concept_id, status, ccs, order_idx),
+        )
+        get_conn().commit()
+
+
+def get_concept_states(series_id: str) -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute(
+            "SELECT * FROM concept_state WHERE series_id = ? ORDER BY order_idx", (series_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_concept_approved(series_id: str, concept_id: str, approved: bool) -> None:
+    with _lock:
+        get_conn().execute(
+            "UPDATE concept_state SET approved = ?, status = CASE WHEN ? THEN 'approved' ELSE status END WHERE series_id = ? AND concept_id = ?",
+            (1 if approved else 0, 1 if approved else 0, series_id, concept_id),
+        )
+        get_conn().commit()
+
+
+def set_concept_status(series_id: str, concept_id: str, status: str, ccs: Optional[int] = None) -> None:
+    with _lock:
+        if ccs is None:
+            get_conn().execute(
+                "UPDATE concept_state SET status = ? WHERE series_id = ? AND concept_id = ?",
+                (status, series_id, concept_id),
+            )
+        else:
+            get_conn().execute(
+                "UPDATE concept_state SET status = ?, ccs = ? WHERE series_id = ? AND concept_id = ?",
+                (status, ccs, series_id, concept_id),
+            )
+        get_conn().commit()
+
+
+def bump_regen(series_id: str, concept_id: str) -> None:
+    with _lock:
+        get_conn().execute(
+            "UPDATE concept_state SET regen_count = regen_count + 1 WHERE series_id = ? AND concept_id = ?",
+            (series_id, concept_id),
+        )
+        get_conn().commit()
+
+
+def reorder_concepts(series_id: str, ordered_ids: list[str]) -> None:
+    with _lock:
+        for idx, concept_id in enumerate(ordered_ids):
+            get_conn().execute(
+                "UPDATE concept_state SET order_idx = ? WHERE series_id = ? AND concept_id = ?",
+                (idx, series_id, concept_id),
+            )
+        get_conn().commit()
+
+
+# -------------------------------------------------------------------- runs --
+
+
+def create_run(series_id: str, kind: str) -> str:
+    run_id = new_id("run")
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO pipeline_runs (id, series_id, kind, status, created_at) VALUES (?,?,?,?,?)",
+            (run_id, series_id, kind, "running", _now()),
+        )
+        get_conn().commit()
+    return run_id
+
+
+def finish_run(run_id: str, status: str, error: Optional[str] = None) -> None:
+    with _lock:
+        get_conn().execute(
+            "UPDATE pipeline_runs SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+            (status, error, _now(), run_id),
+        )
+        get_conn().commit()
+
+
+# ------------------------------------------------------------- performance --
+
+
+def add_performance(series_id: Optional[str], concept_id: Optional[str], platform: str, metrics: dict) -> str:
+    row_id = new_id("perf")
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO performance_log (id, series_id, concept_id, platform, metrics, pasted_at) VALUES (?,?,?,?,?,?)",
+            (row_id, series_id, concept_id, platform, json.dumps(metrics), _now()),
+        )
+        get_conn().commit()
+    return row_id
+
+
+def list_performance() -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute("SELECT * FROM performance_log ORDER BY pasted_at DESC").fetchall()
+    return [
+        {**dict(r), "metrics": json.loads(r["metrics"])}
+        for r in rows
+    ]
+
+
+# ----------------------------------------------------------------- uploads --
+
+
+def add_upload(filename: str, kind: str, path: str, content_type: Optional[str], series_id: Optional[str]) -> str:
+    upload_id = new_id("upl")
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO uploads (id, filename, kind, path, content_type, series_id, created_at) VALUES (?,?,?,?,?,?,?)",
+            (upload_id, filename, kind, path, content_type, series_id, _now()),
+        )
+        get_conn().commit()
+    return upload_id
+
+
+def get_uploads(upload_ids: list[str]) -> list[dict[str, Any]]:
+    if not upload_ids:
+        return []
+    marks = ",".join("?" for _ in upload_ids)
+    with _lock:
+        rows = get_conn().execute(f"SELECT * FROM uploads WHERE id IN ({marks})", upload_ids).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_uploads() -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute("SELECT * FROM uploads ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]

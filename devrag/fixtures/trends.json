@@ -1,0 +1,68 @@
+[
+  {
+    "source_id": "trend:T08",
+    "kind": "trend",
+    "tier": "realtime",
+    "keyword": "free AI video editor",
+    "niche": "ai_tools",
+    "direction": "rising",
+    "velocity_4wk": 0.42,
+    "as_of": "2026-08-18",
+    "text": "Google Trends: 'free AI video editor' rising, +42% 4-week search velocity (as of 18 Aug 2026)."
+  },
+  {
+    "source_id": "trend:T09",
+    "kind": "trend",
+    "tier": "realtime",
+    "keyword": "AI agents for work",
+    "niche": "ai_tools",
+    "direction": "rising",
+    "velocity_4wk": 0.61,
+    "as_of": "2026-08-18",
+    "text": "Google Trends: 'AI agents for work' rising sharply, +61% 4-week velocity (as of 18 Aug 2026)."
+  },
+  {
+    "source_id": "trend:T12",
+    "kind": "trend",
+    "tier": "realtime",
+    "keyword": "ingredient checker skincare",
+    "niche": "skincare_d2c",
+    "direction": "rising",
+    "velocity_4wk": 0.27,
+    "as_of": "2026-08-18",
+    "text": "Google Trends: 'ingredient checker skincare' rising, +27% 4-week velocity (as of 18 Aug 2026)."
+  },
+  {
+    "source_id": "trend:T14",
+    "kind": "trend",
+    "tier": "curated",
+    "keyword": "festive season launches (Diwali window)",
+    "niche": "all",
+    "direction": "seasonal",
+    "velocity_4wk": null,
+    "as_of": "2026-08-15",
+    "text": "Ops calendar: Diwali commerce window opens late Oct 2026 — D2C ad volume and CPMs climb from mid-September; launch-adjacent content peaks 2–3 weeks before."
+  },
+  {
+    "source_id": "trend:T15",
+    "kind": "trend",
+    "tier": "curated",
+    "keyword": "trending audio — 'said no one ever' remix",
+    "niche": "all",
+    "direction": "rising",
+    "velocity_4wk": null,
+    "as_of": "2026-08-15",
+    "text": "Ops weekly note: 'said no one ever' remix audio trending on Reels for skit/inversion formats (as-of 15 Aug 2026 — trends decay fast, re-check before shipping)."
+  },
+  {
+    "source_id": "trend:T17",
+    "kind": "trend",
+    "tier": "realtime",
+    "keyword": "protein snacks india",
+    "niche": "fitness",
+    "direction": "rising",
+    "velocity_4wk": 0.33,
+    "as_of": "2026-08-18",
+    "text": "Google Trends: 'protein snacks india' rising, +33% 4-week velocity (as of 18 Aug 2026)."
+  }
+]

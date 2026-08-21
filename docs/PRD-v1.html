@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plotline — Product Requirements v1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#16181D;
+  --paper:#FAFAF8;
+  --card:#FFFFFF;
+  --rec:#E5312B;
+  --steel:#5A6270;
+  --line:#E4E2DC;
+  --wash:#F1F0EB;
+  --slab:#1E2430;
+  --slab2:#2A3242;
+  --ok:#1E7A4D;
+  --warn:#B26A00;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 "Archivo",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"Space Mono",monospace}
+a{color:inherit}
+
+/* layout */
+.frame{max-width:1220px;margin:0 auto;padding:0 28px;display:grid;grid-template-columns:196px 1fr;gap:44px}
+.rail{position:sticky;top:0;align-self:start;height:100vh;padding:34px 0;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:2px;overflow:auto}
+.rail .logo{font-family:"Archivo Black";font-size:19px;letter-spacing:-.02em;margin-bottom:4px}
+.rail .logo .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--rec);margin-left:6px;animation:blink 1.6s steps(1) infinite}
+@keyframes blink{50%{opacity:.15}}
+@media (prefers-reduced-motion:reduce){.rail .logo .dot{animation:none}}
+.rail .tag{font-family:"Space Mono";font-size:10.5px;color:var(--steel);margin-bottom:22px}
+.rail a{display:block;font-family:"Space Mono";font-size:11px;color:var(--steel);text-decoration:none;padding:5px 0;border-bottom:1px dotted transparent}
+.rail a:hover,.rail a:focus-visible{color:var(--ink)}
+.rail a b{color:var(--ink);font-weight:700;margin-right:7px}
+main{padding:34px 0 90px;min-width:0}
+
+/* sections */
+section{padding:46px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:none}
+.eyebrow{display:flex;align-items:center;gap:9px;font-family:"Space Mono";font-size:11px;letter-spacing:.14em;color:var(--steel);text-transform:uppercase;margin-bottom:14px}
+.eyebrow::before{content:"";width:8px;height:8px;background:var(--rec)}
+h1{font-family:"Archivo Black";font-size:clamp(34px,4.6vw,54px);line-height:1.02;letter-spacing:-.02em;text-transform:uppercase}
+h2{font-family:"Archivo Black";font-size:clamp(23px,2.6vw,31px);line-height:1.08;letter-spacing:-.015em;text-transform:uppercase;margin-bottom:18px}
+h3{font-size:16px;font-weight:700;margin:26px 0 10px}
+h4{font-family:"Space Mono";font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);margin:18px 0 8px}
+p{max-width:74ch;margin-bottom:10px}
+.lead{font-size:17px;font-weight:500;max-width:70ch}
+ul.tight{list-style:none;max-width:76ch}
+ul.tight li{padding:7px 0 7px 20px;position:relative;border-bottom:1px dotted var(--line)}
+ul.tight li::before{content:"—";position:absolute;left:0;color:var(--rec);font-weight:700}
+ul.tight li:last-child{border-bottom:none}
+strong{font-weight:700}
+.note{font-size:13px;color:var(--steel);max-width:76ch}
+.verdict{border-left:3px solid var(--ink);background:var(--wash);padding:12px 16px;max-width:76ch;font-size:14px;margin:14px 0}
+.verdict b{font-family:"Space Mono";font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px}
+
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0 6px}
+th{font-family:"Space Mono";font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);text-align:left;padding:8px 12px 8px 0;border-bottom:2px solid var(--ink);vertical-align:bottom}
+td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+td.num,th.num{text-align:right;font-family:"Space Mono";font-size:12.5px;white-space:nowrap}
+tr:hover td{background:var(--wash)}
+.pill{display:inline-block;font-family:"Space Mono";font-size:10px;letter-spacing:.06em;padding:2px 8px;border:1px solid var(--ink);border-radius:99px;white-space:nowrap}
+.pill.red{border-color:var(--rec);color:var(--rec)}
+.pill.dim{border-color:var(--line);color:var(--steel)}
+
+/* header */
+header.cover{padding:44px 0 40px;border-bottom:2px solid var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:26px;margin-top:22px;font-family:"Space Mono";font-size:11.5px;color:var(--steel)}
+.meta b{display:block;color:var(--ink);font-size:12.5px}
+.names{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+
+/* persona reels (signature: 9:16 frames) */
+.reels{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:22px;margin:18px 0;max-width:640px}
+.reel{aspect-ratio:9/16;background:var(--slab);color:#EDEEF0;border-radius:18px;padding:18px 16px;display:flex;flex-direction:column;position:relative;overflow:hidden;box-shadow:0 14px 34px rgba(22,24,29,.16)}
+.reel::after{content:"9:16";position:absolute;top:14px;right:14px;font-family:"Space Mono";font-size:9px;color:#7C8698;border:1px solid #3A4356;padding:1px 6px;border-radius:4px}
+.reel .handle{font-family:"Space Mono";font-size:11px;color:#9AA3B4}
+.reel .pname{font-family:"Archivo Black";font-size:21px;margin:2px 0 1px}
+.reel .role{font-size:12.5px;color:#C4CAD6;margin-bottom:12px}
+.reel .blk{margin-top:auto}
+.reel h5{font-family:"Space Mono";font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#8A93A6;margin:10px 0 4px}
+.reel ul{list-style:none;font-size:12px;line-height:1.5}
+.reel ul li{padding-left:12px;position:relative}
+.reel ul li::before{content:"›";position:absolute;left:0;color:var(--rec)}
+.reel .goal{background:var(--rec);color:#fff;font-size:12px;font-weight:600;padding:7px 10px;border-radius:8px;margin-top:12px}
+
+/* flow / architecture slabs */
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:14px 0}
+.flow .step{background:var(--card);border:1.5px solid var(--ink);padding:10px 13px;font-size:12.5px;min-width:120px;flex:1}
+.flow .step b{display:block;font-family:"Space Mono";font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--rec);margin-bottom:3px}
+.flow .arr{align-self:center;font-family:"Space Mono";color:var(--steel)}
+.arch{display:grid;gap:10px;margin:16px 0}
+.layer{background:var(--slab);color:#E8EAEE;padding:14px 16px;border-radius:10px}
+.layer h5{font-family:"Space Mono";font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#8A93A6;margin-bottom:9px}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{background:var(--slab2);border:1px solid #3A4356;font-size:12px;padding:5px 10px;border-radius:7px}
+.chip.hot{border-color:var(--rec);}
+.arch .down{justify-self:center;font-family:"Space Mono";color:var(--steel);font-size:13px}
+
+/* cards */
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:14px 0}
+.card{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--ink);padding:16px 18px}
+.card.risk{border-top-color:var(--rec)}
+.card h5{font-family:"Space Mono";font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.card p,.card ul{font-size:13.5px}
+.card ul{list-style:none}
+.card ul li{padding:4px 0 4px 14px;position:relative}
+.card ul li::before{content:"—";position:absolute;left:0;color:var(--rec)}
+
+/* journey table */
+.jr td:first-child{font-family:"Space Mono";font-size:11px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;color:var(--steel)}
+
+/* phase bar */
+.phases{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:14px}
+.phase{border:1.5px solid var(--ink);padding:14px 16px;background:var(--card)}
+.phase b{font-family:"Archivo Black";display:block;font-size:15px;text-transform:uppercase;margin-bottom:2px}
+.phase span{font-family:"Space Mono";font-size:10.5px;color:var(--steel);display:block;margin-bottom:8px}
+.phase ul{list-style:none;font-size:12.5px}
+.phase ul li{padding:3px 0 3px 13px;position:relative}
+.phase ul li::before{content:"›";position:absolute;left:0;color:var(--rec)}
+
+@media (max-width:960px){
+  .frame{grid-template-columns:1fr;gap:0}
+  .rail{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line);flex-direction:row;flex-wrap:wrap;gap:12px;padding:20px 0}
+  .rail .tag{display:none}
+  .reels{max-width:100%}
+}
+@media print{.rail{display:none}.frame{display:block}}
+
+/* concept confidence cards */
+.ccs{border:1.5px solid var(--ink);background:var(--card);margin:16px 0}
+.ccs .head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--wash)}
+.ccs .head .t{font-weight:700;font-size:14.5px;max-width:70%}
+.ccs .head .t small{display:block;font-family:"Space Mono";font-size:10px;color:var(--steel);font-weight:400;margin-top:2px}
+.ccs .head .sc{font-family:"Space Mono";font-size:24px;font-weight:700;text-align:right}
+.ccs .head .sc small{display:block;font-size:9.5px;color:var(--steel);font-weight:400}
+.ccs .desc{padding:10px 16px;font-size:13px;border-bottom:1px solid var(--line)}
+.ccs table{margin:0;font-size:12.5px}
+.ccs th,.ccs td{padding:8px 12px}
+.ccs tr:last-child td{border-bottom:none}
+.rate{font-family:"Space Mono";font-size:11px;font-weight:700;white-space:nowrap}
+.rate.h{color:var(--ok)}.rate.m{color:var(--warn)}.rate.l{color:var(--rec)}
+.rt{color:var(--rec);font-size:11.5px}
+
+pre{background:var(--slab);color:#DCE2EC;font-family:"Space Mono",monospace;font-size:11.5px;line-height:1.55;padding:14px 16px;border-radius:10px;overflow-x:auto;margin:10px 0;max-width:100%}
+pre b{color:#fff}
+</style>
+</head>
+<body>
+<div class="frame">
+
+<nav class="rail" aria-label="Sections">
+  <div class="logo">PLOTLINE<span class="dot" aria-hidden="true"></span></div>
+  <div class="tag">PRD · v1.0 · CONFIDENTIAL</div>
+  <a href="#brief"><b>01</b>Brief</a>
+  <a href="#personas"><b>02</b>Personas &amp; journeys</a>
+  <a href="#planning"><b>03</b>Planning engine</a>
+  <a href="#creative"><b>04</b>Creative studio</a>
+  <a href="#studios"><b>05</b>Avatar · Voice · My Space</a>
+  <a href="#agentic"><b>06</b>Agentic architecture</a>
+  <a href="#system"><b>07</b>System &amp; API stack</a>
+  <a href="#costs"><b>08</b>Unit economics</a>
+  <a href="#memory"><b>09</b>Memory &amp; RAG</a>
+  <a href="#intel"><b>10</b>Intelligence sources</a>
+  <a href="#prompts"><b>11</b>System prompts</a>
+  <a href="#ui"><b>12</b>UI spec</a>
+  <a href="#metrics"><b>13</b>Metrics</a>
+  <a href="#risks"><b>14</b>Risks &amp; open calls</a>
+  <a href="#phasing"><b>15</b>Phasing</a>
+</nav>
+
+<main>
+
+<header class="cover" id="top">
+  <div class="eyebrow">Product requirements · first version</div>
+  <h1>An engine that plans content that works — then makes it.</h1>
+  <p class="lead" style="margin-top:16px">AI co-pilot for professional and aspiring influencers: evidence-backed content plans, then scripts, avatars, voice and video — up to 30s, 9:16 — in one flow. Publishing/scheduling stays out of scope.</p>
+  <div class="names">
+    <span class="pill red">Name rec: PLOTLINE</span>
+    <span class="pill dim">Alt: CADENCE</span>
+    <span class="pill dim">Alt: HOOKLAB</span>
+    <span class="pill dim">Alt: REELPLAN</span>
+    <span class="pill dim">"Content Guru" — drop it (generic, dated)</span>
+  </div>
+  <p class="note" style="margin-top:10px">Plotline = plan-first positioning; short, ownable, works globally. Run a trademark/domain check before committing — an in-app messaging startup uses a similar name.</p>
+  <div class="meta">
+    <div><b>Owner</b>Anand</div>
+    <div><b>Date</b>21 Aug 2026</div>
+    <div><b>Status</b>Draft for review</div>
+    <div><b>Media stack</b>fal.ai (own key)</div>
+    <div><b>LLM</b>Anthropic Claude</div>
+  </div>
+</header>
+
+<section id="brief">
+  <div class="eyebrow">01 · Brief</div>
+  <h2>What we're building, and the one thing that must be true</h2>
+  <p><strong>Problem.</strong> Creators know their niche but not what will perform. Scripting is their weakest skill. Production (avatar, voice, video) is slow and fragmented across 4–6 tools. Existing AI tools generate assets; none earn trust at the <em>plan</em> stage with evidence.</p>
+  <p><strong>Bet.</strong> We win at the plan. If the first plan clicks — concepts with visible rationale, referenced to real high-performing content and stats — everything downstream (creative studio, avatars, voice) converts. If the plan feels like generic ChatGPT output, nothing else matters.</p>
+  <h3>V1 is / is not</h3>
+  <table>
+    <tr><th style="width:50%">In scope (v1)</th><th>Out of scope (v1)</th></tr>
+    <tr><td>Plan → approve → text / image / video ≤30s, 9:16</td><td>Posting, scheduling, platform OAuth</td></tr>
+    <tr><td>Two personas: AI-content creator, product-ad (UGC) creator</td><td>Analytics ingestion via platform APIs (manual paste first)</td></tr>
+    <tr><td>Inspiration DB (curated, ~500 assets at launch) + best-practice corpus</td><td>Live trend scraping at scale (ToS risk — see §12)</td></tr>
+    <tr><td>Avatar + voice building blocks on fal.ai</td><td>Music generation, editing timeline, collab/teams</td></tr>
+  </table>
+  <h3>Winning factors → what each requires</h3>
+  <ul class="tight">
+    <li><strong>Plan that clicks</strong> → every concept carries evidence: 1–2 inspiration references + a stat + a red-team pass. Not adjectives.</li>
+    <li><strong>Confidence before generate</strong> → Creative Studio never shows a final script first. It shows a Concept Confidence Card: storyline beats, format, why-it-wins, cost. Generate is the second click.</li>
+    <li><strong>Memory</strong> → profile + campaign + performance memory; the loop from published results back into the planner is the real moat (§09).</li>
+    <li><strong>RAG</strong> → inspiration corpus + best-practices corpus + user's own content. Quality of curation beats quantity.</li>
+  </ul>
+</section>
+<section id="personas">
+  <div class="eyebrow">02 · Personas &amp; journeys</div>
+  <h2>Two personas, two different definitions of "working"</h2>
+  <div class="reels">
+    <article class="reel">
+      <div class="handle">@ria.decodes.ai</div>
+      <div class="pname">RIA · 27</div>
+      <div class="role">AI-tools educator · IG Reels + YT Shorts · 8K followers, aspiring → pro</div>
+      <div class="blk">
+        <h5>Pains</h5>
+        <ul>
+          <li>Guesses what will work; 1 in 10 posts lands</li>
+          <li>Scripts read flat; hooks die at 3s</li>
+          <li>4–5 posts/wk needed; a reel takes her 3h</li>
+        </ul>
+        <h5>Content mode</h5>
+        <ul><li>Faceless or avatar-led explainers, series-driven</li></ul>
+        <div class="goal">Goal: 8K → 100K followers, first brand deals. Success = follower velocity + saves.</div>
+      </div>
+    </article>
+    <article class="reel">
+      <div class="handle">@kabir.makes.ads</div>
+      <div class="pname">KABIR · 32</div>
+      <div class="role">UGC / product-ad creator for D2C brands · paid deliverables</div>
+      <div class="blk">
+        <h5>Pains</h5>
+        <ul>
+          <li>Hook fatigue: needs 10–20 ad variants/wk</li>
+          <li>Clients ask "why this angle?" — no proof</li>
+          <li>Variant production cost eats his margin</li>
+        </ul>
+        <h5>Content mode</h5>
+        <ul><li>Product-in-hand avatar shots, testimonials, unboxing, b-roll + VO</li></ul>
+        <div class="goal">Goal: more variants per brief, higher client win-rate. Success = CTR/thumb-stop of delivered ads.</div>
+      </div>
+    </article>
+  </div>
+
+  <h3>Journey — Ria (series creator)</h3>
+  <table class="jr">
+    <tr><th style="width:14%">Stage</th><th style="width:29%">User does</th><th style="width:32%">System does</th><th>Output</th></tr>
+    <tr><td>Context</td><td>Picks "Series"; niche = AI tools; purpose = followers; platforms = IG/Shorts; cadence = 5/wk × 2 wks; uploads 2 past reels</td><td>Intake step extracts style, tone, capability from uploads (Claude vision)</td><td>Structured creator context</td></tr>
+    <tr><td>Inspiration</td><td>Multi-selects 4 of 12 suggested reference reels/formats</td><td>Vector search over inspiration DB filtered by niche + platform + format</td><td>Reference set → planner context</td></tr>
+    <tr><td>Plan</td><td>Waits ~60–90s</td><td>Planner drafts 10 concepts w/ evidence → red-team critiques → one refine pass</td><td>10-concept plan on timeline</td></tr>
+    <tr><td>Align</td><td>Approves 8, drags order, regenerates 2 with feedback</td><td>Regenerates only flagged concepts; locks plan</td><td>Approved series in Plans</td></tr>
+    <tr><td>Produce</td><td>Opens concept → Creative Studio; approves Confidence Card; picks avatar + voice; generates</td><td>Script → keyframes (Nano Banana) → shots (Veo i2v) → VO (TTS) → server-side stitch</td><td>≤30s 9:16 reel, downloadable</td></tr>
+    <tr><td>Loop</td><td>Pastes post results after 72h (views, retention, saves)</td><td>Performance memory updates; next plan re-weights formats</td><td>Smarter plan #2</td></tr>
+  </table>
+
+  <h3>Journey — Kabir (ad creator)</h3>
+  <table class="jr">
+    <tr><th style="width:14%">Stage</th><th style="width:29%">User does</th><th style="width:32%">System does</th><th>Output</th></tr>
+    <tr><td>Context</td><td>Picks "One-time campaign"; uploads brand brief PDF + 6 product shots; purpose = conversions; audience = brand's ICP</td><td>Extracts claims, tone rules, banned words, product attributes from brief</td><td>Ad brief object</td></tr>
+    <tr><td>Inspiration</td><td>Selects 3 winning ad formats (problem-agitate-solve, 3-reasons, skit)</td><td>Retrieves from ad-format library w/ benchmark CTR notes</td><td>Angle references</td></tr>
+    <tr><td>Plan</td><td>Reviews 8 angle concepts, each = hook ×2 + structure + why-it-wins</td><td>Red-team checks claim safety, hook sameness, brand-tone fit</td><td>Approved angle set</td></tr>
+    <tr><td>Produce</td><td>Batch-generates 3 hook variants per angle for A/B; product held by avatar</td><td>Avatar w/ product via Nano Banana edit (multi-image) → i2v → VO; exports 9:16 (+1:1 crop later)</td><td>6–12 ad variants</td></tr>
+    <tr><td>Loop</td><td>Reports winning variant CTR</td><td>Hook/angle scores update per brand + niche</td><td>Better angle ranking next brief</td></tr>
+  </table>
+  <p class="note">Difference that matters: Ria optimizes a series arc over weeks; Kabir optimizes variant volume per brief. Same engine, different plan templates and batch controls.</p>
+</section>
+
+<section id="planning">
+  <div class="eyebrow">03 · Planning engine</div>
+  <h2>Context + inspiration + evidence → a plan you can defend</h2>
+
+  <h3>3.1 User context (form, not chat — chat only for refinement)</h3>
+  <ul class="tight">
+    <li><strong>Layout:</strong> guided blocks, each with a one-line inline guideline; required vs optional fields marked. <strong>Naming is required:</strong> user names every series/post at creation — that name is its handle in the Plans tab.</li>
+    <li><strong>Mode:</strong> Series or One-time · <strong>Content area</strong> (AI, product ads, kids' education, viral/general…) · free-text description of what they want to say</li>
+    <li><strong>Purpose:</strong> followers / impressions / engagement / conversions (pick primary — planner optimizes one) · target audience · platforms · timeline &amp; cadence · content type (text / text+image / text+video)</li>
+    <li><strong>References ("Teach the engine" block):</strong> clear upload tiles — past posts, docs/brief, screenshots, brand assets — each labeled required/optional. Claude's native vision handles them — <strong>no separate vision model needed.</strong> Extraction result echoed back under the tiles ("style extracted: …") so the user sees what the engine learned.</li>
+  </ul>
+
+  <h3>3.2 Inspiration DB — what to store, how to fill it <span class="pill">answers open point (c)</span></h3>
+  <table>
+    <tr><th style="width:22%">Per asset</th><th>Fields</th></tr>
+    <tr><td>Identity</td><td>Platform, source link, posted date, creator size band (nano/micro/macro)</td></tr>
+    <tr><td>Classification</td><td>Niche tags, format taxonomy (talking-head, faceless b-roll, tutorial, skit, listicle carousel, UGC testimonial, unboxing, meme), duration</td></tr>
+    <tr><td>Craft</td><td>Hook text + hook type (question / bold claim / pattern-interrupt / POV), structure beats, CTA style, thumbnail</td></tr>
+    <tr><td>Performance</td><td>Views, engagement rate, velocity (views/day first week) — as-of date stamped</td></tr>
+    <tr><td>Annotation</td><td>Transcript + LLM "why it works" note, written at ingest (Haiku) — this is what makes retrieval useful</td></tr>
+  </table>
+  <h4>Sourcing (honest version)</h4>
+  <ul class="tight">
+    <li><strong>Safe:</strong> TikTok Creative Center (public trends/top ads), YouTube Data API (ToS-compliant), brand ad libraries (Meta Ad Library for ad formats), creator-submitted links.</li>
+    <li><strong>Scraper services (updated):</strong> logged-out public <em>metadata</em> via Apify / Bright Data is legally defensible after <em>Meta v. Bright Data</em> and <em>X Corp v. Bright Data</em> (both won by the scraper, 2024). Scrape metrics + captions + links; never rehost the videos (copyright is a separate question from scraping). Full pipeline in §10.</li>
+    <li><strong>Baseline:</strong> ~500 curated + annotated assets across 6–8 niches at launch; weekly scraper runs + ops QA after. Annotated quality beats raw volume.</li>
+    <li><strong>Card contents (not just a title):</strong> format + platform + duration chips · title · 1–2 line content description (what actually happens in the post) · stats line with source_id + as-of · one-line "why it works". Multi-select; selections enter planner context as structured evidence.</li>
+    <li><strong>Wired but disabled at launch:</strong> while sourcing is tentative, ship the full card UI on sample data with selection disabled and an honest "sample data — pipeline pending" label. The wiring (retrieval call, evidence handoff) is real; only the corpus is placeholder. No fake liveness.</li>
+  </ul>
+
+  <h3>3.3 Curated best-practice corpus <span class="pill">answers open point (d)</span></h3>
+  <ul class="tight">
+    <li>Official creator-education docs (IG/YouTube/TikTok creator academies, algorithm explainers) — safest, most current.</li>
+    <li>Retention/hook research + hook formula libraries; ad-creative playbooks (e.g. Meta performance creative guidance).</li>
+    <li>Expert teardowns transcribed from public talks/podcasts, tagged by niche and platform.</li>
+    <li>Ingest: chunk 500–800 tokens; metadata {platform, topic, content_type, source_tier}; pgvector + rerank at query. Source-tier weighting so official docs outrank blog spam.</li>
+  </ul>
+
+  <h3>3.4 Agent pipeline</h3>
+  <div class="flow">
+    <div class="step"><b>Intake</b>Extract + normalize context, uploads (Claude vision). Runs as a step, not a standing agent.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Planner</b>Drafts concepts with evidence refs (inspiration IDs + stats + corpus cites)</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Red-team</b>Dynamic persona critiques. Feedback only — never rewrites.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Planner</b>One refine pass. Hard cap: 1 loop (cost + latency control).</div>
+    <div class="arr">→</div>
+    <div class="step"><b>User</b>Approve / feedback / regenerate per concept</div>
+  </div>
+  <div class="verdict"><b>Verdict on your "Agent 1 — do we need it?"</b>As a separate agent: no. Merge synthesis into an intake step of the planner call. Keep it as a distinct step (own prompt) only when files/screenshots are uploaded, so vision extraction is isolated and cacheable. Separate standing agent = +latency, +cost, no quality gain.</div>
+
+  <h3>3.5 What the plan contains <span class="pill">answers open point (e.ii)</span></h3>
+  <table>
+    <tr><th style="width:24%">Level</th><th>Fields</th></tr>
+    <tr><td>Series</td><td>Objective + north-star metric, audience, platforms, cadence, pillar mix (e.g. 60% core / 30% trend-adjacent / 10% experimental), review checkpoint date</td></tr>
+    <tr><td>Per concept</td><td>Title · hook (2 options) · format · platform · 2–3 line synopsis · <strong>why-it-wins</strong> (linked evidence: inspiration asset + stat + corpus principle) · CTA · effort S/M/L · asset needs · calendar slot · status</td></tr>
+  </table>
+
+  <h3>3.6 Red-team persona inputs <span class="pill">answers open point (e.iii)</span></h3>
+  <ul class="tight">
+    <li>Target-audience psychographics (built from user context) + platform-algorithm lens (retention at 3s/10s, loopability, save-worthiness)</li>
+    <li>Saturation check vs inspiration DB — "this is the 400th version of X" flag</li>
+    <li>Feasibility vs user's stated capacity and content type; brand/claim safety (critical for Kabir)</li>
+    <li>Hook strength score (1–5) with reason; derivative-risk and "why would anyone share this" test</li>
+  </ul>
+
+  <h3>3.7 External stats at plan stage <span class="pill">answers open point (E)</span></h3>
+  <ul class="tight">
+    <li><strong>Niche benchmarks from our own DB:</strong> median views/ER by format × niche — cheapest credible stat, fully owned.</li>
+    <li><strong>Google Trends</strong> keyword velocity for topic terms (free, legal).</li>
+    <li><strong>Seasonal/event calendar:</strong> festivals, launches, platform moments — India + global, hand-maintained.</li>
+    <li><strong>Trending audio &amp; format notes:</strong> curated weekly by ops; platforms expose no reliable trend API — don't pretend it's live data, label the as-of date in the UI.</li>
+  </ul>
+
+  <h3>3.8 Concept Confidence Framework (CCF) — the formula behind every plan</h3>
+  <p><strong>Card anatomy (locked):</strong> Concept (title) → Description (2–3 lines) → Creative direction (what the post will actually contain: format, setting, treatment — ≤40 words) → Hook (verbal line + first frame) → element table. <strong>Honesty rule:</strong> if an element isn't addressed, the card says <em>not addressed</em> with why — no forced Med ratings. The planner proposes scores; <strong>the feedback agent owns the final rating.</strong> Final CCS &gt; 70 unlocks exactly <strong>3 creative options</strong> per post — distinct angles, each scored. Below 70 → rework loop. Creative work always ships as choices, never a single take.</p>
+  <table>
+    <tr><th style="width:21%">Element</th><th>What it asks</th><th style="width:34%">Evidence that counts</th></tr>
+    <tr><td>Hook strength</td><td>Do the first 1–3s stop the scroll — visually (works on mute, ≤3 objects) and verbally (problem, claim, or curiosity gap)?</td><td>REF: proven hook pattern in inspiration DB · corpus first-frame rules</td></tr>
+    <tr><td>Audience alignment</td><td>Is this a documented pain/interest of the target audience, not an assumed one?</td><td>STAT: niche×format benchmark · TREND: keyword velocity</td></tr>
+    <tr><td>Retention structure</td><td>Does the shape hold to the end — foreshadow, beats, payoff/twist, loop?</td><td>Corpus formulas (hook→foreshadow→narrative→twist) · retention benchmarks</td></tr>
+    <tr><td>Differentiation</td><td>Fresh angle, or the 400th version? Red-team runs the saturation check against the inspiration DB.</td><td>REF: similarity count in DB, dated</td></tr>
+    <tr><td>Distribution triggers</td><td>A concrete reason to share, save, or comment — utility, identity, emotion.</td><td>Format-level share/save benchmarks</td></tr>
+    <tr><td>Platform-format fit</td><td>Native to the platform and proven in this niche?</td><td>STAT: native-style engagement research · format benchmarks</td></tr>
+    <tr><td>Creator fit &amp; feasibility</td><td>Matches the user's voice, assets, capacity? A great concept the creator can't execute scores Low.</td><td>Profile memory + asset inventory</td></tr>
+    <tr><td>Persuasion &amp; proof <span class="pill dim">ads only</span></td><td>Claim strength, on-screen proof, objection handling, single clear CTA — within brand's approved claims.</td><td>Brand brief compliance · ad-format benchmarks</td></tr>
+  </table>
+
+  <h4>Weights by objective (v1 priors)</h4>
+  <table>
+    <tr><th>Element</th><th class="num">Followers / reach</th><th class="num">Engagement</th><th class="num">Conversions (ads)</th></tr>
+    <tr><td>Hook strength</td><td class="num">25</td><td class="num">20</td><td class="num">25</td></tr>
+    <tr><td>Audience alignment</td><td class="num">15</td><td class="num">15</td><td class="num">15</td></tr>
+    <tr><td>Retention structure</td><td class="num">15</td><td class="num">15</td><td class="num">10</td></tr>
+    <tr><td>Differentiation</td><td class="num">15</td><td class="num">10</td><td class="num">10</td></tr>
+    <tr><td>Distribution triggers</td><td class="num">10</td><td class="num">20</td><td class="num">—</td></tr>
+    <tr><td>Platform-format fit</td><td class="num">10</td><td class="num">10</td><td class="num">10</td></tr>
+    <tr><td>Creator fit &amp; feasibility</td><td class="num">10</td><td class="num">10</td><td class="num">10</td></tr>
+    <tr><td>Persuasion &amp; proof</td><td class="num">—</td><td class="num">—</td><td class="num">20</td></tr>
+  </table>
+  <ul class="tight">
+    <li><strong>Scoring:</strong> High=3, Med=2, Low=1, not-addressed=0. CCS = Σ(weight × score)/3. Gates: final CCS &gt; 70 → qualified, 3 options generated per post · ≥85 flagged "strong" · ≤70 → rework with the feedback agent's fixes.</li>
+    <li><strong>Hard gate:</strong> Hook = Low → rework regardless of composite. A dead hook makes everything downstream irrelevant — hook is multiplicative, not additive.</li>
+    <li><strong>Evidence rule (hard):</strong> agents have no web search and may not answer from memory. Every rating cites a DB-resolvable source_id (asset:/chunk:/stat:/trend:) retrieved in-run; the validator rejects unresolvable citations. Empty retrieval → "no evidence in DB", shown honestly. Model heuristics allowed only as PRINCIPLE, rendered muted.</li>
+    <li><strong>Feedback mechanics:</strong> the feedback agent is the final rating authority — it must verdict every element (agree / downgrade / upgrade, with reason + evidence or a declared evidence gap). Planner proposes, feedback agent disposes; downgrades stay visible on the card.</li>
+    <li><strong>Honesty:</strong> v1 weights are expert priors from the corpus, not learned. Recalibrate from performance memory once ≥200 scored concepts have real results. CCS is structured judgment that forces evidence — not a virality predictor. Never market it as one.</li>
+  </ul>
+
+  <h3>3.9 Agent output schemas &amp; validation</h3>
+  <p>Five contracts, pydantic-enforced. Invalid output → agent re-run with the validation error (max 2 retries) → hard fail surfaced to user. Never silently accepted, never silently repaired.</p>
+  <table>
+    <tr><th style="width:15%">Agent</th><th style="width:24%">Input</th><th style="width:20%">Output schema</th><th>Hard validations</th></tr>
+    <tr><td>Intake</td><td>Form fields + uploads</td><td>CreatorContext</td><td>Enums valid · ≤3 clarifying questions · no advice fields</td></tr>
+    <tr><td>Planner</td><td>CreatorContext + selected asset_ids (+ Feedback on refine pass)</td><td>Plan</td><td>Every element present or addressed=false with reason · every evidence item has resolvable source_id · slots match cadence · refine pass may touch only flagged concepts (diff-checked)</td></tr>
+    <tr><td>Feedback</td><td>Plan</td><td>Feedback</td><td>Verdict on ALL elements of every concept + 4 lenses (saturation, claims/brand safety, feasibility, platform policy) — any missing = invalid · downgrades need reason + evidence or evidence_gap=true · ccs_final computed and re-checked server-side</td></tr>
+    <tr><td>Planner — variants pass</td><td>Concepts with ccs_final &gt; 70</td><td>Options[3]</td><td>Exactly 3 · distinct angle_labels · each independently scored</td></tr>
+    <tr><td>Creative director</td><td>Approved option</td><td>ConfidenceCard → ScriptPackage</td><td>Card exists before script · every shot ≤8s · identity + wardrobe/lighting locks verbatim in every keyframe_prompt · cost estimate present · closing_shot slot present</td></tr>
+    <tr><td>Brand-kit composer</td><td>Uploaded assets OR pre-extracted brand data</td><td>BrandKit</td><td>2–3 options · message ≤7 words · logo never redrawn, only overlaid</td></tr>
+  </table>
+<pre><b>// Evidence — the atom everything reuses</b>
+Evidence {
+  tag: "REF" | "STAT" | "TREND" | "PRINCIPLE"
+  source_id: string        // asset:A118 | chunk:C0421 | stat:S88 | trend:T12 | "model" (PRINCIPLE only)
+  claim: string            // one sentence, numbers only if present in source
+  as_of: date | null
+}
+<b>// Plan (planner → feedback agent → user)</b>
+Plan {
+  series { objective, north_star_metric, pillar_mix, cadence, checkpoint_date }
+  concepts [{
+    id, slot_date, title,
+    description: string(≤300)
+    creative_direction: string(≤240)   // what the post will contain
+    hook { verbal: string, first_frame: string }
+    format, platform, cta, effort: "S"|"M"|"L", asset_needs[]
+    element_scores [{
+      element: enum(8)
+      addressed: bool                  // false = honest gap, score 0
+      proposed_rating: "H"|"M"|"L"|null
+      how_addressed: string | why_not: string
+      evidence: Evidence[]             // ≥1 unless addressed=false
+    }]
+  }]
+}
+<b>// Feedback (final authority)</b>
+Feedback {
+  concept_verdicts [{
+    concept_id,
+    element_verdicts [{ element, verdict:"agree"|"downgrade"|"upgrade",
+                        final_rating, reason, evidence: Evidence[] | evidence_gap: true }]
+    lenses { saturation:{similar_count, source_id}, claims_safety, feasibility, platform_policy }
+    kill_flags[]                       // hook=L, unsubstantiated claim, policy risk
+    fixes [{ priority, change }]
+    ccs_final: int
+  }]
+}
+<b>// Options (variants pass, only for ccs_final > 70)</b>
+Option { option_id:"A"|"B"|"C", angle_label, hook, creative_direction_delta, ccs }
+<b>// ScriptPackage (creative director, post card-approval)</b>
+ScriptPackage {
+  beats[], vo_script,
+  shots [{ shot_id, duration_s ≤8, keyframe_prompt,   // must embed identity_pack refs + locks
+           motion_prompt, vo_segment, boundary: "cut"|"interpolate" }]
+  consistency_plan { identity_pack_ids[], wardrobe_lock, lighting_lock }
+  route: "one_take"|"keyframe_cuts"|"interpolated"    // user-chosen
+  closing_shot_option_id, cost_estimate_credits
+}
+<b>// BrandKit (closing shot)</b>
+BrandKit {
+  source: "assets"|"url_extract"
+  brand { name, logo_asset_id, colors[], tagline|null }
+  closing_shot_options [2..3] [{ layout, message ≤7 words, image_prompt, duration_s: 1.5–2.5 }]
+}</pre>
+  <p class="note">Server re-computes CCS from ratings — the model never gets to do its own arithmetic unchecked. Every source_id is resolved against the DB at validation time; one dead citation fails the whole output.</p>
+
+  <h4>Example 1 — Ria · objective: followers · Reels/Shorts · ~35s</h4>
+  <div class="ccs">
+    <div class="head">
+      <div class="t">"I fired my ₹40K editor — these 3 free AI tools do it better"<small>LISTICLE DEMO · SCREEN-REC + VO · SELF-REFERENTIAL TWIST</small></div>
+      <div class="sc">92<small>CCS · SHIP</small></div>
+    </div>
+    <div class="desc">Opens on a ₹40,000 invoice being torn. Three tools shown editing <em>this exact video</em>; twist ending: "tool #3 edited everything you just watched."<br><strong>Creative direction:</strong> faceless screen-rec, cursor-led demos, captions bottom-third, energetic VO, 35s.</div>
+    <table>
+      <tr><th>Element (wt)</th><th>Rating</th><th>How it's addressed</th><th style="width:34%">Evidence</th></tr>
+      <tr><td>Hook (25)</td><td><span class="rate h">HIGH</span></td><td>First frame: invoice torn on camera, 2 objects, readable on mute; verbal names money + an enemy</td><td><span class="pill">REF</span> asset #A118, same "I fired my ___" hook, 2.1M views · <span class="pill dim">PRINCIPLE</span> first-frame rules</td></tr>
+      <tr><td>Audience alignment (15)</td><td><span class="rate h">HIGH</span></td><td>Editing cost is a top stated pain of aspiring creators</td><td><span class="pill">STAT</span> tool-demo format, AI niche: median 48K views, n=64, as of Aug '26 · <span class="pill red">TREND</span> "free AI video editor" rising 4-wk velocity</td></tr>
+      <tr><td>Retention structure (15)</td><td><span class="rate h">HIGH</span></td><td>Hook → foreshadow ("#3 edits while I sleep") → 3 beats → twist; 35s target</td><td><span class="pill dim">PRINCIPLE</span> corpus shorts formula; 90%+ retention benchmark</td></tr>
+      <tr><td>Differentiation (15)</td><td><span class="rate m">MED</span> <span class="rt">↓ red-team</span></td><td>Tool listicles saturated; self-referential "it edited this video" is the fresh element</td><td><span class="pill">REF</span> 37 similar assets in DB last 90 days — <span class="rt">downgraded from High: angle common, twist carries it</span></td></tr>
+      <tr><td>Distribution triggers (10)</td><td><span class="rate m">MED</span></td><td>Save-the-list utility + tag-a-creator share; no comment mechanic</td><td><span class="pill dim">PRINCIPLE</span></td></tr>
+      <tr><td>Platform fit (10) · Creator fit (10)</td><td><span class="rate h">HIGH</span></td><td>Screen-rec + VO native to Reels/Shorts; zero shoot, matches Ria's existing style</td><td>Profile memory + format benchmark</td></tr>
+    </table>
+    <div class="desc" style="border-bottom:none;border-top:1px solid var(--line)"><strong>3 options (CCS &gt; 70):</strong> A — invoice hook, as scored · B — story-led: "the day I almost quit over editing costs" · C — challenge: "human editor vs AI, same clip, who wins?"</div>
+  </div>
+
+  <h4>Example 2 — Kabir · objective: conversions · vitamin-C serum ad · 20s</h4>
+  <div class="ccs">
+    <div class="head">
+      <div class="t">"Your ₹3,000 serum has 2% of this — check the label"<small>UGC SELFIE · PROBLEM–AGITATE–SOLVE · PRICE ANCHOR</small></div>
+      <div class="sc">87<small>CCS · SHIP AFTER 2 FIXES</small></div>
+    </div>
+    <div class="desc">Avatar flips a premium-style bottle to the label, price-anchors ₹3,000 vs ₹599, shows the brand's ingredient % on screen with a patch-test cutaway. CTA: "check your label."<br><strong>Creative direction:</strong> UGC selfie, handheld, kitchen light, product-in-hand, captions on, 20s.</div>
+    <table>
+      <tr><th>Element (wt)</th><th>Rating</th><th>How it's addressed</th><th style="width:34%">Evidence</th></tr>
+      <tr><td>Hook (25)</td><td><span class="rate h">HIGH</span></td><td>Pattern interrupt: bottle flipped + bold overlay "2% of this"; loss framing on money already spent</td><td><span class="pill">REF</span> top skincare ad, Meta Ad Library — ingredient-callout hook, 94 days live</td></tr>
+      <tr><td>Audience alignment (15)</td><td><span class="rate h">HIGH</span></td><td>22–35 skincare buyers burnt by premium pricing — brand ICP match</td><td><span class="pill">STAT</span> PAS format in beauty: benchmark CTR set, n=41</td></tr>
+      <tr><td>Persuasion &amp; proof (20)</td><td><span class="rate m">MED</span> <span class="rt">↓ red-team</span></td><td>On-screen % comparison + patch-test; single CTA</td><td><span class="rt">Downgraded: "2%" claim needs brand substantiation doc before ship</span> · <span class="pill dim">PRINCIPLE</span></td></tr>
+      <tr><td>Retention structure (10)</td><td><span class="rate m">MED</span></td><td>20s PAS; demo-section dip risk — fix: move price reveal to 0:08</td><td><span class="pill dim">PRINCIPLE</span> retention-curve heuristic</td></tr>
+      <tr><td>Platform fit (10)</td><td><span class="rate h">HIGH</span></td><td>Native selfie UGC style, vertical, captions on</td><td><span class="pill">STAT</span> native-style ads: 3.3× engagement, 74% attention vs repurposed (TikTok research)</td></tr>
+      <tr><td>Differentiation (10) · Creator fit (10)</td><td><span class="rate m">MED</span> / <span class="rate h">HIGH</span></td><td>Ingredient-check angle common — patch-test cutaway is the fresh proof; avatar + product-in-hand, no shoot</td><td><span class="pill">REF</span> saturation count · asset inventory</td></tr>
+    </table>
+    <div class="desc" style="border-bottom:none;border-top:1px solid var(--line)"><strong>3 options (CCS &gt; 70):</strong> A — ingredient-check, as scored · B — testimonial: "my derm's 3-word advice" · C — side-by-side texture test, no talking.</div>
+  </div>
+  <p class="note">Both cards render exactly like this in the plan view and again as the Confidence Card in Creative Studio. The two red-team downgrades are deliberate: a scoresheet with visible dissent is more believable than straight Highs.</p>
+</section>
+<section id="creative">
+  <div class="eyebrow">04 · Creative studio</div>
+  <h2>Confidence first, script second, render last</h2>
+  <div class="flow">
+    <div class="step"><b>1 · Concept in</b>Arrives with plan context + selected references + objective</div>
+    <div class="arr">→</div>
+    <div class="step"><b>2 · Confidence card</b>Storyline beats + CCS element scores (§3.8), est. cost &amp; time. No script yet.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>3 · Script</b>On approval: full script + shot list + VO text. Editable.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>4 · Assets</b>Avatar pick · keyframes (Nano Banana) · voice (TTS)</div>
+    <div class="arr">→</div>
+    <div class="step"><b>5 · Shots</b>Image-to-video per shot (Veo 3.1 Fast, ≤8s each)</div>
+    <div class="arr">→</div>
+    <div class="step"><b>6 · Assemble</b>Server-side stitch + VO mix → 9:16 MP4 → My Space</div>
+  </div>
+  <div class="verdict"><b>Verdict on ">10s = front-end script to stitch"</b>Don't stitch on the front end. Client-side (WebCodecs/ffmpeg.wasm) is fragile across devices and kills mobile. Two correct routes: (a) Veo 3.1 <em>extend-video</em> chains a clip natively to 30s — fewer seams, higher cost; (b) shot-wise i2v + server-side ffmpeg (worker container) — cheaper, full control of cuts and VO. Ship (b) as default, (a) as premium "one-take" option.</div>
+  <h3>Rules</h3>
+  <ul class="tight">
+    <li>Text-only concepts finish in Content Studio — never force Creative Studio.</li>
+    <li>Every generate click shows cost estimate first (credits). Drafts render 1 shot before committing the full reel.</li>
+    <li>Character consistency across shots: generate keyframes from one avatar reference via Nano Banana multi-image edit; feed keyframe → i2v per shot. Expect drift; expose "re-roll shot" not "re-roll reel".</li>
+    <li><strong>The studio is a conversation, not a wizard.</strong> The step flow above is the agent's internal sequence. UI: user lands in a thread with the concept pre-loaded; agent opens with the confidence card; approvals, tweaks and re-rolls all happen in-thread; a persistent prompt modal sits at the bottom (DS prompt-bar pattern: radius-20 container, attach button, model pill, 32px send). No step tabs.</li>
+    <li>Sidebar = past threads/series only (+ New thread · DIY, which is the same tools with no agent).</li>
+    <li>On final approval the deliverable — creative file(s) + text (caption/copy/description) — is posted in-thread and saved to My Space for download.</li>
+  </ul>
+
+  <h3>Character consistency &amp; shot integration (Veo 3.1)</h3>
+  <table>
+    <tr><th style="width:18%">Route</th><th style="width:30%">Recommended for</th><th>How</th><th style="width:22%">Trade-off</th></tr>
+    <tr><td>One-take</td><td>Talking-head, monologue, single scene</td><td>Veo 3.1 t2v/i2v with native audio + extend-video chained to 30s</td><td>Best continuity, highest cost, least shot control</td></tr>
+    <tr><td>Keyframe cuts</td><td>Listicle, multi-scene, tutorial</td><td>Identity-pack keyframes (NB2 multi-ref) → i2v per shot → hard cuts + VO in stitch</td><td>Cheapest; drift risk between scenes</td></tr>
+    <tr><td>Interpolated flow</td><td>Product demo, transition-heavy</td><td>Veo 3.1 first/last-frame interpolation between adjacent keyframes</td><td>Smoothest seams, mid cost</td></tr>
+  </table>
+  <ul class="tight">
+    <li><strong>Recommendation, not decision:</strong> the creative director recommends a route from content type + context, with a reason. The user picks. Routes are never switched silently.</li>
+    <li><strong>Identity pack:</strong> 3–5 reference images per avatar; wardrobe + lighting descriptors locked and repeated verbatim in every keyframe prompt.</li>
+    <li><strong>Seam QA:</strong> embedding-similarity check on each shot's boundary frames; below threshold → shot flagged for re-roll before stitch.</li>
+  </ul>
+  <h3>Closing brand shot (auto end-card)</h3>
+  <div class="flow">
+    <div class="step"><b>Input</b>User uploads brand assets — or gives a brand URL</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Extract</b>System pipeline (not an agent): logo, name, colors, tagline from the site</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Compose</b>Nano Banana renders 2–3 end-card options: 9:16, brand colors, logo overlaid never redrawn, message ≤7 words</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Approve</b>User picks one (or none)</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Stitch</b>ffmpeg appends 1.5–2.5s + audio tail</div>
+  </div>
+</section>
+
+<section id="studios">
+  <div class="eyebrow">05 · Avatar · Voice · My Space</div>
+  <h2>Building blocks, kept deliberately thin in v1</h2>
+  <div class="grid2">
+    <div class="card">
+      <h5>Avatar studio</h5>
+      <ul>
+        <li>Three entry points: upload own photo · template gallery (12–20 curated) · prompt-to-avatar</li>
+        <li>Engine: Nano Banana / NB2 edit with multi-image reference for identity lock</li>
+        <li>Consent gate on uploaded faces: self-attestation + likeness policy; block celebrity lookalike prompts (§12)</li>
+        <li>Saved avatars = reusable reference sets in My Space</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h5>Voice studio</h5>
+      <ul>
+        <li>Pilot tier: Kokoro TTS — $0.02/1K chars, 19 stock voices. Good enough for drafts and faceless content</li>
+        <li>Step-up: MiniMax Speech HD ($0.10/1K, 30+ languages incl. Hindi, emotion tags) for final renders</li>
+        <li>Voice design / clone (MiniMax) = v1.5 — clone needs consent flow first</li>
+        <li>Blocks: script→VO, voice picker with 5s preview, speed control, per-shot audio files for the stitcher</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h5>My Space</h5>
+      <ul>
+        <li>Profile: creator context, niche, tone rules, banned topics — editable, feeds every agent call</li>
+        <li>Series &amp; campaigns do NOT live here — they moved to the <strong>Plans</strong> tab (top nav). My Space keeps profile, avatars, assets, performance log.</li>
+        <li>Avatars &amp; assets: all inputs and outputs, linked to source campaign + generation params (reproducibility)</li>
+        <li>Performance log: manual paste of post results — the feedback loop's front door</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="agentic">
+  <div class="eyebrow">06 · Agentic architecture</div>
+  <h2>A pipeline with judgment, not an open-ended agent</h2>
+  <div class="verdict"><b>Framework recommendation</b>V1: thin custom orchestrator — explicit state machine (context → retrieve → plan → critique → refine → await-approval) driving Anthropic tool-use calls. The flow is fixed; LangGraph/CrewAI adds abstraction you don't need yet. Adopt LangGraph at v1.5 if you want checkpointing/replay and branching creative sessions. Claude Agent SDK worth evaluating for the Creative Studio's conversational loop.</div>
+  <div class="arch">
+    <div class="layer"><h5>Client — Next.js</h5><div class="chips"><span class="chip">Content Studio (stage sidebar)</span><span class="chip">Creative Studio (thread + prompt bar)</span><span class="chip">Avatar / Voice</span><span class="chip">My Space</span></div></div>
+    <div class="down">↓ REST + SSE (agent streaming) ↓</div>
+    <div class="layer"><h5>Orchestrator — state machine, Python/FastAPI</h5><div class="chips"><span class="chip hot">Intake step · Claude Haiku 4.5 (+ Sonnet vision when files present)</span><span class="chip hot">Planner · Claude Sonnet 4.6</span><span class="chip hot">Red-team · Sonnet 4.6, dynamic persona prompt</span><span class="chip hot">Creative director · Sonnet 4.6 (studio thread)</span></div></div>
+    <div class="down">↓ tools ↓</div>
+    <div class="layer"><h5>Tools</h5><div class="chips"><span class="chip">RAG search (pgvector + rerank)</span><span class="chip">Stats lookup (benchmarks, trends, calendar)</span><span class="chip">fal.ai media (NB image · Veo 3.1 i2v/extend · TTS)</span><span class="chip">ffmpeg assemble worker</span><span class="chip">Cost estimator</span></div></div>
+    <div class="down">↓ state ↓</div>
+    <div class="layer"><h5>Data &amp; async</h5><div class="chips"><span class="chip">RDS Postgres 16 + pgvector (plans, corpora, memory, sessions)</span><span class="chip">SQS (generation jobs)</span><span class="chip">S3 (assets, presigned)</span><span class="chip">Lambda + API GW (fal webhooks → SSE)</span><span class="chip">EventBridge → Lambda → Apify (weekly ingest)</span><span class="chip">Secrets Manager (keys)</span></div></div>
+  </div>
+  <p class="note">All media generation is async job-based: queue → fal → webhook → assemble → notify. Never block an HTTP request on a 60s render.</p>
+</section>
+
+<section id="system">
+  <div class="eyebrow">07 · System &amp; API stack</div>
+  <h2>Verified pricing, current as of Aug 2026 (fal.ai)</h2>
+  <table>
+    <tr><th>Job</th><th>Model</th><th class="num">Price</th><th>Note</th></tr>
+    <tr><td>Draft images / keyframes</td><td>Nano Banana (Gemini 2.5 Flash Image)</td><td class="num">$0.039 / img</td><td>Volume workhorse; i2i edit same price</td></tr>
+    <tr><td>Better keyframes, character lock</td><td>Nano Banana 2 (Gemini 3.1 Flash)</td><td class="num">$0.08 / img</td><td>Consistency up to 5 people, 14 ref images</td></tr>
+    <tr><td>Hero stills, text-in-image</td><td>Nano Banana Pro (Gemini 3 Pro Image)</td><td class="num">$0.15 / img</td><td>4K = $0.30; use sparingly</td></tr>
+    <tr><td>Video shots (default)</td><td>Veo 3.1 Fast i2v</td><td class="num">$0.10 / s</td><td>No audio, 720/1080p; ≤8s per gen; VO added in stitch</td></tr>
+    <tr><td>Video with native audio</td><td>Veo 3.1 Fast</td><td class="num">$0.15 / s</td><td>Lip-synced dialogue; extend-video chains to 30s</td></tr>
+    <tr><td>Premium one-take</td><td>Veo 3.1 Standard</td><td class="num">$0.40 / s (audio)</td><td>Gate behind top plan only</td></tr>
+    <tr><td>Draft VO</td><td>Kokoro TTS</td><td class="num">$0.02 / 1K chars</td><td>19 voices, cheapest credible option</td></tr>
+    <tr><td>Final VO</td><td>MiniMax Speech HD</td><td class="num">$0.10 / 1K chars</td><td>Hindi + 30 languages, emotion/pause tags</td></tr>
+    <tr><td>Reasoning</td><td>Claude Sonnet 4.6 / Haiku 4.5</td><td class="num">per token</td><td>Sonnet: plan/critique/studio · Haiku: intake, ingest annotation</td></tr>
+  </table>
+  <p class="note">"Google omni" from the brief mapped to Veo 3.1 — that's the current Google video line on fal. Prices move; re-verify before pricing the product. All fal prices above pulled from fal.ai model pages this week.</p>
+  <h3>Build handoff — who builds what (read before scaffolding anything)</h3>
+  <table>
+    <tr><th style="width:16%">Agent</th><th style="width:30%">Repos it owns</th><th>Scope &amp; boundaries</th></tr>
+    <tr><td>Codex</td><td><span class="pill">plotline-kb</span> <span class="pill">plotline-rag</span></td><td>KB ingestion → validated JSONL; RAG layer on the free-tier dev account: S3 + DynamoDB (plotline_* / plotline-*) + local fastembed embeddings + hybrid search, served as a local FastAPI on 127.0.0.1:8787. In progress under a separate brief.</td></tr>
+    <tr><td>Claude Code</td><td><span class="pill">plotline-api</span> <span class="pill">plotline-web</span></td><td>Orchestrator + agents (§11 prompts, §3.9 schemas, server-side validators) and the Next.js UI (§12, DS grammar). <strong>Consumes</strong> the RAG service over HTTP — must NOT reimplement retrieval, embeddings, or KB ingestion, and must not modify Codex's repos.</td></tr>
+  </table>
+  <ul class="tight">
+    <li><strong>Frozen interfaces:</strong> RAG HTTP contract — <span class="mono">POST /search_corpus</span> (query, k, filters → Evidence-shaped results with source_id, tier, score) and <span class="mono">POST /resolve_source_ids</span>. The §3.9 validator resolves every cited source_id through this endpoint; one dead id fails the agent output.</li>
+    <li><strong>Environment override (dev):</strong> Phase 1 runs on a personal free-tier AWS account (ap-south-1, $5 budget alert): DynamoDB provisioned within the shared always-free 25 RCU/WCU, S3, everything else local processes. No RDS, no App Runner, no paid services without explicit owner OK. Phase 1 needs no queue; SQS (always-free tier) enters at Phase 2 with an IAM policy update.</li>
+    <li><strong>The table below is the scale-up architecture</strong> for a credit-funded account — documented target, not what Phase-1 dev deploys.</li>
+    <li>Agents get retrieval tools only — no network tools registered in plotline-api, ever (§11 guardrails).</li>
+  </ul>
+  <h3>AWS deployment — scale-up architecture (credit-funded account, not Phase-1 dev)</h3>
+  <table>
+    <tr><th>Concern</th><th>Service</th><th>v1 sizing</th><th class="num">~$/mo</th></tr>
+    <tr><td>API + orchestrator</td><td>App Runner (FastAPI container)</td><td>0.25 vCPU / 0.5 GB, scale-to-1</td><td class="num">5–15</td></tr>
+    <tr><td>Assemble worker (ffmpeg)</td><td>ECS Fargate task, on demand</td><td>Per job, SQS-triggered</td><td class="num">1–5</td></tr>
+    <tr><td>Queue</td><td>SQS standard</td><td>—</td><td class="num">&lt;1</td></tr>
+    <tr><td>DB + vectors + sessions</td><td>RDS Postgres 16 + pgvector</td><td>db.t4g.micro, 20 GB</td><td class="num">13–16</td></tr>
+    <tr><td>Assets</td><td>S3 + presigned URLs</td><td>—</td><td class="num">1–3</td></tr>
+    <tr><td>fal webhooks</td><td>Lambda + API Gateway</td><td>—</td><td class="num">&lt;1</td></tr>
+    <tr><td>Weekly ingest</td><td>EventBridge Scheduler → Lambda → Apify API</td><td>Weekly</td><td class="num">&lt;1</td></tr>
+    <tr><td>Keys</td><td>Secrets Manager (Anthropic, fal, Apify)</td><td>3 secrets</td><td class="num">1.2</td></tr>
+  </table>
+  <ul class="tight">
+    <li><strong>Total infra ≈ $25–40/mo</strong> → the $200 credit covers ~5–6 months of build + pilot. Media spend (fal) is separate and will dominate — it does not come out of AWS credit.</li>
+    <li><strong>Deliberately skipped in v1:</strong> ElastiCache (sessions live in Postgres), Aurora (overkill), EKS. Add Redis only when SSE fan-out demands it.</li>
+    <li><strong>IAM:</strong> don't build on the existing user's broad keys. Create per-service roles + one scoped deploy user (least privilege); keep the existing IAM user for console/bootstrap only.</li>
+  </ul>
+</section>
+
+<section id="costs">
+  <div class="eyebrow">08 · Unit economics</div>
+  <h2>The 30-second reel is the margin problem. Design around it.</h2>
+  <table>
+    <tr><th>Deliverable</th><th>Route</th><th class="num">Clean take</th><th class="num">Realistic (w/ retries)</th></tr>
+    <tr><td>Text post</td><td>LLM only</td><td class="num">~$0.02</td><td class="num">~$0.05</td></tr>
+    <tr><td>Image post (3 variants)</td><td>NB ×3 + LLM</td><td class="num">~$0.15</td><td class="num">~$0.30</td></tr>
+    <tr><td>30s reel — default</td><td>6 NB keyframes + 4×8s Veo Fast i2v + Kokoro VO + stitch</td><td class="num">~$3.60</td><td class="num">$5–8</td></tr>
+    <tr><td>30s reel — native audio</td><td>Veo 3.1 Fast + extend, audio on</td><td class="num">~$4.50</td><td class="num">$8–13</td></tr>
+  </table>
+  <ul class="tight">
+    <li><strong>Implication:</strong> at a $29/mo plan, break-even is ~4–6 finished reels. Price in credits, not unlimited. Free tier gets text+image and one watermarked draft reel.</li>
+    <li><strong>Cost levers:</strong> draft = 1 shot only before full commit · re-roll per shot, never per reel · no-audio i2v + TTS instead of native audio · cache keyframes per avatar.</li>
+    <li><strong>Show the cost.</strong> Confidence Card displays credit price before generate — doubles as trust and as consumption control.</li>
+  </ul>
+</section>
+<section id="memory">
+  <div class="eyebrow">09 · Memory &amp; RAG</div>
+  <h2>Four memories. The performance loop is the moat.</h2>
+  <table>
+    <tr><th style="width:22%">Memory</th><th>Holds</th><th style="width:26%">Store / lifecycle</th></tr>
+    <tr><td>Session</td><td>Current thread state, tool results, pending approvals</td><td>Redis · expires with session</td></tr>
+    <tr><td>Profile</td><td>Niche, tone, banned topics, capacity, style prefs — extracted by Haiku after key events, user-editable in My Space</td><td>Postgres · durable</td></tr>
+    <tr><td>Campaign</td><td>Approved plans, decisions, per-concept status, generated assets + params</td><td>Postgres · per campaign</td></tr>
+    <tr><td>Performance</td><td>Posted results (manual paste v1) → format/hook win-rates per user + aggregated per niche</td><td>Postgres · compounds forever — <strong>this is what competitors can't copy</strong></td></tr>
+  </table>
+  <h4>RAG corpora</h4>
+  <ul class="tight">
+    <li>Inspiration assets (annotated) · best-practice corpus (source-tiered) · user's own past content + results.</li>
+    <li>Retrieval: pgvector hybrid (dense + keyword) + rerank; planner receives structured evidence objects, not raw chunks — forces citable "why-it-wins".</li>
+    <li>Skip for v1: episodic chat summarization across all history, knowledge graphs. Small, sharp memory beats a memory platform.</li>
+  </ul>
+</section>
+
+<section id="intel">
+  <div class="eyebrow">10 · Agent intelligence sources</div>
+  <h2>Where every claim comes from — RAG, DB, realtime, or model prior</h2>
+  <p><strong>Rule:</strong> the planner must tag every "why-it-wins" claim with its source. The UI renders REF / STAT / TREND as evidence and PRINCIPLE as opinion. Model-prior knowledge is never dressed up as data — that honesty is part of the trust product.</p>
+  <table>
+    <tr><th>Capability</th><th>Source</th><th>Type</th><th>Freshness</th><th>Cold-start / fallback</th></tr>
+    <tr><td>What's working now (formats, hooks per niche)</td><td>Inspiration DB — annotated assets</td><td><span class="pill">RAG</span></td><td>Weekly scraper runs + user submissions</td><td>Model prior, rendered as PRINCIPLE</td></tr>
+    <tr><td>Craft rules (hooks, retention, packaging)</td><td>Best-practice corpus — platform docs + expert extractions</td><td><span class="pill">RAG</span></td><td>Monthly re-ingest</td><td>—</td></tr>
+    <tr><td>Benchmarks (median views/ER by format × niche)</td><td>SQL aggregates over inspiration + performance data</td><td><span class="pill">DB</span></td><td>Nightly job</td><td>Hide stat if n &lt; 30 — never fake a benchmark</td></tr>
+    <tr><td>What worked for <em>this</em> user</td><td>Performance memory</td><td><span class="pill">DB</span></td><td>On result paste (v1)</td><td>Niche aggregate</td></tr>
+    <tr><td>Topic momentum</td><td>Google Trends</td><td><span class="pill red">REALTIME</span></td><td>At plan time</td><td>Skip silently</td></tr>
+    <tr><td>Trending audio, formats, events calendar</td><td>Ops-curated tables (TikTok Creative Center, seasonal calendar)</td><td><span class="pill">DB</span></td><td>Weekly, as-of stamped in UI</td><td>—</td></tr>
+    <tr><td>Audience psychology, platform mechanics (general)</td><td>Claude — model-native</td><td><span class="pill dim">PRIOR</span></td><td>Training cutoff</td><td>Always labelled PRINCIPLE</td></tr>
+    <tr><td>User context, uploads, tone rules</td><td>Profile memory + intake extraction</td><td><span class="pill">DB</span></td><td>Per session / on edit</td><td>—</td></tr>
+  </table>
+
+  <h3>Inspiration acquisition pipeline (scraper-based, v1)</h3>
+  <div class="flow">
+    <div class="step"><b>Seed</b>Per-niche lists: hashtags, creators, keywords (ops-maintained)</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Scrape</b>Apify actors weekly: TikTok / IG / X public metadata — caption, stats, duration, audio, thumb, link</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Filter</b>Dedupe + engagement-velocity cut: keep top decile per niche</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Annotate</b>Haiku: hook type, structure beats, format tag, why-it-works note</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Embed</b>pgvector + metadata; thumb cached, video linked not stored</div>
+    <div class="arr">→</div>
+    <div class="step"><b>QA</b>Human spot-check 10% weekly → live</div>
+  </div>
+  <ul class="tight">
+    <li><strong>Cost:</strong> scraper actors ≈ $0.3–1 per 1K posts (TikTok/IG), ≈ $0.2 per 1K tweets; Haiku annotation is pennies per hundred. Full weekly refresh across 8 niches &lt; $50/mo.</li>
+    <li><strong>Rules:</strong> logged-out public only · metadata + stats + link, never rehosted video or full third-party transcript · content metrics, not people data (DPDP/GDPR) · every asset stamped with as-of date.</li>
+    <li><strong>Agent boundary:</strong> scrapers and the brand-URL extractor are deterministic <em>system pipelines</em>. Planning and feedback agents have no web access at all — they see only what already landed in the DB (§3.9 evidence policy).</li>
+    <li><strong>User-supplied inspiration:</strong> paste a link → one-off fetch → same annotation pipeline → stored private to that user. Cleanest legal path and a product feature.</li>
+  </ul>
+
+  <h3>Evidence tags in product</h3>
+  <ul class="tight">
+    <li><span class="pill">REF</span> linked inspiration asset — "this format, this creator, these numbers"</li>
+    <li><span class="pill">STAT</span> computed benchmark from our DB, with n and as-of date</li>
+    <li><span class="pill red">TREND</span> live signal (Trends velocity, curated trend table)</li>
+    <li><span class="pill dim">PRINCIPLE</span> model or corpus heuristic — useful, but not data. Shown in muted style.</li>
+  </ul>
+</section>
+
+<section id="prompts">
+  <div class="eyebrow">11 · System prompts &amp; agent guidelines</div>
+  <h2>Copy-paste contracts for the build</h2>
+  <p>These + §3.9 schemas are the handoff to Claude Code. Shared policy is prepended to every agent prompt. Treat these as v1: run them through evals with 20 seeded contexts before trusting, and version every change.</p>
+
+  <h4>Shared agent policy (prepended to all)</h4>
+<pre>EVIDENCE &amp; HONESTY POLICY — applies to every agent
+1. You have no web search and no browsing. Do not simulate one.
+2. Every factual claim about performance, formats, audiences, or trends must cite a
+   source_id returned by YOUR retrieval tools in THIS run (asset:* / chunk:* / stat:* / trend:*).
+   Citations that don't resolve against the DB fail validation.
+3. If retrieval returns nothing relevant: write "no evidence in DB" and set
+   evidence_gap=true. Never approximate a number. Never invent an asset or stat.
+4. General knowledge is allowed only as tag=PRINCIPLE with source_id="model".
+   Principles are opinions, not data. Do not dress them up as data.
+5. Output strict JSON matching your schema — no markdown, no prose outside JSON.
+   On validation error you are re-run with the error; fix only what is invalid.
+6. Never fabricate user context. Missing input stays null.
+7. Audience: Indian + global creators. No claims that violate platform ad policy.</pre>
+
+  <h4>1 · Intake agent (Haiku 4.5; Sonnet when files attached)</h4>
+<pre>You normalize raw user input into CreatorContext JSON: form fields, pasted text,
+and uploads (video frames, screenshots, docs).
+- From uploads, extract only what is visible: style, tone, format, pacing,
+  captions, avatar presence. Describe. Do not guess metrics or performance.
+- Map free text to enums; anything unmappable goes to notes[], not forced enums.
+- Unknown required fields → null + add to clarifying_questions[] (max 3, only
+  if truly blocking).
+- You give no advice, no ideas, no plan. You are a parser with eyes.
+OUTPUT: CreatorContext v1.</pre>
+
+  <h4>2 · Planner agent (Sonnet 4.6)</h4>
+<pre>You are the Planning Agent. Build a content plan a strategist would defend
+line by line in front of the creator.
+TOOLS: search_inspiration, search_corpus, get_benchmarks, get_trends, get_profile.
+PASS 1 — CONCEPTS
+- Produce concepts for every slot in the cadence. Each concept: title,
+  description (2–3 lines), creative_direction (what the post will contain:
+  format, setting, treatment — ≤40 words), hook {verbal line, first_frame},
+  format, platform, cta, effort, asset_needs.
+- Score every applicable element (8 for conversions, else 7) with
+  proposed_rating + how_addressed + evidence[]. If an element is genuinely
+  not addressed: addressed=false, why_not, rating null. Do NOT force a Med.
+- Respect pillar_mix and stated capacity. A concept the creator cannot
+  produce is invalid, however good it looks.
+- You propose ratings. The feedback agent decides them. Do not compute ccs.
+PASS 2 — REFINE (input: Feedback)
+- Change only concepts/elements the feedback flagged. Log changes[].
+  Untouched concepts must be byte-identical (diff-checked).
+PASS 3 — OPTIONS (input: concepts with ccs_final &gt; 70)
+- Exactly 3 options per concept: distinct angle_label, hook,
+  creative_direction_delta. Different approaches, not reworded copies.
+OUTPUT: Plan v1 / Options v1.</pre>
+
+  <h4>3 · Feedback agent — red team (Sonnet 4.6)</h4>
+<pre>You are the Feedback Agent and the FINAL RATING AUTHORITY.
+Persona for this run: {dynamic_persona} — built from target audience,
+platform behavior, and niche norms. Judge as that audience, not as an AI.
+TOOLS: search_inspiration, search_corpus, get_benchmarks.
+For EVERY concept:
+- Verdict on EVERY element: agree / downgrade / upgrade → final_rating.
+  Each non-agree needs a reason + evidence[] or evidence_gap=true.
+- Four mandatory lenses: (a) saturation — run similarity retrieval, cite the
+  count and source_id; (b) claims &amp; brand safety; (c) feasibility vs the
+  creator's stated capacity; (d) platform policy.
+- kill_flags: hook=Low, unsubstantiated claim, policy risk. A kill_flag
+  blocks options regardless of score.
+- fixes[]: ordered by impact, each a concrete change, not "make it better".
+- Missing any element or lens = your output is invalid.
+You give feedback only. You never rewrite concepts. Server recomputes CCS.
+OUTPUT: Feedback v1.</pre>
+
+  <h4>4 · Creative director (Sonnet 4.6 — studio thread)</h4>
+<pre>You run Creative Studio for one approved option. The sequence is fixed:
+1. CONFIDENCE CARD first: storyline beats (not the script), the option's
+  element scores, route recommendation WITH reason, cost estimate in credits.
+  Never reveal the full script before card approval. No exceptions.
+2. After approval: ScriptPackage — vo_script, shots (each ≤8s) with
+  keyframe_prompt embedding identity_pack refs + wardrobe_lock +
+  lighting_lock VERBATIM in every shot, motion_prompt, boundary type.
+3. Route recommendation by content type: talking-head → one_take;
+  multi-scene/listicle → keyframe_cuts; product/transition-heavy →
+  interpolated. Recommend, explain, then the USER decides. Never switch
+  routes silently.
+4. Include closing_shot slot; offer BrandKit flow if no end-card exists.
+5. Performance claims follow the evidence policy. Craft advice = PRINCIPLE.
+6. Every generate action is preceded by its credit cost.
+OUTPUT: ConfidenceCard v1 → ScriptPackage v1.</pre>
+
+  <h4>5 · Brand-kit composer (Haiku 4.5 + Nano Banana)</h4>
+<pre>INPUT: uploaded brand assets OR brand data pre-extracted by the system
+pipeline {name, logo_asset_id, colors, tagline}. You never fetch URLs.
+- Produce 2–3 closing_shot_options: layout (logo position, background from
+  brand colors), message ≤7 words, image_prompt for Nano Banana (9:16).
+- The logo is an overlay asset. NEVER redraw, restyle, or re-render a logo.
+- Messages are suggestions; no offers, prices, or claims not present in the
+  provided data.
+OUTPUT: BrandKit v1.</pre>
+
+  <h4>Build guardrails for Claude Code / Codex</h4>
+  <ul class="tight">
+    <li>Validators live server-side (pydantic). The model never checks its own homework: CCS recomputed, source_ids resolved, diffs enforced on refine.</li>
+    <li>Planner and feedback agents get retrieval tools only — no network tools registered, not "instructed not to use them".</li>
+    <li>Log every agent run: prompt version, tool calls, source_ids cited, validation retries. This is the eval + recalibration dataset.</li>
+    <li>Prompt files versioned in repo (/prompts/*.md), loaded at runtime — never hardcoded in code.</li>
+    <li>Retrieval is a service, not a library: plotline-api calls the plotline-rag HTTP contract (§7 build handoff). Do not embed, index, or query vectors inside plotline-api.</li>
+  </ul>
+</section>
+
+<section id="ui">
+  <div class="eyebrow">12 · UI spec</div>
+  <h2>Studio dark, plan light</h2>
+  <table>
+    <tr><th style="width:24%">Surface</th><th>Spec</th></tr>
+    <tr><td>Nav</td><td>Home (SEO/discovery) · Content Studio · Creative Studio · Avatar Studio · <strong>Plans</strong> · My Space. ("Plans" replaces the working name "My Plan"; alternates considered: Playbook, Calendar.)</td></tr>
+    <tr><td>Content Studio</td><td>Stage sidebar: Context → Inspiration → Plan → Concepts &amp; options. Context = guided blocks with inline guidelines, required/optional flags, upload tiles, and a required series/post name. Plan view = concept cards on a timeline, drag to reorder, per-card actions (approve / feedback / regenerate / → Creative Studio)</td></tr>
+    <tr><td>Inspiration cards</td><td>Format/platform/duration chips + title + content description + stats (source_id, as-of) + why-it-works line. Launch state: wired, sample data, selection disabled with honest label until the pipeline is live</td></tr>
+    <tr><td>Creative Studio</td><td>Conversational thread — no step tabs. Concept lands pre-loaded, agent opens with the confidence card, everything else (script, renders, end-cards, final) happens in-thread. Persistent bottom prompt modal (attach + model pill + send). Sidebar = past threads/series + New thread · DIY</td></tr>
+    <tr><td>Plans</td><td>All named series/campaigns with status (x/y approved, next slot, objective). Returning users start here: "Generate next post" jumps straight into a Creative Studio thread; "Open plan" returns to the timeline; new series starts in Content Studio</td></tr>
+    <tr><td>My Space</td><td>Sidebar: Profile · Avatars · Assets · Performance. Deliverables arrive here as text + creative bundles, downloadable, with generation params stored</td></tr>
+    <tr><td>Design system</td><td>Adopt the PixelBin nov-* component grammar — radii (12/16/20), spacing, shadows, block/tile patterns, prompt bar (r20 container, action row, model pill, 32px circular send), selector chips, upload tiles (dashed), icon set — but keep Plotline's own type and palette. DS fonts/colors (Inter, #6933fa family) are explicitly NOT used</td></tr>
+    <tr><td>Defaults</td><td>Video 9:16 · image 1:1 · audio on · ≤30s · sensible model defaults, no model-picker anxiety for new users</td></tr>
+  </table>
+  <h4>References</h4>
+  <ul class="tight">
+    <li><strong>Creative/Avatar studios:</strong> Higgsfield-style — dark, cinematic gallery, bottom prompt bar (your stated favourite; fits generation surfaces).</li>
+    <li><strong>Plan flow:</strong> not Higgsfield. Use Linear-style board / Notion-timeline pattern — light surface, dense cards, drag-first. Planning is reading + deciding, not vibing; light UI reads faster.</li>
+    <li>Note: interface references from product knowledge; design to pull current screenshots — no live browsing was run for this doc.</li>
+  </ul>
+</section>
+
+<section id="metrics">
+  <div class="eyebrow">13 · Metrics</div>
+  <h2>Measure the bet, not vanity</h2>
+  <table>
+    <tr><th>Metric</th><th>Target (first 90 days)</th><th>Why</th></tr>
+    <tr><td>Activation: first approved plan</td><td>≥55% of signups</td><td>Tests the core bet directly</td></tr>
+    <tr><td>Plans approved in ≤2 regenerations</td><td>≥70%</td><td>Plan quality, not patience</td></tr>
+    <tr><td>Concept → finished asset rate</td><td>≥40%</td><td>Creative Studio conversion</td></tr>
+    <tr><td>Time to first asset</td><td>&lt;20 min</td><td>Seamlessness claim</td></tr>
+    <tr><td>Performance results pasted back</td><td>≥25% of users</td><td>Feeds the moat</td></tr>
+    <tr><td>Media cost per finished reel</td><td>≤$6 blended</td><td>Unit economics guardrail</td></tr>
+    <tr><td>W4 retention</td><td>≥30%</td><td>Series cadence working</td></tr>
+  </table>
+</section>
+
+<section id="risks">
+  <div class="eyebrow">14 · Risks &amp; open calls</div>
+  <h2>What kills this, in order</h2>
+  <div class="grid2">
+    <div class="card risk"><h5>1 · Unit economics</h5><p>$5–13 per finished reel at current fal prices. Unlimited plans are impossible; credits + draft-tier are structural, not optional. Google can reprice Veo under us at any time.</p></div>
+    <div class="card risk"><h5>2 · Weak moat at plan layer</h5><p>ChatGPT writes content plans free. Our defense = annotated inspiration DB + performance loop + one-flow production. If curation ops slips, the plan degrades to generic and the bet dies.</p></div>
+    <div class="card risk"><h5>3 · Inspiration DB legality — narrowed, not closed</h5><p>US courts backed logged-out public scraping (Meta and X both lost to Bright Data, 2024), so the metadata pipeline is defensible. Residual: platform IP-blocking and account bans (use third-party scrapers so that risk sits with them), copyright if we rehost videos or full transcripts (we don't), and personal-data law (GDPR / India DPDP — store content metrics, not people data).</p></div>
+    <div class="card risk"><h5>4 · Likeness &amp; voice consent</h5><p>Uploaded faces and (later) voice cloning need consent attestation, celebrity-lookalike blocking, and a misuse policy pre-launch. One deepfake incident defines the brand.</p></div>
+    <div class="card risk"><h5>5 · Multi-shot consistency</h5><p>Character drift across shots is unsolved. Mitigate: NB2 reference-locked keyframes, per-shot re-roll, honest "AI look" positioning for v1. Don't promise brand-film fidelity.</p></div>
+    <div class="card risk"><h5>6 · Crowded market</h5><p>Creatify, Higgsfield, createpersona et al. own "generate an avatar video". Nobody owns "evidence-backed plan → production". Positioning must lead with the plan, or we're a thinner Higgsfield.</p></div>
+  </div>
+  <h4>Open calls for review</h4>
+  <ul class="tight">
+    <li>Pricing currency: INR-first credits vs USD — affects target segment (India creators vs global).</li>
+    <li>Kabir batch A/B volume in v1 or v1.5 (adds batch infra + cost exposure).</li>
+    <li>Name/trademark clearance for Plotline (or pick alt).</li>
+  </ul>
+</section>
+
+<section id="phasing">
+  <div class="eyebrow">15 · Phasing</div>
+  <h2>Two phases, no dates — the gate does the scheduling</h2>
+  <div class="phases">
+    <div class="phase"><b>Phase 1</b><span>UI/UX + planning product + infra</span>
+      <ul><li>Design system in place (DS component grammar, Plotline type + palette)</li><li>Content Studio end-to-end: guided context blocks, named series, inspiration cards (wired, sample data, disabled), agent pipeline, plan + concept cards + 3 options</li><li>Plans tab: series list, statuses, "generate next post" entry, returning-user flow</li><li>My Space: profile, assets, performance paste</li><li>Infra: AWS stack, schemas + server-side validators, agent prompts + evals (20 seeded contexts), KB bootstrap via the Codex prompt</li><li>Exit gate: ≥55% of test users approve a plan in ≤2 regenerations — no Creative Studio work starts before this holds</li></ul>
+    </div>
+    <div class="phase"><b>Phase 2</b><span>Creative Studio</span>
+      <ul><li>Conversational studio thread + bottom prompt modal; threads sidebar</li><li>Confidence card → script → media routes (one-take / cuts / interpolated), identity packs, seam QA</li><li>Closing brand shot (assets or URL-extract → 2–3 options → stitch)</li><li>Avatar Studio + Voice Studio (Kokoro draft / MiniMax HD final); credits + cost display</li><li>Delivery: text + creative bundle posted in-thread and saved to My Space</li></ul>
+    </div>
+  </div>
+  <p class="note" style="margin-top:22px">— End of PRD v1 · Plotline · 21 Aug 2026 · Feedback → Anand</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,142 @@
+[
+  {
+    "source_id": "chunk:C0402",
+    "kind": "chunk",
+    "tier": "official",
+    "topic": "first_frame",
+    "platform": "instagram_reels",
+    "content_type": "video",
+    "text": "First-frame rules (IG creator guidance): the opening frame must read on mute and at thumbnail size — max 2–3 distinct objects, high contrast, and any text under 6 words. Motion in frame one outperforms static title cards. Never open on a logo.",
+    "as_of": "2026-06-01"
+  },
+  {
+    "source_id": "chunk:C0409",
+    "kind": "chunk",
+    "tier": "official",
+    "topic": "retention_structure",
+    "platform": "youtube_shorts",
+    "content_type": "video",
+    "text": "Shorts retention formula: hook (0–3s) → foreshadow the payoff (3–8s) → 2–4 tight beats with visual change every 5–8s → payoff or twist in the final 15%. Shorts that loop cleanly (last frame ≈ first frame) show measurably higher average view duration.",
+    "as_of": "2026-05-20"
+  },
+  {
+    "source_id": "chunk:C0415",
+    "kind": "chunk",
+    "tier": "research",
+    "topic": "hook_types",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Hook taxonomy with observed stop-rates: question hooks underperform bold claims in saturated niches; pattern-interrupts (physical action, unexpected object) and specific-number claims ('$2K/month', '2%') outperform generic promises. Naming an enemy or a cost in the first line raises 3s retention.",
+    "as_of": "2026-04-15"
+  },
+  {
+    "source_id": "chunk:C0421",
+    "kind": "chunk",
+    "tier": "research",
+    "topic": "retention_structure",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Retention-curve research: the steepest drop is 0–3s; a second dip appears at the start of any demo/explanation segment. Countermeasures: move the most surprising visual to the dip point, keep segments under 8s, and foreshadow ('#3 is the one that edits while you sleep') before entering list structure.",
+    "as_of": "2026-03-30"
+  },
+  {
+    "source_id": "chunk:C0428",
+    "kind": "chunk",
+    "tier": "official",
+    "topic": "distribution",
+    "platform": "instagram_reels",
+    "content_type": "video",
+    "text": "IG ranking signals for Reels (official explainer): watch time and completion first, then shares and saves; comments weigh more when they arrive early. Formats with a built-in reason to share (utility lists, identity content, tag-a-friend mechanics) compound distribution.",
+    "as_of": "2026-07-01"
+  },
+  {
+    "source_id": "chunk:C0433",
+    "kind": "chunk",
+    "tier": "research",
+    "topic": "native_style",
+    "platform": "tiktok",
+    "content_type": "video",
+    "text": "Native-style ad research (TikTok): ads shot in native selfie/UGC style achieve ~3.3x engagement and 74% attention vs repurposed studio ads. Handheld camera, captions on, real-environment lighting are the strongest native markers.",
+    "as_of": "2026-02-10"
+  },
+  {
+    "source_id": "chunk:C0437",
+    "kind": "chunk",
+    "tier": "expert",
+    "topic": "ad_structure",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Performance-creative playbook: problem–agitate–solve (PAS) remains the highest-floor ad structure for D2C; put the price anchor or offer by 0:08, one CTA only, and put on-screen proof (demo, test, percentage) at the agitate→solve turn. Multiple CTAs measurably depress conversion.",
+    "as_of": "2026-05-05"
+  },
+  {
+    "source_id": "chunk:C0441",
+    "kind": "chunk",
+    "tier": "expert",
+    "topic": "claims_safety",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Claims safety for ad creatives: any numeric or comparative product claim ('2% actives', 'lasts 3x longer') needs brand substantiation on file before shipping; health and efficacy claims additionally face platform ad-policy review. Softening to 'check your label' style imperatives keeps the persuasion while avoiding unsubstantiated-claim rejection.",
+    "as_of": "2026-06-18"
+  },
+  {
+    "source_id": "chunk:C0446",
+    "kind": "chunk",
+    "tier": "official",
+    "topic": "series_strategy",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Creator-academy guidance on series: a recognizable series pattern (fixed opener, day-number, fixed scorecard) trains return viewership and lifts follower conversion 2–4x vs one-off posts of equal reach. Pillar mix guidance: ~60% core format, ~30% trend-adjacent, ~10% experimental.",
+    "as_of": "2026-04-01"
+  },
+  {
+    "source_id": "chunk:C0452",
+    "kind": "chunk",
+    "tier": "research",
+    "topic": "saves_shares",
+    "platform": "instagram_reels",
+    "content_type": "video",
+    "text": "Save-worthiness drivers: reference value (lists, formulas, benchmarks the viewer will need later) is the strongest save trigger; emotional identity content drives shares instead. A concrete end-card ('save this for your next X') lifts save rate without hurting completion.",
+    "as_of": "2026-03-12"
+  },
+  {
+    "source_id": "chunk:C0457",
+    "kind": "chunk",
+    "tier": "expert",
+    "topic": "hook_writing",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Hook-writing heuristics from ad teardowns: write the hook as [specific stake] + [tension word] + [open loop]. Verbal and visual hooks must be different information, not the same line twice — the text overlay should add stakes the audio doesn't carry.",
+    "as_of": "2026-01-25"
+  },
+  {
+    "source_id": "chunk:C0463",
+    "kind": "chunk",
+    "tier": "official",
+    "topic": "platform_fit",
+    "platform": "youtube_shorts",
+    "content_type": "video",
+    "text": "Shorts vs Reels fit: Shorts audiences tolerate longer explainers (45–60s) and reward information density; Reels reward tighter loops (20–35s) and stronger aesthetic cohesion. Cross-posting without re-cutting typically underperforms on one of the two.",
+    "as_of": "2026-05-28"
+  },
+  {
+    "source_id": "chunk:C0468",
+    "kind": "chunk",
+    "tier": "research",
+    "topic": "cta",
+    "platform": "all",
+    "content_type": "video",
+    "text": "CTA research: comment-bait CTAs ('vote A or B') outperform follow-CTAs for reach; follow-CTAs work only when tied to a series promise ('follow for day 13'). For conversion ads, imperative micro-actions ('check your label') outperform brand-benefit CTAs.",
+    "as_of": "2026-02-28"
+  },
+  {
+    "source_id": "chunk:C0473",
+    "kind": "chunk",
+    "tier": "expert",
+    "topic": "faceless_production",
+    "platform": "all",
+    "content_type": "video",
+    "text": "Faceless production patterns: cursor-led screen recordings with energetic VO and bottom-third captions are the lowest-effort format that still ranks; avoid static screenshots — every 5s needs cursor motion, zoom, or cut. AI-avatar fronting works when the avatar is consistent across the series (identity lock).",
+    "as_of": "2026-06-30"
+  }
+]
