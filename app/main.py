@@ -63,6 +63,7 @@ def health() -> dict[str, Any]:
     return {
         "service": "plotline-api",
         "mock_llm": config.MOCK_LLM,
+        "media_mock": config.MOCK_MEDIA,
         "models": {
             "planner": config.PLANNER_MODEL,
             "feedback": config.FEEDBACK_MODEL,

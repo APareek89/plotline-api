@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `7403fd9` (plotline-api) · `0146691` (plotline-web)
+last-synced: `f8d656e` (plotline-api) · `2eb6138` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
@@ -40,7 +40,15 @@ events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tab
   format-library corpus (15 curated chunks, synced to S3/DDB — 25 total), chat UI
   (§01-§04). 69 tests, 20/20 evals. Old stage UI kept at /studio/[seriesId] as the
   plan board (panel "Expand" target); demo-v2 html stale per §09.
-- ▶ Runs in MOCK_LLM=1. Servers: `bash run.sh` (starts rag :8788 + devrag :8787 + api :8600) · web :3100 (`npm run dev`)
+- ✅ Addendum-02 CREATIVE STUDIO (docs/PRD-addendum-02.html = Phase-2 spec of record):
+  fal.ai media client (queue API; FAL_KEY in .env from Projects/creative-qc-agent; probe-
+  verified model ids NB/NB2/NBPro + veo3.1/fast/i2v + kokoro + minimax-02-hd), MOCK_MEDIA=1
+  default (SVG/ffmpeg/WAV placeholders, $0; no-ffmpeg → poster fallback for Render).
+  Creative thread driver: confidence card → route → script (per-shot edit) → voice
+  (previews) → editable prompts (verbatim, cost-gated) → generate (seam QA + 1 free auto
+  re-roll, per-asset reroll) → end-card → Post Card (one id, 3 surfaces) → next-concept
+  stitch. Plans lifecycle Planned/In production/Ready/Posted + 72h results nudge. DIY at
+  /creative. Real-fal verified: 1 nano-banana image + 1 kokoro TTS (~$0.04). 77 tests.
 - ✅ DEPLOYED 2026-08-22: github.com/APareek89/{plotline-api,plotline-web} (private, branch
   master) → Render free/singapore: web https://plotline-web.onrender.com · api
   https://plotline-api-apyq.onrender.com (srv-da4pufqfngtc73col7rg api, srv-da4pujrl550s738l6uag
@@ -62,6 +70,7 @@ events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tab
   seed.yaml retires (alias noted in kb/build_corpus.py)
 - 🤖 AGENT: exit-gate instrumentation — approval-within-≤2-regens report from concept_state.regen_count
 - 🤖 AGENT: Addendum leftovers — R6 freshness validator (needs trends corpus / plotline-curator §08); real-mode command parsing for free text beyond the deterministic grammar; context-edit re-run confirm flow; rebuild demo html on request
+- 🤖 AGENT: Addendum-02 leftovers — final stitch (shots+VO → single final.mp4, needs ffmpeg concat), carousel/image-post/audio variants (§03 table — reel path built), credits-low banner (no fal balance API wired), consent gate stub, My Space Post-Card rows, real creative-director agent (mock only; prompts ready)
 
 ## Decisions
 - 2026-08-21 — SQLite + local files for Phase-1 dev (no RDS/AWS in Claude Code lane) — PRD §7 env override; Codex owns plotline_* AWS

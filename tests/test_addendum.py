@@ -192,7 +192,7 @@ def test_pick_format_plans_in_batches_with_verdicts_and_plan():
     payload = first_concept["payload"]
     assert payload["verdict"] is not None and payload["ccs"] is not None
     assert "coverage" in payload and "provisional" in payload
-    assert [a["event"] for a in first_concept["actions"]] == ["approve", "feedback", "regenerate"]
+    assert [a["event"] for a in first_concept["actions"]] == ["approve", "feedback", "regenerate", "produce"]
     plan_msgs = [m for m in msgs if any(a["type"] == "plan" for a in m.get("artifacts", []))]
     assert plan_msgs and plan_msgs[-1]["question"] is not None
     # activity log captured proposal + any downgrades

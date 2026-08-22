@@ -157,21 +157,25 @@ def _mock_audio(text: str, dest: Path) -> Path:
 
 
 def _mock_video(prompt: str, ratio: str, duration_s: float, dest: Path) -> Path:
+    import colorsys
+
     w, h = _RATIO_PX.get(ratio, (540, 960))
     hue = int(_slug(prompt), 16) % 360
+    r, g, b = colorsys.hls_to_rgb(hue / 360, 0.25, 0.40)
+    hexcol = f"0x{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-loglevel", "error",
-             "-f", "lavfi", "-i", f"color=c=hsl({hue}\\,40%\\,25%):s={w}x{h}:d={duration_s}",
-             "-vf", f"drawtext=text='MOCK SHOT — {_slug(prompt)}':fontcolor=white:fontsize=20:x=(w-text_w)/2:y=(h-text_h)/2",
+             "-f", "lavfi", "-i", f"color=c={hexcol}:s={w}x{h}:d={duration_s}",
+             "-vf", f"drawtext=text='MOCK SHOT {_slug(prompt)}':fontcolor=white:fontsize=20:x=(w-text_w)/2:y=(h-text_h)/2",
              "-pix_fmt", "yuv420p", str(dest)],
             check=True, timeout=60,
         )
     except Exception:
-        # no ffmpeg / drawtext missing → plain color clip, still a real mp4
+        # drawtext unavailable → plain color clip, still a real mp4
         subprocess.run(
             ["ffmpeg", "-y", "-loglevel", "error",
-             "-f", "lavfi", "-i", f"color=c=gray:s={w}x{h}:d={duration_s}",
+             "-f", "lavfi", "-i", f"color=c={hexcol}:s={w}x{h}:d={duration_s}",
              "-pix_fmt", "yuv420p", str(dest)],
             check=True, timeout=60,
         )
@@ -198,16 +202,23 @@ def generate(
     name = f"{kind}_{_slug(prompt + str(seed or 0))}"
 
     if config.MOCK_MEDIA:
+        import shutil as _sh
+
+        out_kind = kind
         ext = {"image": "svg", "video": "mp4", "audio": "wav"}[kind]
+        if kind == "video" and not _sh.which("ffmpeg"):
+            # no ffmpeg (e.g. Render) → honest SVG poster instead of a broken mp4
+            out_kind, ext = "image", "svg"
         dest = config.ASSET_DIR / f"{name}.{ext}"
-        if kind == "image":
-            _mock_image(prompt, ratio, dest)
+        if out_kind == "image":
+            _mock_image(prompt if kind == "image" else f"[video poster — ffmpeg unavailable] {prompt}", ratio, dest)
         elif kind == "audio":
             _mock_audio(prompt, dest)
         else:
             _mock_video(prompt, ratio, duration_s, dest)
         logger.info("mock %s generated (%s) — $0.00", kind, dest.name)
-        return {"path": str(dest), "model": "mock", "cost": 0.0, "seed": seed, "mock": True}
+        return {"path": str(dest), "model": "mock", "cost": 0.0, "seed": seed, "mock": True,
+                "kind": out_kind}
 
     if kind == "image":
         model = config.MEDIA_MODELS["image_draft" if tier == "draft" else ("image_pro" if tier == "pro" else "image_final")]

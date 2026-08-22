@@ -411,14 +411,14 @@ def _generate_turn(thread_id: str) -> None:
             _working[thread_id] = f"animating {slot}"
             clip = generate("video", shot["motion_prompt"], duration_s=shot["duration_s"],
                             image_url=frame.get("url"))
-            cid = store.add_asset(thread_id, slot, "video", clip["path"],
+            cid = store.add_asset(thread_id, slot, clip.get("kind", "video"), clip["path"],
                                   {"model": clip["model"], "prompt": shot["motion_prompt"],
                                    "frame_asset": fid}, clip["cost"])
             store.log_generation(thread_id, cid, "generate", prompt=shot["motion_prompt"],
                                  model=clip["model"], cost=clip["cost"])
             ws["spent"] += clip["cost"]
             ws["assets"][slot] = cid
-            items.append({"asset_id": cid, "slot": slot, "kind": "video",
+            items.append({"asset_id": cid, "slot": slot, "kind": clip.get("kind", "video"),
                           "preview_url": _asset_url(cid), "status": "ready", "cost": clip["cost"]})
 
         # VO track (chosen voice, final tier)
