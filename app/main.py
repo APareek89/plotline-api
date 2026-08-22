@@ -6,6 +6,7 @@ vectors itself. Run: uvicorn app.main:app --port 8600
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import shutil
 from typing import Any, Optional
@@ -41,9 +42,10 @@ def _rag_startup_check() -> None:
     except RagUnavailable as exc:
         logging.getLogger("plotline.rag").warning("plotline-rag not reachable at startup: %s", exc)
 
+_extra_origins = [o.strip() for o in os.environ.get("PLOTLINE_CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3100", "http://127.0.0.1:3100"],
+    allow_origins=["http://localhost:3100", "http://127.0.0.1:3100", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
