@@ -41,6 +41,13 @@ events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tab
   (§01-§04). 69 tests, 20/20 evals. Old stage UI kept at /studio/[seriesId] as the
   plan board (panel "Expand" target); demo-v2 html stale per §09.
 - ▶ Runs in MOCK_LLM=1. Servers: `bash run.sh` (starts rag :8788 + devrag :8787 + api :8600) · web :3100 (`npm run dev`)
+- ✅ DEPLOYED 2026-08-22: github.com/APareek89/{plotline-api,plotline-web} (private, branch
+  master) → Render free/singapore: web https://plotline-web.onrender.com · api
+  https://plotline-api-apyq.onrender.com (srv-da4pufqfngtc73col7rg api, srv-da4pujrl550s738l6uag
+  web; owner tea-d3af7615pdvs73cqm9f0; key ~/.claude/secrets/render-api-key). Cloud runs
+  MOCK_LLM=1 with devrag as primary+aux (sample data, no AWS/Anthropic in cloud);
+  render-start.sh boots both. CAVEATS: free tier spins down (~50s cold start); SQLite on
+  ephemeral disk — threads/series reset on redeploy; autoDeploy on push to master.
 - ▶ Loop.MD status: offered (awaiting user's answer)
 
 ## Pending points
