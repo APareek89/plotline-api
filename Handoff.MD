@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `dc5379c` (plotline-api) · `2d01541` (plotline-web)
+last-synced: `7403fd9` (plotline-api) · `0146691` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
@@ -10,10 +10,12 @@ last-synced: `dc5379c` (plotline-api) · `2d01541` (plotline-web)
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
 
 ## Compact summary of previous session
-Phase 1 built from the PRD (docs/PRD-v1.txt) and verified end-to-end in the browser:
-context form → intake → inspiration cards (sample-data label) → plan pipeline (plan →
-red-team → refine → options) → concept cards with CCF scoresheets → approve/regenerate/
-reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/20 evals.
+Phase 1 built + RAG/KB integrated + **Addendum-01 applied** (docs/PRD-addendum-01.html —
+chat-first Content Studio; supersedes v1 §12 Content Studio row). Browser-verified:
+context blocks (+3 required positioning fields) → thread with pinned context summary →
+inspiration → PASS 0.5 format options (format-library corpus citations) → concept
+batches of 3 with verdicts/coverage → dual-path approvals (typed + buttons, same
+events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tabs.
 
 ## Ownership (changed 2026-08-22)
 - Claude owns the WHOLE stack in THIS repo: api + rag/ (retrieval service) + kb/ (corpus
@@ -32,6 +34,12 @@ reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/2
 - ✅ kb/ corpus pipeline: kb/sources/*.yaml → `make -C rag kb` → rag/data/best_practice.jsonl
   (validates ids/tiers/urls/text; official/expert tiers REQUIRE real http(s) urls; seed
   chunks pin hashes so sync stays no-op). Then `make -C rag index eval sync`.
+- ✅ Addendum-01: AgentMessage/UserEvent envelope (§05), thread driver + command parser,
+  R2/R3 validators + saturation guard + platform hard filter + evidence-coverage %/
+  PROVISIONAL + niche gate + thin-plan escalation (§7.2/7.3), prompt deltas (§06),
+  format-library corpus (15 curated chunks, synced to S3/DDB — 25 total), chat UI
+  (§01-§04). 69 tests, 20/20 evals. Old stage UI kept at /studio/[seriesId] as the
+  plan board (panel "Expand" target); demo-v2 html stale per §09.
 - ▶ Runs in MOCK_LLM=1. Servers: `bash run.sh` (starts rag :8788 + devrag :8787 + api :8600) · web :3100 (`npm run dev`)
 - ▶ Loop.MD status: offered (awaiting user's answer)
 
@@ -46,6 +54,7 @@ reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/2
 - 🤖 AGENT: platform vocab drift — corpus uses "twitter", app uses "x"; normalize when
   seed.yaml retires (alias noted in kb/build_corpus.py)
 - 🤖 AGENT: exit-gate instrumentation — approval-within-≤2-regens report from concept_state.regen_count
+- 🤖 AGENT: Addendum leftovers — R6 freshness validator (needs trends corpus / plotline-curator §08); real-mode command parsing for free text beyond the deterministic grammar; context-edit re-run confirm flow; rebuild demo html on request
 
 ## Decisions
 - 2026-08-21 — SQLite + local files for Phase-1 dev (no RDS/AWS in Claude Code lane) — PRD §7 env override; Codex owns plotline_* AWS
