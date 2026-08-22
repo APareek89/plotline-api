@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `17d4dd7` (plotline-api) · `2d01541` (plotline-web)
+last-synced: `dc5379c` (plotline-api) · `2d01541` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
@@ -55,3 +55,4 @@ reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/2
 - 2026-08-21 — Ports: api 8600, web 3100, RAG 8787 (frozen) — avoid clashes with other local projects
 - 2026-08-21 — DS: cobalt #2946E5 + Avenir Next system stack; Inter/#6933fa banned per PRD §12
 - 2026-08-21 — Git checkpoints: AUTO (user chose in power-coding setup, supersedes earlier propose-only rule for checkpoints)
+- 2026-08-22 — Ownership takeover: rag+kb absorbed into plotline-api, Claude owns full stack, Codex delegate-only — user decision; AWS fence carried over binding
