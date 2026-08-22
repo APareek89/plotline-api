@@ -1,0 +1,139 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Architecture Flow</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:1100px;margin:0 auto;padding:24px 20px 80px;color:#1f2937;background:#fafafa}
+ h1{border-bottom:2px solid #e5e7eb;padding-bottom:8px}
+ h2{margin-top:36px;border-top:1px solid #e5e7eb;padding-top:18px;color:#111827}
+ pre.mermaid{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:14px 0 28px;overflow:auto;text-align:center}
+ .hint{position:sticky;top:0;background:#fff8e1;border:1px solid #f0d264;border-radius:6px;padding:8px 12px;font-size:13px;color:#5a4a00;margin-bottom:16px}
+ .mermaid svg{max-width:100%;height:auto}
+</style></head><body>
+<div class="hint">Tip: use Ctrl/Cmd + scroll or browser zoom to enlarge a diagram.</div>
+<h1>Architecture Flow</h1>
+<h2>01 plotline-rag master flow</h2>
+<pre class="mermaid">%% 01 plotline-rag master flow
+%% files: src/plotline_rag/index/build.py, src/plotline_rag/service.py
+%% granularity: master
+flowchart TD
+  A["Validated KB JSONL&lt;br/&gt;[DATA · local file]&lt;br/&gt;in: plotline-kb chunks&lt;br/&gt;out: validated corpus"]:::data
+  B["Build hybrid index&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: validated chunks&lt;br/&gt;out: embeddings, BM25, manifest"]:::fn
+  C["Local cache&lt;br/&gt;[DATA · .cache]&lt;br/&gt;in: index bundle&lt;br/&gt;out: offline-ready artifacts"]:::data
+  D["AWS sync&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: hashed bundle and chunks&lt;br/&gt;out: idempotent S3 and DDB state"]:::fn
+  E["S3 and DynamoDB&lt;br/&gt;[DATA · AWS]&lt;br/&gt;in: bundle and resolvable IDs&lt;br/&gt;out: source of truth"]:::data
+  F["FastAPI startup&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: config and cache state&lt;br/&gt;out: loaded search engine"]:::fn
+  G{"Index source&lt;br/&gt;[FUNCTION]&lt;br/&gt;S3 marker present and online?"}:::dec
+  H["Request router&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: bounded Pydantic HTTP request&lt;br/&gt;out: search or validation call, logged resolver failures"]:::fn
+  I["Hybrid search&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: query, filters, k&lt;br/&gt;out: ranked evidence"]:::fn
+  J["Source-ID validation&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: claimed IDs&lt;br/&gt;out: resolved and unresolved IDs"]:::fn
+  K["JSON response&lt;br/&gt;[DATA · API result]&lt;br/&gt;in: evidence or ID status&lt;br/&gt;out: frozen service contract"]:::term
+
+  A --&gt; B --&gt; C --&gt; D --&gt; E
+  C --&gt; F
+  E --&gt; F
+  F --&gt; G
+  G --&gt;|"yes · refresh ETag cache"| E
+  G --&gt;|"no · local or offline cache"| C
+  G --&gt; H
+  H --&gt;|"POST /search_corpus"| I --&gt; K
+  H --&gt;|"POST /resolve_source_ids"| J --&gt; K
+
+  classDef agent fill:#dbeafe,stroke:#2563eb,color:#0b2a5b;
+  classDef fn fill:#dcfce7,stroke:#16a34a,color:#052e16;
+  classDef dec fill:#f3e8ff,stroke:#9333ea,color:#2a0a4a;
+  classDef term fill:#e5e7eb,stroke:#6b7280,color:#111827;
+  classDef ask fill:#cffafe,stroke:#0891b2,color:#083344;
+  classDef data fill:#ede9fe,stroke:#7c3aed,color:#2a0a4a;
+</pre>
+<h2>02 index build and sync flow</h2>
+<pre class="mermaid">%% 02 index build and sync flow
+%% files: src/plotline_rag/index/build.py, src/plotline_rag/index/embed.py, src/plotline_rag/store/s3.py, src/plotline_rag/store/ddb.py
+%% granularity: full
+flowchart TD
+  A["Read JSONL&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: one JSON object per line&lt;br/&gt;out: Pydantic KBChunk list"]:::fn
+  B{"Corpus ceiling&lt;br/&gt;[FUNCTION]&lt;br/&gt;chunk count at most 20,000?"}:::dec
+  C["Reject build&lt;br/&gt;[DATA · error]&lt;br/&gt;in: invalid or oversized corpus&lt;br/&gt;out: actionable failure"]:::term
+  D["Embed documents&lt;br/&gt;[LIBRARY · FastEmbed ONNX]&lt;br/&gt;in: chunk text&lt;br/&gt;out: normalized float32 matrix"]:::data
+  E["Tokenize corpus&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: chunk text&lt;br/&gt;out: lowercase term lists"]:::fn
+  F["Build BM25&lt;br/&gt;[LIBRARY · rank-bm25]&lt;br/&gt;in: token lists&lt;br/&gt;out: BM25Okapi index"]:::data
+  G["Write NPZ and pickle&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: matrix, IDs, BM25&lt;br/&gt;out: cached artifacts"]:::fn
+  H["Hash manifest&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: JSONL and artifacts&lt;br/&gt;out: model, dim, count, SHA-256"]:::fn
+  I{"Sync mode&lt;br/&gt;[FUNCTION]&lt;br/&gt;dry run?"}:::dec
+  J["Validation report&lt;br/&gt;[DATA · CLI result]&lt;br/&gt;in: manifest&lt;br/&gt;out: no AWS mutation"]:::term
+  Q{"AWS cost fence&lt;br/&gt;[FUNCTION]&lt;br/&gt;all plotline tables provisioned and total at most 10 RCU and 10 WCU?"}:::dec
+  R["Refuse sync&lt;br/&gt;[DATA · error]&lt;br/&gt;in: unsafe billing or capacity&lt;br/&gt;out: no S3 or DDB mutation"]:::term
+  K{"Remote bundle current&lt;br/&gt;[FUNCTION]&lt;br/&gt;manifest and all object hashes match?"}:::dec
+  L["Upload bundle&lt;br/&gt;[LIBRARY · boto3 S3]&lt;br/&gt;in: four local files&lt;br/&gt;out: private S3 objects"]:::data
+  M{"Chunk hash current&lt;br/&gt;[FUNCTION]&lt;br/&gt;DynamoDB item hash matches?"}:::dec
+  N["Batch write one item&lt;br/&gt;[LIBRARY · boto3 DynamoDB]&lt;br/&gt;in: serialized chunk item&lt;br/&gt;out: stored source ID or error after 8 unprocessed retries"]:::data
+  O["WCU throttle&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: item size and elapsed time&lt;br/&gt;out: sleep at least units divided by 1 WCU"]:::fn
+  P["Sync report&lt;br/&gt;[DATA · CLI result]&lt;br/&gt;in: uploaded, written, skipped&lt;br/&gt;out: idempotency evidence"]:::term
+
+  A --&gt; B
+  B --&gt;|"no"| C
+  B --&gt;|"yes"| D --&gt; G
+  B --&gt;|"yes"| E --&gt; F --&gt; G
+  G --&gt; H --&gt; I
+  I --&gt;|"yes"| J
+  I --&gt;|"no"| Q
+  Q --&gt;|"no"| R
+  Q --&gt;|"yes"| K
+  K --&gt;|"no"| L --&gt; M
+  K --&gt;|"yes · skip S3"| M
+  M --&gt;|"yes · skip item"| P
+  M --&gt;|"no"| N --&gt; O --&gt; P
+
+  classDef agent fill:#dbeafe,stroke:#2563eb,color:#0b2a5b;
+  classDef fn fill:#dcfce7,stroke:#16a34a,color:#052e16;
+  classDef dec fill:#f3e8ff,stroke:#9333ea,color:#2a0a4a;
+  classDef term fill:#e5e7eb,stroke:#6b7280,color:#111827;
+  classDef ask fill:#cffafe,stroke:#0891b2,color:#083344;
+  classDef data fill:#ede9fe,stroke:#7c3aed,color:#2a0a4a;
+</pre>
+<h2>03 search and source resolution flow</h2>
+<pre class="mermaid">%% 03 search and source resolution flow
+%% files: src/plotline_rag/schema.py, src/plotline_rag/search/hybrid.py, src/plotline_rag/service.py
+%% granularity: full
+flowchart TD
+  A["Validate request&lt;br/&gt;[LIBRARY · Pydantic]&lt;br/&gt;in: query at most 4,000 chars, k at most 50, filters, corpus&lt;br/&gt;out: normalized SearchRequest"]:::data
+  B["Filter candidates&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: chunks and metadata filters&lt;br/&gt;out: eligible row indexes"]:::fn
+  C{"Candidates exist&lt;br/&gt;[FUNCTION]&lt;br/&gt;eligible count greater than zero?"}:::dec
+  D["Empty results&lt;br/&gt;[DATA · API result]&lt;br/&gt;in: no candidates&lt;br/&gt;out: empty list plus manifest"]:::term
+  E["Embed query&lt;br/&gt;[LIBRARY · FastEmbed ONNX]&lt;br/&gt;in: query text&lt;br/&gt;out: normalized 384-d vector"]:::data
+  F["Dense cosine&lt;br/&gt;[LIBRARY · NumPy]&lt;br/&gt;in: matrix and query vector&lt;br/&gt;out: cosine score per candidate"]:::data
+  G["BM25 scores&lt;br/&gt;[LIBRARY · rank-bm25]&lt;br/&gt;in: query terms and BM25 index&lt;br/&gt;out: lexical score per candidate"]:::data
+  H["Reciprocal-rank fusion&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: dense and BM25 ranks&lt;br/&gt;out: fused score using rank constant 60"]:::fn
+  I{"Rerank requested&lt;br/&gt;[FUNCTION]&lt;br/&gt;rerank equals true?"}:::dec
+  J["V1 reserved error&lt;br/&gt;[DATA · HTTP 400]&lt;br/&gt;in: unsupported rerank request&lt;br/&gt;out: explicit error"]:::term
+  K["Evidence results&lt;br/&gt;[DATA · API result]&lt;br/&gt;in: top k fused rows&lt;br/&gt;out: IDs, text, scores, manifest"]:::term
+  L["Validate source IDs&lt;br/&gt;[FUNCTION]&lt;br/&gt;in: up to 100 unique IDs&lt;br/&gt;out: existence lookups"]:::fn
+  M{"Online resolver&lt;br/&gt;[FUNCTION]&lt;br/&gt;S3-backed online startup?"}:::dec
+  N["DynamoDB consistent gets&lt;br/&gt;[LIBRARY · boto3]&lt;br/&gt;in: at most 100 source_id_full keys&lt;br/&gt;out: existing IDs or logged HTTP 503"]:::data
+  O["Local cache set&lt;br/&gt;[DATA · in-memory IDs]&lt;br/&gt;in: offline source IDs&lt;br/&gt;out: existing IDs"]:::data
+  P["Resolution response&lt;br/&gt;[DATA · API result]&lt;br/&gt;in: existing ID set&lt;br/&gt;out: resolved and unresolved lists"]:::term
+
+  A --&gt; B --&gt; C
+  C --&gt;|"no"| D
+  C --&gt;|"yes"| E --&gt; F --&gt; H
+  C --&gt;|"yes"| G --&gt; H
+  H --&gt; I
+  I --&gt;|"yes"| J
+  I --&gt;|"no"| K
+  L --&gt; M
+  M --&gt;|"yes"| N --&gt; P
+  M --&gt;|"no · offline"| O --&gt; P
+
+  classDef agent fill:#dbeafe,stroke:#2563eb,color:#0b2a5b;
+  classDef fn fill:#dcfce7,stroke:#16a34a,color:#052e16;
+  classDef dec fill:#f3e8ff,stroke:#9333ea,color:#2a0a4a;
+  classDef term fill:#e5e7eb,stroke:#6b7280,color:#111827;
+  classDef ask fill:#cffafe,stroke:#0891b2,color:#083344;
+  classDef data fill:#ede9fe,stroke:#7c3aed,color:#2a0a4a;
+</pre>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad:false, securityLevel:"loose", theme:"base",
+  themeVariables:{ fontFamily:"-apple-system, Segoe UI, Roboto, sans-serif", fontSize:"14px" } });
+await mermaid.run({ querySelector:"pre.mermaid" });
+</script>
+</body></html>

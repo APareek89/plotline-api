@@ -1,0 +1,32 @@
+%% 01 plotline-rag master flow
+%% files: src/plotline_rag/index/build.py, src/plotline_rag/service.py
+%% granularity: master
+flowchart TD
+  A["Validated KB JSONL<br/>[DATA · local file]<br/>in: plotline-kb chunks<br/>out: validated corpus"]:::data
+  B["Build hybrid index<br/>[FUNCTION]<br/>in: validated chunks<br/>out: embeddings, BM25, manifest"]:::fn
+  C["Local cache<br/>[DATA · .cache]<br/>in: index bundle<br/>out: offline-ready artifacts"]:::data
+  D["AWS sync<br/>[FUNCTION]<br/>in: hashed bundle and chunks<br/>out: idempotent S3 and DDB state"]:::fn
+  E["S3 and DynamoDB<br/>[DATA · AWS]<br/>in: bundle and resolvable IDs<br/>out: source of truth"]:::data
+  F["FastAPI startup<br/>[FUNCTION]<br/>in: config and cache state<br/>out: loaded search engine"]:::fn
+  G{"Index source<br/>[FUNCTION]<br/>S3 marker present and online?"}:::dec
+  H["Request router<br/>[FUNCTION]<br/>in: bounded Pydantic HTTP request<br/>out: search or validation call, logged resolver failures"]:::fn
+  I["Hybrid search<br/>[FUNCTION]<br/>in: query, filters, k<br/>out: ranked evidence"]:::fn
+  J["Source-ID validation<br/>[FUNCTION]<br/>in: claimed IDs<br/>out: resolved and unresolved IDs"]:::fn
+  K["JSON response<br/>[DATA · API result]<br/>in: evidence or ID status<br/>out: frozen service contract"]:::term
+
+  A --> B --> C --> D --> E
+  C --> F
+  E --> F
+  F --> G
+  G -->|"yes · refresh ETag cache"| E
+  G -->|"no · local or offline cache"| C
+  G --> H
+  H -->|"POST /search_corpus"| I --> K
+  H -->|"POST /resolve_source_ids"| J --> K
+
+  classDef agent fill:#dbeafe,stroke:#2563eb,color:#0b2a5b;
+  classDef fn fill:#dcfce7,stroke:#16a34a,color:#052e16;
+  classDef dec fill:#f3e8ff,stroke:#9333ea,color:#2a0a4a;
+  classDef term fill:#e5e7eb,stroke:#6b7280,color:#111827;
+  classDef ask fill:#cffafe,stroke:#0891b2,color:#083344;
+  classDef data fill:#ede9fe,stroke:#7c3aed,color:#2a0a4a;

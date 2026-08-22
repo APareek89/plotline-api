@@ -1,0 +1,43 @@
+%% 02 index build and sync flow
+%% files: src/plotline_rag/index/build.py, src/plotline_rag/index/embed.py, src/plotline_rag/store/s3.py, src/plotline_rag/store/ddb.py
+%% granularity: full
+flowchart TD
+  A["Read JSONL<br/>[FUNCTION]<br/>in: one JSON object per line<br/>out: Pydantic KBChunk list"]:::fn
+  B{"Corpus ceiling<br/>[FUNCTION]<br/>chunk count at most 20,000?"}:::dec
+  C["Reject build<br/>[DATA · error]<br/>in: invalid or oversized corpus<br/>out: actionable failure"]:::term
+  D["Embed documents<br/>[LIBRARY · FastEmbed ONNX]<br/>in: chunk text<br/>out: normalized float32 matrix"]:::data
+  E["Tokenize corpus<br/>[FUNCTION]<br/>in: chunk text<br/>out: lowercase term lists"]:::fn
+  F["Build BM25<br/>[LIBRARY · rank-bm25]<br/>in: token lists<br/>out: BM25Okapi index"]:::data
+  G["Write NPZ and pickle<br/>[FUNCTION]<br/>in: matrix, IDs, BM25<br/>out: cached artifacts"]:::fn
+  H["Hash manifest<br/>[FUNCTION]<br/>in: JSONL and artifacts<br/>out: model, dim, count, SHA-256"]:::fn
+  I{"Sync mode<br/>[FUNCTION]<br/>dry run?"}:::dec
+  J["Validation report<br/>[DATA · CLI result]<br/>in: manifest<br/>out: no AWS mutation"]:::term
+  Q{"AWS cost fence<br/>[FUNCTION]<br/>all plotline tables provisioned and total at most 10 RCU and 10 WCU?"}:::dec
+  R["Refuse sync<br/>[DATA · error]<br/>in: unsafe billing or capacity<br/>out: no S3 or DDB mutation"]:::term
+  K{"Remote bundle current<br/>[FUNCTION]<br/>manifest and all object hashes match?"}:::dec
+  L["Upload bundle<br/>[LIBRARY · boto3 S3]<br/>in: four local files<br/>out: private S3 objects"]:::data
+  M{"Chunk hash current<br/>[FUNCTION]<br/>DynamoDB item hash matches?"}:::dec
+  N["Batch write one item<br/>[LIBRARY · boto3 DynamoDB]<br/>in: serialized chunk item<br/>out: stored source ID or error after 8 unprocessed retries"]:::data
+  O["WCU throttle<br/>[FUNCTION]<br/>in: item size and elapsed time<br/>out: sleep at least units divided by 1 WCU"]:::fn
+  P["Sync report<br/>[DATA · CLI result]<br/>in: uploaded, written, skipped<br/>out: idempotency evidence"]:::term
+
+  A --> B
+  B -->|"no"| C
+  B -->|"yes"| D --> G
+  B -->|"yes"| E --> F --> G
+  G --> H --> I
+  I -->|"yes"| J
+  I -->|"no"| Q
+  Q -->|"no"| R
+  Q -->|"yes"| K
+  K -->|"no"| L --> M
+  K -->|"yes · skip S3"| M
+  M -->|"yes · skip item"| P
+  M -->|"no"| N --> O --> P
+
+  classDef agent fill:#dbeafe,stroke:#2563eb,color:#0b2a5b;
+  classDef fn fill:#dcfce7,stroke:#16a34a,color:#052e16;
+  classDef dec fill:#f3e8ff,stroke:#9333ea,color:#2a0a4a;
+  classDef term fill:#e5e7eb,stroke:#6b7280,color:#111827;
+  classDef ask fill:#cffafe,stroke:#0891b2,color:#083344;
+  classDef data fill:#ede9fe,stroke:#7c3aed,color:#2a0a4a;

@@ -15,21 +15,36 @@ context form → intake → inspiration cards (sample-data label) → plan pipel
 red-team → refine → options) → concept cards with CCF scoresheets → approve/regenerate/
 reorder → Plans tab → My Space (profile + performance paste). 23 tests, 20/20 evals.
 
+## Ownership (changed 2026-08-22)
+- Claude owns the WHOLE stack in THIS repo: api + rag/ (retrieval service) + kb/ (corpus
+  pipeline) + devrag. Codex gets specific delegated tasks only — no standing lane.
+- ~/Documents/plotline-rag is SUPERSEDED by rag/ here (moved 2026-08-22, no git history
+  existed). Safe for the user to archive/delete.
+- AWS fence (binding, from Codex's handoff): profile `plotline-agent`, region ap-south-1,
+  `plotline-*` buckets + `plotline_*` tables ONLY; never touch aarav-*/Handson. DynamoDB
+  stays PROVISIONED 1RCU/1WCU. No LLM calls inside rag/.
+
 ## Current state
-- ✅ Shipped: full Phase-1 planning product, both repos (see git log & Learning.MD)
-- ✅ Codex's plotline-rag (~/Documents/plotline-rag, S3+DynamoDB, ap-south-1) wired in:
-  RoutingRag routes chunk:* → plotline-rag :8788, asset:/stat:/trend:* → devrag aux :8787.
-  Two-layer citation validation (local subset + remote resolve), seed-tier gate, bounded
-  retries. 41 tests, 20/20 evals, live-verified (plan cited chunk:C0001 via DynamoDB).
-- ▶ Runs in MOCK_LLM=1. Servers: `bash run.sh` (starts plotline-rag :8788 + devrag :8787 + api :8600) · web :3100 (`npm run dev`)
+- ✅ Shipped: full Phase-1 planning product + integrated RAG/KB (see git log & Learning.MD)
+- ✅ rag/ (S3+DynamoDB, hybrid RRF, :8788): RoutingRag routes chunk:* → rag :8788,
+  asset:/stat:/trend:* → devrag aux :8787. Two-layer citation validation, seed gate,
+  bounded retries. 53 tests (41 api + 12 rag), 20/20 evals, recall@5 10/10, live-verified.
+- ✅ kb/ corpus pipeline: kb/sources/*.yaml → `make -C rag kb` → rag/data/best_practice.jsonl
+  (validates ids/tiers/urls/text; official/expert tiers REQUIRE real http(s) urls; seed
+  chunks pin hashes so sync stays no-op). Then `make -C rag index eval sync`.
+- ▶ Runs in MOCK_LLM=1. Servers: `bash run.sh` (starts rag :8788 + devrag :8787 + api :8600) · web :3100 (`npm run dev`)
 - ▶ Loop.MD status: offered (awaiting user's answer)
 
 ## Pending points
 - 🧑 USER: copy the ANTHROPIC_API_KEY line into plotline-api/.env yourself; set MOCK_LLM=0 to go live, then run one real plan + the golden set
 - 🧑 USER: answer the Loop offer; edit Loop.MD goal/evals to make them yours
 - 🧑 USER: PRD open calls — trademark check on "Plotline"; pricing currency INR vs USD
-- 🤖 AGENT: when plotline-kb's validated corpus replaces the 10 seed chunks (Codex: make index/eval/sync), set PLOTLINE_ALLOW_SEED_EVIDENCE=0 in .env and re-run evals
-- 🤖 AGENT: when plotline-rag hosts asset:/stat:/trend: corpora, drop devrag + PLOTLINE_AUX_RAG_URL (routing collapses to one backend)
+- 🤖 AGENT: author the real curated corpus in kb/sources/ (target ≥60 chunks; official/expert
+  tiers need real URLs), retire seed.yaml, set PLOTLINE_ALLOW_SEED_EVIDENCE=0, re-run evals
+- 🤖 AGENT: port asset:/stat:/trend: corpora into rag/ (multi-corpus), drop devrag +
+  PLOTLINE_AUX_RAG_URL (routing collapses to one backend)
+- 🤖 AGENT: platform vocab drift — corpus uses "twitter", app uses "x"; normalize when
+  seed.yaml retires (alias noted in kb/build_corpus.py)
 - 🤖 AGENT: exit-gate instrumentation — approval-within-≤2-regens report from concept_state.regen_count
 
 ## Decisions

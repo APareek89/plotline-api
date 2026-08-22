@@ -1,0 +1,4 @@
+"""Plotline local-first retrieval service."""
+
+__version__ = "0.1.0"
+

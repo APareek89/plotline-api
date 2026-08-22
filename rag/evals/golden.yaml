@@ -1,0 +1,21 @@
+- query: "how long should a YouTube Short be for retention"
+  expected: ["chunk:C0001"]
+- query: "what should the opening hook of an Instagram Reel do"
+  expected: ["chunk:C0002"]
+- query: "how should I evaluate TikTok completion rate and rewatches"
+  expected: ["chunk:C0003"]
+- query: "what is a sustainable LinkedIn posting cadence"
+  expected: ["chunk:C0004"]
+- query: "how should I structure an X Twitter thread"
+  expected: ["chunk:C0005"]
+- query: "why should social videos include accurate captions"
+  expected: ["chunk:C0006"]
+- query: "how should YouTube thumbnails and titles work together for CTR"
+  expected: ["chunk:C0007"]
+- query: "how should a creator reply to audience comments"
+  expected: ["chunk:C0008"]
+- query: "how do I test one creative variable without noisy conclusions"
+  expected: ["chunk:C0009"]
+- query: "where should a sponsorship disclosure appear"
+  expected: ["chunk:C0010"]
+

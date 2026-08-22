@@ -27,3 +27,13 @@ resolve, both fail closed. tier="seed" evidence rejected unless PLOTLINE_ALLOW_S
 **Preventive action:** When two repos share a "frozen" contract, freeze it as executable
 fixtures (recorded request/response pairs), not prose — the normalizer in rag_client.py
 now tolerates both shapes so the next drift degrades gracefully.
+
+### 2026-08-21 — (inherited from Codex/rag) DynamoDB batch items were double-serialized
+
+**Symptom:** Mocked DynamoDB store rejected `source_id_full` as a map instead of a string.
+**Why:** Values were serialized once in code and again by the resource client's handlers —
+`resource.meta.client` keeps resource-layer transforms; the batch path mixed API levels.
+**Action taken (Codex):** Separate `session.client("dynamodb")` for typed batch writes;
+Table resource only for ordinary gets. Lives in rag/src/plotline_rag/store/ddb.py.
+**Preventive action:** Test every persistence adapter through moto at the SAME API level
+and request shape production uses.

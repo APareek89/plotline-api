@@ -1,0 +1,234 @@
+source: development seed corpus (Codex bootstrap 2026-08-21) — replace with real KB chunks; delete this
+  file when the curated corpus fully covers it
+chunks:
+- id: seed-001
+  source_id: C0001
+  source_url: urn:plotline:seed:C0001
+  source_tier: seed
+  title: YouTube Shorts length and retention
+  text: 'Development seed: For YouTube Shorts, choose the shortest duration that delivers the complete
+    idea. Remove slow introductions, show the payoff early, and inspect audience-retention drop-offs before
+    changing length.'
+  platform:
+  - youtube
+  topic:
+  - retention
+  - duration
+  content_type:
+  - short_video
+  claim_type: heuristic
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0001-v1
+- id: seed-002
+  source_id: C0002
+  source_url: urn:plotline:seed:C0002
+  source_tier: seed
+  title: Instagram Reels opening hook
+  text: 'Development seed: An Instagram Reel should establish the subject or tension in its opening moments.
+    Use a clear visual change, concise on-screen premise, or immediate demonstration instead of a generic
+    greeting.'
+  platform:
+  - instagram
+  topic:
+  - hooks
+  - retention
+  content_type:
+  - reel
+  - short_video
+  claim_type: heuristic
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0002-v1
+- id: seed-003
+  source_id: C0003
+  source_url: urn:plotline:seed:C0003
+  source_tier: seed
+  title: TikTok completion and rewatch
+  text: 'Development seed: For TikTok videos, make the ending resolve the opening promise and consider
+    a natural visual loop. Compare completion rate and rewatches with similar videos rather than optimizing
+    raw views alone.'
+  platform:
+  - tiktok
+  topic:
+  - completion_rate
+  - rewatch
+  - analytics
+  content_type:
+  - short_video
+  claim_type: heuristic
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0003-v1
+- id: seed-004
+  source_id: C0004
+  source_url: urn:plotline:seed:C0004
+  source_tier: seed
+  title: LinkedIn professional posting cadence
+  text: 'Development seed: A sustainable LinkedIn cadence is more useful than bursts followed by silence.
+    Publish when there is a concrete professional insight, maintain consistent quality, and adjust cadence
+    using follower and conversation signals.'
+  platform:
+  - linkedin
+  topic:
+  - cadence
+  - community
+  content_type:
+  - post
+  claim_type: heuristic
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0004-v1
+- id: seed-005
+  source_id: C0005
+  source_url: urn:plotline:seed:C0005
+  source_tier: seed
+  title: X thread structure
+  text: 'Development seed: Structure an X thread so the first post states a specific promise, each reply
+    advances one idea, and the final reply summarizes the takeaway. Remove replies that repeat context
+    without adding evidence.'
+  platform:
+  - x
+  - twitter
+  topic:
+  - structure
+  - writing
+  content_type:
+  - thread
+  claim_type: heuristic
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0005-v1
+- id: seed-006
+  source_id: C0006
+  source_url: urn:plotline:seed:C0006
+  source_tier: seed
+  title: Captions and accessible video
+  text: 'Development seed: Add accurate captions to social video so the message remains understandable
+    without sound and is accessible to more viewers. Review automated captions for names, technical terms,
+    timing, and speaker changes.'
+  platform:
+  - youtube
+  - instagram
+  - tiktok
+  - linkedin
+  topic:
+  - accessibility
+  - captions
+  content_type:
+  - video
+  - short_video
+  claim_type: practice
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0006-v1
+- id: seed-007
+  source_id: C0007
+  source_url: urn:plotline:seed:C0007
+  source_tier: seed
+  title: YouTube thumbnail and title pairing
+  text: 'Development seed: Treat a YouTube title and thumbnail as one promise. Make them complementary
+    rather than repetitive, accurately represent the video, and compare click-through rate alongside watch
+    quality to avoid misleading packaging.'
+  platform:
+  - youtube
+  topic:
+  - thumbnail
+  - title
+  - click_through_rate
+  content_type:
+  - long_video
+  claim_type: heuristic
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0007-v1
+- id: seed-008
+  source_id: C0008
+  source_url: urn:plotline:seed:C0008
+  source_tier: seed
+  title: Replying to audience comments
+  text: 'Development seed: Reply to meaningful audience comments with specific, useful responses. Questions
+    and corrections can reveal follow-up topics; avoid generic engagement bait and do not reward abusive
+    conversations.'
+  platform:
+  - youtube
+  - instagram
+  - tiktok
+  - linkedin
+  - x
+  topic:
+  - community
+  - comments
+  content_type:
+  - community_management
+  claim_type: practice
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0008-v1
+- id: seed-009
+  source_id: C0009
+  source_url: urn:plotline:seed:C0009
+  source_tier: seed
+  title: Testing one creative variable
+  text: 'Development seed: When comparing content performance, change one meaningful creative variable
+    at a time when practical, document the hypothesis, and compare like-for-like formats and audiences.
+    Avoid declaring a winner from one noisy result.'
+  platform:
+  - youtube
+  - instagram
+  - tiktok
+  - linkedin
+  - x
+  topic:
+  - experimentation
+  - analytics
+  content_type:
+  - analysis
+  claim_type: method
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0009-v1
+- id: seed-010
+  source_id: C0010
+  source_url: urn:plotline:seed:C0010
+  source_tier: seed
+  title: Clear sponsorship disclosure
+  text: 'Development seed: Disclose sponsored or materially connected content clearly and close to the
+    endorsement. Use language the audience will understand; do not hide the disclosure among hashtags
+    or only on a profile page.'
+  platform:
+  - youtube
+  - instagram
+  - tiktok
+  - linkedin
+  - x
+  topic:
+  - disclosure
+  - sponsorship
+  - trust
+  content_type:
+  - sponsored_content
+  claim_type: compliance
+  quotes: []
+  stats: []
+  published: null
+  retrieved_at: '2026-08-21T00:00:00Z'
+  hash: seed-C0010-v1

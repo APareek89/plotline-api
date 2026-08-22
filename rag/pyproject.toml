@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plotline-rag"
+version = "0.1.0"
+description = "Local-first hybrid retrieval service for Plotline planning agents"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "boto3>=1.35,<2",
+  "fastapi>=0.115,<1",
+  "fastembed>=0.6,<1",
+  "numpy>=2,<3",
+  "pydantic>=2.10,<3",
+  "python-dotenv>=1,<2",
+  "PyYAML>=6,<7",
+  "rank-bm25>=0.2.2,<1",
+  "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+test = [
+  "moto[s3,dynamodb]>=5,<6",
+  "pytest>=8,<9",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
