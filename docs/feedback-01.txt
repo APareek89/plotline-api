@@ -1,0 +1,58 @@
+﻿Feedback: 1
+See image below:
+Fix 1: the side panel should be almost touching the left boundary of screen
+Fix 2: Only Chat window should cover almost entire space next to side panel (same as in claude code)
+Fix 3: when a specific card is clicked 40% of the chat window space should be taken over by the information in card
+Fix 4: the card information should be shown clearly with proper alignment, formatting, no overlaps or white space access
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+See below image:
+Fix 1: occupy complete space from left to right including top nav bar
+Fix 2: keep everything in view port no scrolling so accordingly adjust input panels and boxes while keping good UI
+  
+
+
+
+Guiding principles for complete application:
+1. No unnecessary empty or unused space on the window
+2. Clean formatting, display of content
