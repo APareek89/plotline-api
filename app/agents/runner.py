@@ -97,6 +97,34 @@ def extract_json(text: str) -> Any:
     return json.loads(stripped[start : end + 1])
 
 
+def unwrap_envelope(data: Any, schema: Type[BaseModel]) -> Any:
+    """Real-mode models following the Addendum-01 conversational protocol
+    sometimes wrap their payload in an AgentMessage envelope ({text, artifacts,
+    question}). The SERVER owns the envelope — if the expected schema isn't
+    AgentMessage itself, pull the payload back out of the wrapper."""
+    if (
+        schema.__name__ != "AgentMessage"
+        and isinstance(data, dict)
+        and isinstance(data.get("artifacts"), list)
+        and ("text" in data or "question" in data)
+    ):
+        for artifact in data["artifacts"]:
+            payload = artifact.get("payload") if isinstance(artifact, dict) else None
+            if isinstance(payload, dict):
+                try:
+                    schema.model_validate(payload)
+                    return payload
+                except ValidationError:
+                    continue
+        # single artifact but its payload didn't validate → return it anyway so
+        # the retry error names the REAL schema gap, not the envelope wrapper
+        if len(data["artifacts"]) == 1 and isinstance(data["artifacts"][0], dict):
+            payload = data["artifacts"][0].get("payload")
+            if isinstance(payload, dict):
+                return payload
+    return data
+
+
 def _llm_call(
     model: str,
     system: str,
@@ -185,7 +213,7 @@ def run_agent(
                         }
                     )
                 text = _llm_call(model, system, messages, dispatcher, use_tools)
-                data = extract_json(text)
+                data = unwrap_envelope(extract_json(text), schema)
 
             obj = schema.model_validate(data)
             if validate is not None:

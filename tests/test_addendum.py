@@ -228,3 +228,22 @@ def test_saturation_guard_below_threshold(monkeypatch):
     for verdict in feedback.concept_verdicts:
         assert verdict.lenses.saturation.insufficient_data is True
         assert "7" in (verdict.lenses.saturation.note or "")
+
+
+def test_envelope_wrapped_output_is_unwrapped():
+    """Real-mode models sometimes follow protocol rule 10 too literally and
+    wrap their schema in an AgentMessage envelope — the runner unwraps it."""
+    from app.agents.runner import unwrap_envelope
+    from app.schemas import FormatOptions
+
+    bare = {"options": [
+        {"format_id": "f1", "name": "N", "vehicle": "v", "why_fits": "w",
+         "evidence": [], "effort": "S", "cadence_fit": "weekly"},
+        {"format_id": "f2", "name": "N2", "vehicle": "v", "why_fits": "w",
+         "evidence": [], "effort": "M", "cadence_fit": "weekly"},
+    ]}
+    wrapped = {"text": "Here are 3 series formats.", "question": "Which?",
+               "artifacts": [{"id": "format_options", "type": "format_options",
+                              "title": "Formats", "payload": bare}]}
+    assert unwrap_envelope(wrapped, FormatOptions) == bare
+    assert unwrap_envelope(bare, FormatOptions) == bare  # bare passes through

@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `f8d656e` (plotline-api) · `2eb6138` (plotline-web)
+last-synced: `3400b39` (plotline-api) · `399a798` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
@@ -8,6 +8,19 @@ last-synced: `f8d656e` (plotline-api) · `2eb6138` (plotline-web)
 > UPDATE on concrete events: before every checkpoint commit · end of every phase ·
 > low-context signal (secondary). Snapshot, not journal; re-stamp `last-synced`.
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
+
+## Monday pickup (2026-08-25) — state as of Fri 22 Aug EOD
+- Feedback-1 (Google Doc) APPLIED app-wide: full-bleed layout (rail flush left, chat fills
+  width, panel = 40%, nav spans window), context form fits one viewport, Plans/DIY densified.
+  Doc archived at docs/feedback-01.txt reference; guiding principles: no dead space, clean formatting.
+- REAL-MODE BUG FIXED (untested live): planner.formats failed because real Sonnet wrapped
+  FormatOptions in the AgentMessage envelope (protocol rule 10 read too literally).
+  Fix = runner.unwrap_envelope() + shared_policy rule 15 (v1.3.0) "server owns the envelope".
+  → FIRST THING MONDAY: re-run a real-mode plan (MOCK_LLM=0) end-to-end to confirm.
+- fal LIVE ON RENDER: FAL_KEY + MOCK_MEDIA=0 set on srv-da4pufqfngtc73col7rg — the PUBLIC
+  demo now spends real fal money per generation (no auth on the app). Watch spend / consider
+  reverting MOCK_MEDIA=1 or adding an auth gate.
+- User has been testing real mode locally (threads "Real-mode smoke — 01" etc. in dev DB).
 
 ## Compact summary of previous session
 Phase 1 built + RAG/KB integrated + **Addendum-01 applied** (docs/PRD-addendum-01.html —
