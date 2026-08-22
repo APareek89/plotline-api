@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import config, orchestrator, store
+from app import config, creative, orchestrator, store
 from app import thread as thread_driver
 from app.agents.runner import AgentHardFail
 from app.orchestrator import run_events
@@ -228,8 +228,14 @@ def get_thread(thread_id: str, after_seq: int = 0) -> dict[str, Any]:
 def post_event(thread_id: str, body: UserEvent) -> dict[str, Any]:
     if body.thread_id != thread_id:
         raise HTTPException(422, "thread_id mismatch")
+    thread = store.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(404, "thread not found")
     try:
-        thread_driver.handle_event(body)
+        if thread["kind"] == "creative":
+            creative.handle_event(body)
+        else:
+            thread_driver.handle_event(body)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"ok": True}
@@ -238,6 +244,150 @@ def post_event(thread_id: str, body: UserEvent) -> dict[str, Any]:
 @app.get("/api/threads/{thread_id}/artifacts/{artifact_id}/activity")
 def artifact_activity(thread_id: str, artifact_id: str) -> list[dict[str, Any]]:
     return store.get_artifact_activity(thread_id, artifact_id)
+
+
+# ----------------------------- Addendum-02: Creative Studio + Post Cards ----
+
+
+class ProduceBody(BaseModel):
+    option: str = "A"
+
+
+@app.post("/api/series/{series_id}/concepts/{concept_id}/produce")
+def produce(series_id: str, concept_id: str, body: ProduceBody) -> dict[str, Any]:
+    """Plans 'Generate next post' + concept-card '→ Creative Studio' land here."""
+    try:
+        return creative.start_creative_thread(series_id, concept_id, body.option)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/assets/{asset_id}/file")
+def asset_file(asset_id: str):
+    from fastapi.responses import FileResponse
+
+    asset = store.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "asset not found")
+    media_types = {"svg": "image/svg+xml", "png": "image/png", "mp4": "video/mp4",
+                   "wav": "audio/wav", "mp3": "audio/mpeg"}
+    ext = asset["path"].rsplit(".", 1)[-1]
+    return FileResponse(asset["path"], media_type=media_types.get(ext, "application/octet-stream"))
+
+
+@app.get("/api/post-cards")
+def post_cards(series_id: Optional[str] = None) -> list[dict[str, Any]]:
+    return store.list_post_cards(series_id)
+
+
+@app.get("/api/post-cards/{card_id}")
+def post_card(card_id: str) -> dict[str, Any]:
+    card = store.get_post_card(card_id)
+    if not card:
+        raise HTTPException(404, "post card not found")
+    return card
+
+
+@app.get("/api/post-cards/{card_id}/bundle")
+def post_card_bundle(card_id: str):
+    """§04: Download bundle — zip of media + caption_<platform>.txt + meta.json."""
+    import io
+    import zipfile
+
+    from fastapi.responses import StreamingResponse
+
+    card = store.get_post_card(card_id)
+    if not card:
+        raise HTTPException(404, "post card not found")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for platform, text in card["post_content"]["caption_variants"].items():
+            hashtags = " ".join(card["post_content"]["hashtags"])
+            zf.writestr(f"caption_{platform}.txt", f"{text}\n\n{hashtags}")
+        zf.writestr("meta.json", json.dumps(card, indent=2, default=str))
+        for m in card["media"]:
+            asset_id = m["url"].rstrip("/").split("/")[-2] if m["url"].endswith("/file") else None
+            asset = store.get_asset(asset_id) if asset_id else None
+            if asset:
+                from pathlib import Path as _P
+
+                p = _P(asset["path"])
+                if p.exists():
+                    zf.writestr(f"media/{m['params'].get('prompt_id', p.stem)}{p.suffix}", p.read_bytes())
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{card_id}.zip"'})
+
+
+@app.get("/api/threads/{thread_id}/generation-log")
+def generation_log(thread_id: str) -> list[dict[str, Any]]:
+    return store.get_generation_log(thread_id)
+
+
+@app.post("/api/post-cards/{card_id}/mark-posted")
+def mark_posted(card_id: str) -> dict[str, Any]:
+    """One object, three surfaces: posting from Plans/My Space is the same
+    status change the thread action makes."""
+    import time as _time
+
+    card = store.get_post_card(card_id)
+    if not card:
+        raise HTTPException(404, "post card not found")
+    card["status"] = "posted"
+    card["posted_at"] = _time.time()
+    store.save_post_card(card)
+    store.set_production_status(card["series_id"], card["concept_id"], "posted")
+    return card
+
+
+class PromptEditBody(BaseModel):
+    prompt_text: str
+
+
+@app.post("/api/threads/{thread_id}/prompts/{slot}")
+def edit_prompt(thread_id: str, slot: str, body: PromptEditBody) -> dict[str, Any]:
+    """§08 rule 7: the user's edited prompt is used VERBATIM downstream."""
+    ws = creative._pending(thread_id)
+    if slot not in ws.get("prompts", {}):
+        raise HTTPException(404, f"no pending prompt for slot {slot}")
+    ws["prompts"][slot] = body.prompt_text
+    store.log_generation(thread_id, None, "edit_prompt", prompt=body.prompt_text)
+    store.log_artifact_activity(thread_id, f"prompt_{slot}", "refined", "user edited prompt")
+    return {"slot": slot, "prompt_text": body.prompt_text}
+
+
+class DiyBody(BaseModel):
+    kind: str  # image | video | audio
+    prompt: str
+    model_tier: str = "final"  # draft | final | pro (images)
+    ratio: str = "9:16"
+    duration_s: float = 4.0
+
+
+@app.post("/api/diy/generate")
+def diy_generate(body: DiyBody) -> dict[str, Any]:
+    """§06 DIY: same prompt-artifact → asset pair, cost shown, no agent."""
+    from app.fal_client import MediaError, estimate_cost, generate
+
+    cost = estimate_cost(body.kind, duration_s=body.duration_s,
+                         chars=len(body.prompt), tier=body.model_tier)
+    try:
+        out = generate(body.kind, body.prompt, ratio=body.ratio,
+                       duration_s=body.duration_s, tier=body.model_tier)
+    except MediaError as exc:
+        raise HTTPException(502 if not exc.policy else 422, str(exc)) from exc
+    asset_id = store.add_asset(None, "diy", body.kind, out["path"],
+                               {"model": out["model"], "prompt": body.prompt, "diy": True},
+                               out["cost"])
+    store.log_generation(None, asset_id, "generate", prompt=body.prompt,
+                         model=out["model"], cost=out["cost"])
+    return {"asset_id": asset_id, "url": f"/api/assets/{asset_id}/file",
+            "model": out["model"], "cost": out["cost"], "estimated": cost, "mock": out["mock"]}
+
+
+@app.get("/api/diy/assets")
+def diy_assets() -> list[dict[str, Any]]:
+    return [a for a in store.list_assets() if a["params"].get("diy")]
 
 
 # ------------------------------------------------------------------- runs ---

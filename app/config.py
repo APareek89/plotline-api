@@ -52,11 +52,37 @@ MOCK_LLM = os.environ.get("MOCK_LLM", "0") == "1"
 
 MAX_VALIDATION_RETRIES = 2  # §3.9: re-run with the error, max 2 retries
 
+# --- Creative Studio media (Addendum-02; fal.ai per v1 §07) -----------------
+FAL_KEY = os.environ.get("FAL_KEY", "")
+# MOCK_MEDIA=1 → deterministic placeholder assets, zero spend; the full flow
+# (prompt artifacts, cost lines, per-asset accept/reroll, Post Card) still runs.
+MOCK_MEDIA = _truthy("MOCK_MEDIA", "1")
+MEDIA_MODELS = {
+    "image_draft": os.environ.get("PLOTLINE_MODEL_IMAGE_DRAFT", "fal-ai/nano-banana"),
+    "image_final": os.environ.get("PLOTLINE_MODEL_IMAGE_FINAL", "fal-ai/nano-banana-2"),
+    "image_pro": os.environ.get("PLOTLINE_MODEL_IMAGE_PRO", "fal-ai/nano-banana-pro"),
+    "video": os.environ.get("PLOTLINE_MODEL_VIDEO", "fal-ai/veo3.1/fast/image-to-video"),
+    "tts_draft": os.environ.get("PLOTLINE_MODEL_TTS_DRAFT", "fal-ai/kokoro/american-english"),
+    "tts_final": os.environ.get("PLOTLINE_MODEL_TTS_FINAL", "fal-ai/minimax/speech-02-hd"),
+}
+# USD estimates shown before every generate (1 credit = $0.10). Env-overridable;
+# these are ESTIMATES — the honest number is whatever fal bills.
+MEDIA_COST_USD = {
+    "image_draft": float(os.environ.get("PLOTLINE_COST_IMAGE_DRAFT", "0.04")),
+    "image_final": float(os.environ.get("PLOTLINE_COST_IMAGE_FINAL", "0.08")),
+    "image_pro": float(os.environ.get("PLOTLINE_COST_IMAGE_PRO", "0.15")),
+    "video_per_s": float(os.environ.get("PLOTLINE_COST_VIDEO_PER_S", "0.10")),
+    "tts_draft_per_1k": float(os.environ.get("PLOTLINE_COST_TTS_DRAFT", "0.02")),
+    "tts_final_per_1k": float(os.environ.get("PLOTLINE_COST_TTS_FINAL", "0.10")),
+}
+
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "plotline.db"
 PROMPTS_DIR = ROOT / "prompts"
 LOG_DIR = DATA_DIR / "runs"
 
-for _d in (DATA_DIR, UPLOAD_DIR, LOG_DIR):
+ASSET_DIR = DATA_DIR / "assets"
+
+for _d in (DATA_DIR, UPLOAD_DIR, LOG_DIR, ASSET_DIR):
     _d.mkdir(parents=True, exist_ok=True)

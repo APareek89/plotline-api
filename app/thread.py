@@ -70,6 +70,7 @@ CONCEPT_ACTIONS = _actions(
     ("approve", "Approve", "primary"),
     ("feedback", "Feedback", "secondary"),
     ("regenerate", "Regenerate", "danger"),
+    ("produce", "→ Creative Studio", "secondary"),
 )
 
 

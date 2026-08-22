@@ -317,6 +317,11 @@ ArtifactType = Literal[
     "script_package",
     "brand_kit",
     "final_delivery",
+    # Addendum-02 §08
+    "asset_prompt",
+    "asset_set",
+    "voice_options",
+    "post_card",
 ]
 
 ActionStyle = Literal["primary", "secondary", "danger"]
@@ -379,6 +384,86 @@ class UserEvent(Strict):
         if self.type == "action" and self.action is None:
             raise ValueError("action event requires action")
         return self
+
+
+# --------------------------- Addendum-02 §04/§08: Creative Studio contracts ---
+
+
+class AssetPrompt(Strict):
+    """§08 rule 7: every generation prompt is an artifact BEFORE running.
+    User-edited prompt_text is used VERBATIM — never 'improved'."""
+
+    asset_slot: str  # frame_01 | shot_02 | slide_03 | vo_track | cover
+    model: str
+    prompt_text: str
+    cost: float  # estimate shown before any generate (§08 rule 8)
+    ratio: str = "9:16"
+    duration_s: Optional[float] = None
+    locks: list[str] = Field(default_factory=list)  # identity/wardrobe/lighting, verbatim
+
+
+class AssetItem(Strict):
+    asset_id: str
+    slot: str
+    kind: Literal["image", "video", "audio"]
+    preview_url: str
+    status: Literal["rendering", "ready", "accepted", "rerolling", "failed"]
+    cost: float = 0.0
+    note: Optional[str] = None  # e.g. seam-QA flag
+
+
+class AssetSet(Strict):
+    slot: str
+    items: list[AssetItem]
+
+
+class VoiceOption(Strict):
+    id: str
+    label: str
+    preview_url: Optional[str] = None
+    tier: Literal["draft", "final"]
+
+
+class VoiceOptions(Strict):
+    voices: list[VoiceOption] = Field(min_length=2)
+
+
+class PostMedia(Strict):
+    kind: Literal["video", "image", "audio"]
+    ratio: str
+    duration_s: Optional[float] = None
+    url: str
+    cover_url: Optional[str] = None
+    params: dict = Field(default_factory=dict)  # model, prompt_id, seed?, cost
+
+
+class PostContent(Strict):
+    hook_line: str
+    caption_variants: dict[str, str]  # platform → text
+    hashtags: list[str] = Field(default_factory=list)
+    cta: str = ""
+    alt_text: str = ""
+
+
+class PostCard(Strict):
+    """§04: the deliverable is an object, not a chat message. One id, three
+    surfaces (thread final artifact · Plans slot chip · My Space row)."""
+
+    id: str
+    series_id: str
+    thread_id: str
+    concept_id: str
+    option: Literal["A", "B", "C"]
+    format: str
+    platforms: list[str]
+    post_content: PostContent
+    media: list[PostMedia] = Field(default_factory=list)
+    total_cost_credits: float = 0.0  # 1 credit = $0.10
+    status: Literal["draft", "ready", "posted"] = "ready"
+    posted_at: Optional[float] = None
+    results_pasted: bool = False
+    created_at: float = 0.0
+    generation_log_ref: str = ""
 
 
 # --------------------------------------------- Phase-2 contracts (defined) ---

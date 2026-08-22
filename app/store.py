@@ -122,12 +122,52 @@ def _init(conn: sqlite3.Connection) -> None:
             detail TEXT,
             created_at REAL NOT NULL
         );
+
+        -- Addendum-02 §04: Post Cards — one object by id, three surfaces.
+        CREATE TABLE IF NOT EXISTS post_cards (
+            id TEXT PRIMARY KEY,
+            series_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            concept_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ready',
+            data TEXT NOT NULL,
+            posted_at REAL,
+            created_at REAL NOT NULL
+        );
+
+        -- Generated assets (mock or fal) + full generation audit trail.
+        CREATE TABLE IF NOT EXISTS assets (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT,
+            slot TEXT,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'ready',
+            cost REAL NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS generation_log (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT,
+            asset_id TEXT,
+            event TEXT NOT NULL,            -- generate | reroll | seam_qa | edit_prompt | …
+            prompt TEXT,
+            model TEXT,
+            seed TEXT,
+            cost REAL DEFAULT 0,
+            created_at REAL NOT NULL
+        );
         """
     )
-    # Addendum-01 migration: coverage % beside CCS on existing dev DBs.
+    # Addendum-01/02 migrations on existing dev DBs.
     cols = {r[1] for r in conn.execute("PRAGMA table_info(concept_state)").fetchall()}
     if "coverage" not in cols:
         conn.execute("ALTER TABLE concept_state ADD COLUMN coverage INTEGER")
+    if "production_status" not in cols:
+        # Plans slot lifecycle (§01): planned | in_production | ready | posted
+        conn.execute("ALTER TABLE concept_state ADD COLUMN production_status TEXT DEFAULT 'planned'")
     conn.commit()
 
 
@@ -404,6 +444,102 @@ def get_artifact_activity(thread_id: str, artifact_id: str) -> list[dict[str, An
         rows = get_conn().execute(
             "SELECT event, detail, created_at FROM artifact_activity WHERE thread_id = ? AND artifact_id = ? ORDER BY created_at",
             (thread_id, artifact_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------- Addendum-02: post cards etc --
+
+
+def save_post_card(card: dict[str, Any]) -> None:
+    with _lock:
+        get_conn().execute(
+            """INSERT INTO post_cards (id, series_id, thread_id, concept_id, status, data, posted_at, created_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET status = excluded.status,
+                 data = excluded.data, posted_at = excluded.posted_at""",
+            (card["id"], card["series_id"], card["thread_id"], card["concept_id"],
+             card["status"], json.dumps(card, default=str), card.get("posted_at"), card.get("created_at") or _now()),
+        )
+        get_conn().commit()
+
+
+def get_post_card(card_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute("SELECT data FROM post_cards WHERE id = ?", (card_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def list_post_cards(series_id: Optional[str] = None) -> list[dict[str, Any]]:
+    with _lock:
+        if series_id:
+            rows = get_conn().execute(
+                "SELECT data FROM post_cards WHERE series_id = ? ORDER BY created_at DESC", (series_id,)
+            ).fetchall()
+        else:
+            rows = get_conn().execute("SELECT data FROM post_cards ORDER BY created_at DESC").fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def set_production_status(series_id: str, concept_id: str, status: str) -> None:
+    with _lock:
+        get_conn().execute(
+            "UPDATE concept_state SET production_status = ? WHERE series_id = ? AND concept_id = ?",
+            (status, series_id, concept_id),
+        )
+        get_conn().commit()
+
+
+def add_asset(thread_id: Optional[str], slot: str, kind: str, path: str,
+              params: dict[str, Any], cost: float, status: str = "ready") -> str:
+    asset_id = new_id("ast")
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO assets (id, thread_id, slot, kind, path, params, status, cost, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (asset_id, thread_id, slot, kind, path, json.dumps(params, default=str), status, cost, _now()),
+        )
+        get_conn().commit()
+    return asset_id
+
+
+def get_asset(asset_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    if not row:
+        return None
+    return {**dict(row), "params": json.loads(row["params"])}
+
+
+def set_asset_status(asset_id: str, status: str) -> None:
+    with _lock:
+        get_conn().execute("UPDATE assets SET status = ? WHERE id = ?", (status, asset_id))
+        get_conn().commit()
+
+
+def list_assets(thread_id: Optional[str] = None) -> list[dict[str, Any]]:
+    with _lock:
+        if thread_id:
+            rows = get_conn().execute("SELECT * FROM assets WHERE thread_id = ? ORDER BY created_at", (thread_id,)).fetchall()
+        else:
+            rows = get_conn().execute("SELECT * FROM assets ORDER BY created_at DESC LIMIT 200").fetchall()
+    return [{**dict(r), "params": json.loads(r["params"])} for r in rows]
+
+
+def log_generation(thread_id: Optional[str], asset_id: Optional[str], event: str,
+                   prompt: Optional[str] = None, model: Optional[str] = None,
+                   seed: Optional[str] = None, cost: float = 0) -> None:
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO generation_log (id, thread_id, asset_id, event, prompt, model, seed, cost, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (new_id("gen"), thread_id, asset_id, event, prompt, model, seed, cost, _now()),
+        )
+        get_conn().commit()
+
+
+def get_generation_log(thread_id: str) -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute(
+            "SELECT * FROM generation_log WHERE thread_id = ? ORDER BY created_at", (thread_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
