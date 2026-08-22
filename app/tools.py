@@ -94,6 +94,7 @@ class ToolDispatcher:
         rag: RoutingRag,
         get_profile: Callable[[], dict[str, Any]],
         surfaced_ids: Optional[set[str]] = None,
+        platform_filter: Optional[list[str]] = None,
     ):
         self.rag = rag
         self._get_profile = get_profile
@@ -101,6 +102,9 @@ class ToolDispatcher:
         # Shared across every agent in one pipeline run — the citation
         # allowlist for the local subset check (cite only what THIS run saw).
         self.surfaced_ids: set[str] = surfaced_ids if surfaced_ids is not None else set()
+        # Addendum-01 §7.3: retrieval hard-filters platform — agents can narrow
+        # within the context's platforms but never search outside them.
+        self.platform_filter = platform_filter
 
     def dispatch(self, name: str, tool_input: dict[str, Any]) -> str:
         result = self._run(name, tool_input)
@@ -117,6 +121,10 @@ class ToolDispatcher:
             for key in ("niche", "platform", "format"):
                 if tool_input.get(key):
                     filters[key] = tool_input[key]
+            if self.platform_filter:
+                asked = tool_input.get("platform")
+                # hard filter: narrow within context platforms, never outside
+                filters["platform"] = asked if asked in self.platform_filter else self.platform_filter
             return self.rag.search_corpus(
                 tool_input.get("query", ""), k=int(tool_input.get("k") or 6), filters=filters
             )

@@ -15,6 +15,9 @@ FORM = {
     "platforms": ["instagram_reels", "youtube_shorts"],
     "cadence": {"type": "series", "posts_per_week": 3, "weeks": 2},
     "content_type": "text_video",
+    "audience_sophistication": "practitioner",
+    "tool_access": "CapCut, Descript, screen recording — no on-camera shoots",
+    "positioning_depth": "power_user",
 }
 
 

@@ -75,6 +75,10 @@ class UploadExtraction(Strict):
     observations: list[str] = Field(default_factory=list)
 
 
+AudienceSophistication = Literal["novice", "practitioner", "expert"]
+PositioningDepth = Literal["beginner_guide", "power_user"]
+
+
 class CreatorContext(Strict):
     """Intake output. A parser with eyes — no advice fields allowed."""
 
@@ -87,6 +91,11 @@ class CreatorContext(Strict):
     platforms: list[Platform] = Field(default_factory=list)
     cadence: Cadence
     content_type: ContentType
+    # Addendum-01 §7.1 — required for NEW intakes (enforced in validate_intake;
+    # Optional here so pre-addendum stored series still load):
+    audience_sophistication: Optional[AudienceSophistication] = None
+    tool_access: Optional[str] = None  # "what can you actually demo"
+    positioning_depth: Optional[PositioningDepth] = None
     style_notes: list[str] = Field(default_factory=list)  # extracted from uploads: visible style/tone/format only
     upload_extractions: list[UploadExtraction] = Field(default_factory=list)
     brand_rules: list[str] = Field(default_factory=list)  # claims/tone rules/banned words from briefs
@@ -197,6 +206,9 @@ class SaturationLens(Strict):
     similar_count: int = Field(ge=0)
     source_id: Optional[str] = None
     note: Optional[str] = None
+    # Addendum-01 §7.3: below the niche asset threshold the lens must declare
+    # insufficient data instead of pretending to a saturation rating.
+    insufficient_data: bool = False
 
 
 class Lenses(Strict):
@@ -256,6 +268,117 @@ class ConceptOptions(Strict):
 
 class OptionsOutput(Strict):
     concept_options: list[ConceptOptions]
+
+
+# ------------------------------------- Addendum-01 §7.1: format stage (0.5) ---
+
+
+class FormatOption(Strict):
+    """A repeatable series format the planner proposes before any concepts.
+    Concepts become episodes of the chosen format(s)."""
+
+    format_id: str  # f1, f2, f3
+    name: str
+    vehicle: str  # the repeatable mechanic, e.g. "same task: human vs AI, scorecard"
+    why_fits: str
+    evidence: list[Evidence] = Field(default_factory=list)  # evidence rules apply
+    effort: Effort
+    cadence_fit: str
+
+
+class FormatOptions(Strict):
+    options: list[FormatOption] = Field(min_length=2, max_length=3)
+
+
+# --------------------------------- Addendum-01 §7.3: thin-plan escalation ---
+
+
+EscalationChoice = Literal["seed_inspiration", "broaden_niche", "accept_provisional"]
+
+
+class Escalation(Strict):
+    reason: str
+    below_threshold_count: int = Field(ge=0)
+    total_concepts: int = Field(ge=1)
+    choices: list[EscalationChoice] = Field(min_length=1)
+
+
+# ---------------------------------- Addendum-01 §05: interaction envelope ---
+
+ArtifactType = Literal[
+    "context_summary",
+    "inspiration_set",
+    "format_options",
+    "concept",
+    "plan",
+    "options",
+    "escalation",
+    "confidence_card",
+    "script_package",
+    "brand_kit",
+    "final_delivery",
+]
+
+ActionStyle = Literal["primary", "secondary", "danger"]
+
+
+class ArtifactAction(Strict):
+    id: str
+    label: str
+    style: ActionStyle
+    event: str  # e.g. approve | feedback | regenerate | pick_format
+
+
+class ArtifactEnvelope(Strict):
+    """Card wrapper. payload carries the §3.9 schema for the type — validated
+    upstream by that schema, transported here as plain JSON."""
+
+    type: ArtifactType
+    id: str
+    title: str
+    payload: dict
+    actions: list[ArtifactAction] = Field(default_factory=list)
+
+
+class AgentMessage(Strict):
+    """Every agent turn, all studios. Text is a conversational envelope ONLY —
+    artifact content is never restated as prose."""
+
+    thread_id: str
+    text: str = Field(max_length=280)
+    artifacts: list[ArtifactEnvelope] = Field(default_factory=list)
+    question: Optional[str] = None  # at most ONE — single field by design
+
+    @field_validator("text")
+    @classmethod
+    def _two_short_sentences(cls, v: str) -> str:
+        enders = sum(v.count(c) for c in ".!?")
+        if enders > 2:
+            raise ValueError("envelope text must be <=2 short sentences — content belongs in artifacts")
+        return v
+
+
+class UserAction(Strict):
+    artifact_id: str
+    event: str
+
+
+class UserEvent(Strict):
+    """Both input paths (typed text, button tap) normalize to this."""
+
+    thread_id: str
+    type: Literal["text", "action"]
+    text: Optional[str] = None
+    action: Optional[UserAction] = None
+    panel_focus: Optional[str] = None  # artifact id while a detail panel is open
+
+    @model_validator(mode="after")
+    def _shape(self) -> "UserEvent":
+        if self.type == "text" and not self.text:
+            raise ValueError("text event requires text")
+        if self.type == "action" and self.action is None:
+            raise ValueError("action event requires action")
+        return self
 
 
 # --------------------------------------------- Phase-2 contracts (defined) ---

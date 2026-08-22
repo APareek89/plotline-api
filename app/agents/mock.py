@@ -67,6 +67,10 @@ def mock_intake(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -
             else {"type": "one_time", "concept_count": 6}
         ),
         "content_type": form.get("content_type", "text_video"),
+        # Addendum-01 §7.1 — pass-through only, never invented (form requires them)
+        "audience_sophistication": form.get("audience_sophistication"),
+        "tool_access": form.get("tool_access"),
+        "positioning_depth": form.get("positioning_depth"),
         "style_notes": [],
         "upload_extractions": [],
         "brand_rules": [],
@@ -128,7 +132,7 @@ _CONCEPT_SEEDS = [
         "angle": "versus challenge",
         "title": '"Human vs AI: same task, who wins?"',
         "format": "challenge",
-        "hook_verbal": "I gave the same job to a pro and to an AI",
+        "hook_verbal": "I gave the same job to a pro editor and to an AI — 60 seconds decides",
         "first_frame": "split screen, countdown timer starts immediately",
         "cta": "Vote A or B in the comments",
         "strength": "strong",
@@ -137,12 +141,53 @@ _CONCEPT_SEEDS = [
         "angle": "myth-buster",
         "title": '"Stop doing {area} the hard way"',
         "format": "talking_head",
-        "hook_verbal": "Everything you know about {area} is slightly wrong",
+        "hook_verbal": "3 {area} myths costing you hours every week",
         "first_frame": "creator mid-gesture with bold caption overlay",
         "cta": "Comment the myth you believed",
         "strength": "weak",
     },
 ]
+
+
+# --------------------------------------- Addendum-01 §7.1: PASS 0.5 formats --
+
+_FORMAT_SEEDS = [
+    {"format_id": "f1", "name": "Cost-slasher demo", "vehicle": "replace a paid workflow with free tools, invoice on camera",
+     "effort": "S", "cadence_fit": "weekly anchor episode — one tool stack per week"},
+    {"format_id": "f2", "name": "Build-in-public diary", "vehicle": "day-counter series, one win or disaster per episode",
+     "effort": "M", "cadence_fit": "2-3x/week — serialization trains return viewing"},
+    {"format_id": "f3", "name": "Human vs AI challenge", "vehicle": "same task head-to-head, scorecard + comment vote",
+     "effort": "M", "cadence_fit": "weekly — versus structure sustains a season"},
+]
+
+
+def mock_planner_formats(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -> dict[str, Any]:
+    """PASS 0.5: propose 2-3 repeatable formats before any concepts, grounded
+    in the format-library corpus + inspiration retrieval."""
+    assert dispatcher is not None
+    context = payload["context"]
+    niche = _niche_of(context.get("content_area", ""))
+    fmt_chunks = _fetch(dispatcher, "search_corpus", {"query": "repeatable series format", "topic": "format_library", "k": 6})
+    assets = _fetch(dispatcher, "search_inspiration", {"query": context.get("content_area", ""), "niche": niche, "k": 6})
+
+    options = []
+    for i, seed in enumerate(_FORMAT_SEEDS):
+        evidence = []
+        if fmt_chunks:
+            chunk = fmt_chunks[i % len(fmt_chunks)]
+            evidence.append({"tag": "REF", "source_id": chunk["source_id"],
+                            "claim": chunk.get("title", "format-library entry"), "as_of": chunk.get("as_of")})
+        if assets:
+            asset = assets[i % len(assets)]
+            evidence.append({"tag": "REF", "source_id": asset["source_id"],
+                            "claim": f"performing neighbor: {asset.get('title', '')[:80]}", "as_of": asset.get("as_of")})
+        options.append({
+            **seed,
+            "why_fits": f"fits {context.get('audience_sophistication') or 'stated'} audience and "
+                        f"'{(context.get('tool_access') or 'no-shoot')[:60]}' tool access; no evidence invented",
+            "evidence": evidence,
+        })
+    return {"options": options}
 
 
 def mock_planner_concepts(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -> dict[str, Any]:
@@ -174,10 +219,22 @@ def mock_planner_concepts(payload: dict[str, Any], dispatcher: Optional[ToolDisp
     def principle(claim: str) -> dict[str, Any]:
         return {"tag": "PRINCIPLE", "source_id": "model", "claim": claim, "as_of": None}
 
+    # PASS 0.5 output: concepts are EPISODES of the chosen formats; one
+    # experimental off-format slot per 4 keeps the 10% experimental pillar.
+    chosen = payload.get("chosen_formats") or []
+    fmt_to_seed = {"f1": 0, "f2": 1, "f3": 2}
+    if chosen:
+        pool = [_CONCEPT_SEEDS[fmt_to_seed[f]] for f in chosen if f in fmt_to_seed] or _CONCEPT_SEEDS[:3]
+        seeds = [pool[i % len(pool)] for i in range(slots)]
+        for j in range(3, slots, 4):
+            seeds[j] = _CONCEPT_SEEDS[3]  # experimental slot (the red-team target)
+    else:
+        seeds = [_CONCEPT_SEEDS[i % len(_CONCEPT_SEEDS)] for i in range(slots)]
+
     start = date.today() + timedelta(days=3)
     concepts = []
     for i in range(slots):
-        seed = _CONCEPT_SEEDS[i % len(_CONCEPT_SEEDS)]
+        seed = seeds[i]
         asset = assets[i % len(assets)]
         chunk = chunks[i % len(chunks)] if chunks else None
         stat = stats[i % len(stats)] if stats else None
@@ -273,11 +330,16 @@ def mock_feedback(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher])
     assets = _fetch(dispatcher, "search_inspiration", {"query": "saturation similar", "niche": niche, "k": 8})
     sat_source = assets[0]["source_id"] if assets else None
 
+    # Addendum-01 §7.3 saturation guard: below the niche asset threshold the
+    # lens declares insufficient_data — never a rating.
+    niche_asset_count = payload.get("niche_asset_count")
+    insufficient = niche_asset_count is not None and niche_asset_count < 25
+
     verdicts = []
     for concept in plan["concepts"]:
         if only_ids and concept["id"] not in only_ids:
             continue
-        weak = concept["format"] == "talking_head" and "slightly wrong" in concept["hook"]["verbal"]
+        weak = concept["format"] == "talking_head" and "myths costing you" in concept["hook"]["verbal"]
         refined = bool(payload.get("refined"))
         element_verdicts = []
         for score in concept["element_scores"]:
@@ -316,8 +378,20 @@ def mock_feedback(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher])
             "concept_id": concept["id"],
             "element_verdicts": element_verdicts,
             "lenses": {
-                "saturation": {"similar_count": 37 if concept["format"] == "listicle_demo" else 6,
-                               "source_id": sat_source, "note": "similarity retrieval over inspiration DB"},
+                "saturation": (
+                    {"similar_count": niche_asset_count or 0, "source_id": None,
+                     "note": f"only {niche_asset_count} assets in this niche — below the {25} threshold",
+                     "insufficient_data": True}
+                    if insufficient
+                    else (
+                        {"similar_count": 37 if concept["format"] == "listicle_demo" else 6,
+                         "source_id": sat_source, "note": "similarity retrieval over inspiration DB"}
+                        if sat_source
+                        # honest empty: no similar assets retrievable → count 0, no fake source
+                        else {"similar_count": 0, "source_id": None,
+                              "note": "no similar assets retrievable for this niche/platform"}
+                    )
+                ),
                 "claims_safety": "no numeric product claims; safe" if context["objective"] != "conversions" else "numeric claims require brand substantiation doc before ship",
                 "feasibility": "within stated capacity (no-shoot formats)",
                 "platform_policy": "no policy risks detected",

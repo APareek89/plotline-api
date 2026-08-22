@@ -66,7 +66,12 @@ def load_sources() -> list[dict]:
 
     for path in files:
         doc = yaml.safe_load(path.read_text()) or {}
+        doc_retrieved_at = doc.get("retrieved_at")  # doc-level default (curation date)
         for i, chunk in enumerate(doc.get("chunks", [])):
+            if not chunk.get("retrieved_at") and doc_retrieved_at:
+                chunk["retrieved_at"] = doc_retrieved_at
+            if not chunk.get("retrieved_at"):
+                errors.append(f"{path.name}#{i}: retrieved_at required (chunk or doc level)")
             where = f"{path.name}#{i} ({chunk.get('source_id', '?')})"
             sid = chunk.get("source_id", "")
             if not ID_RE.match(sid):

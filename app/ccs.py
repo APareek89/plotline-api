@@ -6,6 +6,7 @@ never gets to do its own arithmetic unchecked.
 from __future__ import annotations
 
 from app.schemas import (
+    Concept,
     ConceptVerdict,
     ElementName,
     ObjectiveFamily,
@@ -84,3 +85,33 @@ def concept_status(family: ObjectiveFamily, verdict: ConceptVerdict) -> str:
     if verdict.kill_flags or hook_gate_failed(verdict) or ccs <= QUALIFY_THRESHOLD:
         return "rework"
     return "strong" if ccs >= STRONG_THRESHOLD else "qualified"
+
+
+# ------------------------------------ Addendum-01 §7.3: evidence coverage ---
+
+PROVISIONAL_THRESHOLD = 40  # coverage % below this → PROVISIONAL badge, any CCS
+
+_DATA_TAGS = ("REF", "STAT", "TREND")
+
+
+def evidence_coverage(family: ObjectiveFamily, concept: "Concept") -> int:
+    """% of applicable-element WEIGHT backed by data evidence (REF/STAT/TREND
+    with a DB source) — PRINCIPLE/model opinions don't count. Shown beside CCS
+    everywhere; < 40% marks the concept (and its plan) PROVISIONAL."""
+    weights = WEIGHTS[family]
+    total = sum(w for w in weights.values() if w > 0)
+    backed = 0
+    scores = {s.element: s for s in concept.element_scores}
+    for element, weight in weights.items():
+        if weight <= 0:
+            continue
+        score = scores.get(element)
+        if score and score.addressed and any(
+            e.tag in _DATA_TAGS and e.source_id != "model" for e in score.evidence
+        ):
+            backed += weight
+    return round(100 * backed / total) if total else 0
+
+
+def is_provisional(coverage_pct: int) -> bool:
+    return coverage_pct < PROVISIONAL_THRESHOLD

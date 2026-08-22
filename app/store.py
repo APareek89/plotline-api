@@ -89,8 +89,45 @@ def _init(conn: sqlite3.Connection) -> None:
             series_id TEXT,
             created_at REAL NOT NULL
         );
+
+        -- Addendum-01 §01/§03: chat-first threads. Ordinals are per-series,
+        -- assigned at creation, never reused or renumbered on delete.
+        CREATE TABLE IF NOT EXISTS threads (
+            id TEXT PRIMARY KEY,
+            series_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'planning',
+            stage TEXT NOT NULL DEFAULT 'inspiration',
+            chosen_formats TEXT,
+            created_at REAL NOT NULL,
+            UNIQUE (series_id, ordinal)
+        );
+
+        CREATE TABLE IF NOT EXISTS thread_messages (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            role TEXT NOT NULL,             -- 'agent' | 'user'
+            envelope TEXT NOT NULL,         -- AgentMessage or UserEvent JSON
+            created_at REAL NOT NULL,
+            UNIQUE (thread_id, seq)
+        );
+
+        -- Per-artifact version history, rendered in the panel's Activity tab.
+        CREATE TABLE IF NOT EXISTS artifact_activity (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            artifact_id TEXT NOT NULL,
+            event TEXT NOT NULL,            -- proposed | downgraded | refined | approved | …
+            detail TEXT,
+            created_at REAL NOT NULL
+        );
         """
     )
+    # Addendum-01 migration: coverage % beside CCS on existing dev DBs.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(concept_state)").fetchall()}
+    if "coverage" not in cols:
+        conn.execute("ALTER TABLE concept_state ADD COLUMN coverage INTEGER")
     conn.commit()
 
 
@@ -210,14 +247,17 @@ def get_plan(series_id: str) -> Optional[dict[str, Any]]:
     }
 
 
-def upsert_concept_state(series_id: str, concept_id: str, status: str, ccs: int, order_idx: int) -> None:
+def upsert_concept_state(
+    series_id: str, concept_id: str, status: str, ccs: int, order_idx: int,
+    coverage: Optional[int] = None,
+) -> None:
     with _lock:
         get_conn().execute(
-            """INSERT INTO concept_state (series_id, concept_id, status, ccs, order_idx)
-               VALUES (?,?,?,?,?)
+            """INSERT INTO concept_state (series_id, concept_id, status, ccs, order_idx, coverage)
+               VALUES (?,?,?,?,?,?)
                ON CONFLICT(series_id, concept_id) DO UPDATE SET
-                 status = excluded.status, ccs = excluded.ccs""",
-            (series_id, concept_id, status, ccs, order_idx),
+                 status = excluded.status, ccs = excluded.ccs, coverage = excluded.coverage""",
+            (series_id, concept_id, status, ccs, order_idx, coverage),
         )
         get_conn().commit()
 
@@ -271,6 +311,101 @@ def reorder_concepts(series_id: str, ordered_ids: list[str]) -> None:
                 (idx, series_id, concept_id),
             )
         get_conn().commit()
+
+
+# ----------------------------------------------------------------- threads --
+
+
+def create_thread(series_id: str, kind: str = "planning") -> dict[str, Any]:
+    """Ordinal = max ever used + 1 for this series (never reused: deleted
+    threads leave a gap by design — numbers are identity, not position)."""
+    thread_id = new_id("thr")
+    with _lock:
+        row = get_conn().execute(
+            "SELECT COALESCE(MAX(ordinal), 0) AS m FROM threads WHERE series_id = ?", (series_id,)
+        ).fetchone()
+        ordinal = int(row["m"]) + 1
+        get_conn().execute(
+            "INSERT INTO threads (id, series_id, ordinal, kind, created_at) VALUES (?,?,?,?,?)",
+            (thread_id, series_id, ordinal, kind, _now()),
+        )
+        get_conn().commit()
+    return {"id": thread_id, "series_id": series_id, "ordinal": ordinal, "kind": kind, "stage": "inspiration"}
+
+
+def get_thread(thread_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute("SELECT * FROM threads WHERE id = ?", (thread_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_series_threads(series_id: str) -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute(
+            "SELECT * FROM threads WHERE series_id = ? ORDER BY ordinal", (series_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_thread_stage(thread_id: str, stage: str) -> None:
+    with _lock:
+        get_conn().execute("UPDATE threads SET stage = ? WHERE id = ?", (stage, thread_id))
+        get_conn().commit()
+
+
+def set_thread_formats(thread_id: str, format_ids: list[str]) -> None:
+    with _lock:
+        get_conn().execute(
+            "UPDATE threads SET chosen_formats = ? WHERE id = ?",
+            (json.dumps(format_ids), thread_id),
+        )
+        get_conn().commit()
+
+
+def append_message(thread_id: str, role: str, envelope: dict[str, Any]) -> dict[str, Any]:
+    msg_id = new_id("msg")
+    with _lock:
+        row = get_conn().execute(
+            "SELECT COALESCE(MAX(seq), 0) AS m FROM thread_messages WHERE thread_id = ?", (thread_id,)
+        ).fetchone()
+        seq = int(row["m"]) + 1
+        get_conn().execute(
+            "INSERT INTO thread_messages (id, thread_id, seq, role, envelope, created_at) VALUES (?,?,?,?,?,?)",
+            (msg_id, thread_id, seq, role, json.dumps(envelope, default=str), _now()),
+        )
+        get_conn().commit()
+    return {"id": msg_id, "seq": seq, "role": role, "envelope": envelope}
+
+
+def get_messages(thread_id: str, after_seq: int = 0) -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute(
+            "SELECT * FROM thread_messages WHERE thread_id = ? AND seq > ? ORDER BY seq",
+            (thread_id, after_seq),
+        ).fetchall()
+    return [
+        {"id": r["id"], "seq": r["seq"], "role": r["role"],
+         "envelope": json.loads(r["envelope"]), "created_at": r["created_at"]}
+        for r in rows
+    ]
+
+
+def log_artifact_activity(thread_id: str, artifact_id: str, event: str, detail: Optional[str] = None) -> None:
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO artifact_activity (id, thread_id, artifact_id, event, detail, created_at) VALUES (?,?,?,?,?,?)",
+            (new_id("act"), thread_id, artifact_id, event, detail, _now()),
+        )
+        get_conn().commit()
+
+
+def get_artifact_activity(thread_id: str, artifact_id: str) -> list[dict[str, Any]]:
+    with _lock:
+        rows = get_conn().execute(
+            "SELECT event, detail, created_at FROM artifact_activity WHERE thread_id = ? AND artifact_id = ? ORDER BY created_at",
+            (thread_id, artifact_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # -------------------------------------------------------------------- runs --

@@ -44,6 +44,9 @@ for i in range(12):
             "platforms": [["instagram_reels"], ["youtube_shorts"], ["instagram_reels", "youtube_shorts"]][i % 3],
             "cadence": {"type": "series", "posts_per_week": [3, 4, 5][i % 3], "weeks": [1, 2][i % 2]},
             "content_type": "text_video",
+            "audience_sophistication": ["novice", "practitioner", "expert"][i % 3],
+            "tool_access": "screen recording + free editing tools, no on-camera shoots",
+            "positioning_depth": ["beginner_guide", "power_user"][i % 2],
         }
     )
 for i in range(8):
@@ -59,6 +62,9 @@ for i in range(8):
             "platforms": [["instagram_reels"], ["tiktok"]][i % 2],
             "cadence": {"type": "one_time", "concept_count": [4, 6, 8][i % 3]},
             "content_type": "text_video",
+            "audience_sophistication": ["practitioner", "novice"][i % 2],
+            "tool_access": "product on hand + phone camera + screen recording",
+            "positioning_depth": "beginner_guide",
         }
     )
 

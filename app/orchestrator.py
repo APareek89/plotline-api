@@ -57,8 +57,15 @@ class RunEvents:
 run_events = RunEvents()
 
 
-def _dispatcher(surfaced_ids: Optional[set[str]] = None) -> ToolDispatcher:
-    return ToolDispatcher(rag, store.get_profile, surfaced_ids=surfaced_ids)
+def _dispatcher(
+    surfaced_ids: Optional[set[str]] = None,
+    context: Optional[CreatorContext] = None,
+) -> ToolDispatcher:
+    # Addendum-01 §7.3: retrieval hard-filters platform to the context's set.
+    platform_filter = list(context.platforms) if context and context.platforms else None
+    return ToolDispatcher(
+        rag, store.get_profile, surfaced_ids=surfaced_ids, platform_filter=platform_filter
+    )
 
 
 # ------------------------------------------------------------------- intake
@@ -122,120 +129,166 @@ def _persona_for(context: CreatorContext) -> str:
     )
 
 
+def run_formats(context: CreatorContext, run_retrieved: set[str]) -> "FormatOptions":
+    """Addendum-01 PASS 0.5: 2-3 repeatable formats before any concepts."""
+    from app.schemas import FormatOptions
+    from app.validators import validate_formats
+
+    formats, _ = run_agent(
+        agent="planner.formats",
+        prompt_name="planner",
+        model=config.PLANNER_MODEL,
+        user_payload={"context": context.model_dump(mode="json"), "pass": "formats"},
+        schema=FormatOptions,
+        dispatcher=_dispatcher(run_retrieved, context=context),
+        validate=lambda f: validate_formats(f, rag, retrieved_ids=run_retrieved),
+        mock_fn=mock_agents.mock_planner_formats,
+    )
+    return formats
+
+
+def run_pipeline(
+    context: CreatorContext,
+    emit,
+    *,
+    chosen_formats: Optional[list[str]] = None,
+    niche_asset_count: Optional[int] = None,
+    run_retrieved: Optional[set[str]] = None,
+) -> tuple[Plan, Feedback, OptionsOutput, dict[str, dict[str, Any]]]:
+    """The §3.4 pipeline core, shared by the legacy stage flow and the
+    Addendum-01 thread driver. `emit(stage, message)` reports labeled steps."""
+    family = objective_family(context.objective)
+    emit("retrieve", "Pulling inspiration references + benchmarks…")
+    rag.ensure_ready()  # dependency-unavailable surfaces here, before any agent call
+    payload = {"context": context.model_dump(mode="json")}
+    if chosen_formats:
+        payload["chosen_formats"] = chosen_formats
+    if niche_asset_count is not None:
+        payload["niche_asset_count"] = niche_asset_count
+    # One citation allowlist for the whole pipeline run: agents may cite
+    # only source_ids their retrieval tools surfaced within THIS run.
+    if run_retrieved is None:
+        run_retrieved = set()
+
+    emit("plan", "Planner drafting concepts with evidence…")
+    dispatcher = _dispatcher(run_retrieved, context=context)
+    plan, _ = run_agent(
+        agent="planner.concepts",
+        prompt_name="planner",
+        model=config.PLANNER_MODEL,
+        user_payload={**payload, "pass": "concepts"},
+        schema=Plan,
+        dispatcher=dispatcher,
+        validate=lambda p: validate_plan(p, context, rag, retrieved_ids=run_retrieved),
+        mock_fn=mock_agents.mock_planner_concepts,
+    )
+
+    emit("critique", "Red-team feedback agent judging every element…")
+    feedback, _ = run_agent(
+        agent="feedback.judge",
+        prompt_name="feedback",
+        model=config.FEEDBACK_MODEL,
+        user_payload={**payload, "plan": plan.model_dump(mode="json")},
+        schema=Feedback,
+        dispatcher=_dispatcher(run_retrieved, context=context),
+        validate=lambda f: validate_feedback(
+            f, plan, context, rag, retrieved_ids=run_retrieved,
+            niche_asset_count=niche_asset_count,
+        ),
+        prompt_replacements={"dynamic_persona": _persona_for(context)},
+        mock_fn=mock_agents.mock_feedback,
+    )
+
+    # ---- refine (hard cap: 1 loop; only flagged concepts may change)
+    flagged = _flagged_ids(family, feedback)
+    if flagged:
+        emit("refine", f"Refining {len(flagged)} flagged concept(s) — one pass, diff-checked…")
+        refined_plan, _ = run_agent(
+            agent="planner.refine",
+            prompt_name="planner",
+            model=config.PLANNER_MODEL,
+            user_payload={
+                **payload,
+                "pass": "refine",
+                "plan": plan.model_dump(mode="json"),
+                "feedback": feedback.model_dump(mode="json"),
+                "flagged_concept_ids": sorted(flagged),
+            },
+            schema=Plan,
+            dispatcher=_dispatcher(run_retrieved, context=context),
+            validate=lambda p: validate_plan(
+                p, context, rag, previous_plan=plan, flagged_concept_ids=flagged,
+                retrieved_ids=run_retrieved,
+            ),
+            mock_fn=mock_agents.mock_planner_refine,
+        )
+        plan = refined_plan
+
+        emit("critique", "Feedback agent re-judging refined concepts…")
+        refined_feedback, _ = run_agent(
+            agent="feedback.rejudge",
+            prompt_name="feedback",
+            model=config.FEEDBACK_MODEL,
+            user_payload={
+                **payload,
+                "plan": plan.model_dump(mode="json"),
+                "only_concept_ids": sorted(flagged),
+                "refined": True,
+            },
+            schema=Feedback,
+            dispatcher=_dispatcher(run_retrieved, context=context),
+            validate=lambda f: validate_feedback(
+                f, _subset_plan(plan, flagged), context, rag, retrieved_ids=run_retrieved,
+                niche_asset_count=niche_asset_count,
+            ),
+            prompt_replacements={"dynamic_persona": _persona_for(context)},
+            mock_fn=mock_agents.mock_feedback,
+        )
+        feedback = _merge_feedback(feedback, refined_feedback)
+
+    # ---- statuses + options
+    statuses = _statuses(family, feedback)
+    for concept in plan.concepts:  # Addendum-01 §7.3: coverage % beside CCS everywhere
+        if concept.id in statuses:
+            cov = ccs_mod.evidence_coverage(family, concept)
+            statuses[concept.id]["coverage"] = cov
+            statuses[concept.id]["provisional"] = ccs_mod.is_provisional(cov)
+    qualified = {cid for cid, s in statuses.items() if s["status"] in ("qualified", "strong")}
+
+    options = OptionsOutput(concept_options=[])
+    if qualified:
+        emit("options", f"Generating 3 creative options for {len(qualified)} qualified concept(s)…")
+        qualified_concepts = [
+            {**c.model_dump(mode="json"), "ccs_final": statuses[c.id]["ccs"]}
+            for c in plan.concepts
+            if c.id in qualified
+        ]
+        options, _ = run_agent(
+            agent="planner.options",
+            prompt_name="planner",
+            model=config.PLANNER_MODEL,
+            user_payload={**payload, "pass": "options", "concepts": qualified_concepts},
+            schema=OptionsOutput,
+            dispatcher=_dispatcher(run_retrieved, context=context),
+            validate=lambda o: validate_options(o, qualified),
+            mock_fn=mock_agents.mock_planner_options,
+        )
+
+    return plan, feedback, options, statuses
+
+
 def generate_plan(series_id: str, run_id: str) -> None:
-    """Full pipeline: retrieve refs → planner P1 → feedback → planner refine
-    (flagged only, max 1 loop) → feedback re-verdict → options → persist."""
+    """Legacy stage flow (pre-addendum UI + evals): full pipeline → persist."""
     try:
         series = store.get_series(series_id)
         if not series:
             raise RuntimeError(f"series {series_id} not found")
         context = CreatorContext.model_validate(series["context"])
-        family = objective_family(context.objective)
         store.set_series_status(series_id, "planning")
 
-        run_events.emit(run_id, "retrieve", "Pulling inspiration references + benchmarks…")
-        rag.ensure_ready()  # dependency-unavailable surfaces here, before any agent call
-        payload = {"context": context.model_dump(mode="json")}
-        # One citation allowlist for the whole pipeline run: agents may cite
-        # only source_ids their retrieval tools surfaced within THIS run.
-        run_retrieved: set[str] = set()
-
-        # ---- planner pass 1
-        run_events.emit(run_id, "plan", "Planner drafting concepts with evidence…")
-        dispatcher = _dispatcher(run_retrieved)
-        plan, _ = run_agent(
-            agent="planner.concepts",
-            prompt_name="planner",
-            model=config.PLANNER_MODEL,
-            user_payload={**payload, "pass": "concepts"},
-            schema=Plan,
-            dispatcher=dispatcher,
-            validate=lambda p: validate_plan(p, context, rag, retrieved_ids=run_retrieved),
-            mock_fn=mock_agents.mock_planner_concepts,
+        plan, feedback, options, statuses = run_pipeline(
+            context, lambda stage, msg: run_events.emit(run_id, stage, msg)
         )
-
-        # ---- feedback pass 1 (final rating authority)
-        run_events.emit(run_id, "critique", "Red-team feedback agent judging every element…")
-        feedback, _ = run_agent(
-            agent="feedback.judge",
-            prompt_name="feedback",
-            model=config.FEEDBACK_MODEL,
-            user_payload={**payload, "plan": plan.model_dump(mode="json")},
-            schema=Feedback,
-            dispatcher=_dispatcher(run_retrieved),
-            validate=lambda f: validate_feedback(f, plan, context, rag, retrieved_ids=run_retrieved),
-            prompt_replacements={"dynamic_persona": _persona_for(context)},
-            mock_fn=mock_agents.mock_feedback,
-        )
-
-        # ---- refine (hard cap: 1 loop; only flagged concepts may change)
-        flagged = _flagged_ids(family, feedback)
-        if flagged:
-            run_events.emit(run_id, "refine", f"Refining {len(flagged)} flagged concept(s) — one pass, diff-checked…")
-            refined_plan, _ = run_agent(
-                agent="planner.refine",
-                prompt_name="planner",
-                model=config.PLANNER_MODEL,
-                user_payload={
-                    **payload,
-                    "pass": "refine",
-                    "plan": plan.model_dump(mode="json"),
-                    "feedback": feedback.model_dump(mode="json"),
-                    "flagged_concept_ids": sorted(flagged),
-                },
-                schema=Plan,
-                dispatcher=_dispatcher(run_retrieved),
-                validate=lambda p: validate_plan(
-                    p, context, rag, previous_plan=plan, flagged_concept_ids=flagged,
-                    retrieved_ids=run_retrieved,
-                ),
-                mock_fn=mock_agents.mock_planner_refine,
-            )
-            plan = refined_plan
-
-            run_events.emit(run_id, "critique", "Feedback agent re-judging refined concepts…")
-            refined_feedback, _ = run_agent(
-                agent="feedback.rejudge",
-                prompt_name="feedback",
-                model=config.FEEDBACK_MODEL,
-                user_payload={
-                    **payload,
-                    "plan": plan.model_dump(mode="json"),
-                    "only_concept_ids": sorted(flagged),
-                    "refined": True,
-                },
-                schema=Feedback,
-                dispatcher=_dispatcher(run_retrieved),
-                validate=lambda f: validate_feedback(
-                    f, _subset_plan(plan, flagged), context, rag, retrieved_ids=run_retrieved
-                ),
-                prompt_replacements={"dynamic_persona": _persona_for(context)},
-                mock_fn=mock_agents.mock_feedback,
-            )
-            feedback = _merge_feedback(feedback, refined_feedback)
-
-        # ---- statuses + options
-        statuses = _statuses(family, feedback)
-        qualified = {cid for cid, s in statuses.items() if s["status"] in ("qualified", "strong")}
-
-        options = OptionsOutput(concept_options=[])
-        if qualified:
-            run_events.emit(run_id, "options", f"Generating 3 creative options for {len(qualified)} qualified concept(s)…")
-            qualified_concepts = [
-                {**c.model_dump(mode="json"), "ccs_final": statuses[c.id]["ccs"]}
-                for c in plan.concepts
-                if c.id in qualified
-            ]
-            options, _ = run_agent(
-                agent="planner.options",
-                prompt_name="planner",
-                model=config.PLANNER_MODEL,
-                user_payload={**payload, "pass": "options", "concepts": qualified_concepts},
-                schema=OptionsOutput,
-                dispatcher=_dispatcher(run_retrieved),
-                validate=lambda o: validate_options(o, qualified),
-                mock_fn=mock_agents.mock_planner_options,
-            )
 
         _persist(series_id, plan, feedback, options, statuses)
         store.set_series_status(series_id, "awaiting_review")
@@ -289,7 +342,7 @@ def regenerate_concept(series_id: str, concept_id: str, user_feedback: str, run_
                 "user_feedback": user_feedback,
             },
             schema=Plan,
-            dispatcher=_dispatcher(run_retrieved),
+            dispatcher=_dispatcher(run_retrieved, context=context),
             validate=lambda p: validate_plan(
                 p, context, rag, previous_plan=plan, flagged_concept_ids=flagged,
                 retrieved_ids=run_retrieved,
@@ -414,7 +467,10 @@ def _persist(
         state = statuses.get(concept.id, {"status": "rework", "ccs": 0})
         prev = existing.get(concept.id)
         order_idx = prev["order_idx"] if (keep_order and prev) else idx
-        store.upsert_concept_state(series_id, concept.id, state["status"], state["ccs"], order_idx)
+        store.upsert_concept_state(
+            series_id, concept.id, state["status"], state["ccs"], order_idx,
+            coverage=state.get("coverage"),
+        )
         if prev and prev.get("approved") and not keep_order:
             store.set_concept_approved(series_id, concept.id, True)
 

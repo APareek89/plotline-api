@@ -16,9 +16,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import config, orchestrator, store
+from app import thread as thread_driver
+from app.agents.runner import AgentHardFail
 from app.orchestrator import run_events
 from app.rag_client import RagUnavailable, rag
-from app.schemas import CreatorContext
+from app.schemas import CreatorContext, UserEvent
 
 app = FastAPI(title="plotline-api", version="0.1.0")
 
@@ -126,10 +128,14 @@ def create_series(body: SeriesCreateBody) -> dict[str, Any]:
         raise HTTPException(422, "Naming is required: every series/post needs a name")
     try:
         context = orchestrator.run_intake(body.form, body.upload_ids)
+    except AgentHardFail as exc:
+        raise HTTPException(422, f"Context incomplete: {exc.errors}") from exc
     except Exception as exc:
         raise HTTPException(500, f"Intake failed: {exc}") from exc
     series_id = store.create_series(context.model_dump(mode="json"))
-    return {"id": series_id, "context": context.model_dump(mode="json")}
+    # Addendum-01 §01: the form morphs into a thread — planning is chat-first.
+    thread = thread_driver.start_planning_thread(series_id)
+    return {"id": series_id, "context": context.model_dump(mode="json"), "thread": thread}
 
 
 @app.get("/api/series")
@@ -189,6 +195,47 @@ def suggested_inspiration(series_id: str) -> dict[str, Any]:
     except RagUnavailable as exc:
         raise HTTPException(503, f"RAG service unavailable: {exc}") from exc
     return {"sample_data": True, "selection_enabled": False, "cards": results}
+
+
+# -------------------------------------------- Addendum-01 §01/§02: threads --
+
+
+@app.get("/api/series/{series_id}/threads")
+def series_threads(series_id: str) -> list[dict[str, Any]]:
+    if not store.get_series(series_id):
+        raise HTTPException(404, "series not found")
+    return store.get_series_threads(series_id)
+
+
+@app.get("/api/threads/{thread_id}")
+def get_thread(thread_id: str, after_seq: int = 0) -> dict[str, Any]:
+    thread = store.get_thread(thread_id)
+    if not thread:
+        raise HTTPException(404, "thread not found")
+    series = store.get_series(thread["series_id"])
+    return {
+        **thread,
+        "series_name": series["name"] if series else "",
+        "working": thread_driver.working_step(thread_id),  # labeled step, never a bare spinner
+        "messages": store.get_messages(thread_id, after_seq=after_seq),
+        "concept_states": store.get_concept_states(thread["series_id"]),
+    }
+
+
+@app.post("/api/threads/{thread_id}/events")
+def post_event(thread_id: str, body: UserEvent) -> dict[str, Any]:
+    if body.thread_id != thread_id:
+        raise HTTPException(422, "thread_id mismatch")
+    try:
+        thread_driver.handle_event(body)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.get("/api/threads/{thread_id}/artifacts/{artifact_id}/activity")
+def artifact_activity(thread_id: str, artifact_id: str) -> list[dict[str, Any]]:
+    return store.get_artifact_activity(thread_id, artifact_id)
 
 
 # ------------------------------------------------------------------- runs ---

@@ -1,0 +1,204 @@
+source: >-
+  Format library (Addendum-01 §7.1) — repeatable series formats with
+  audience-fit notes and feasibility requirements. Curated from creator-economy
+  practice; tier=curated with urn urls (honest: no single external source).
+  Enriched by plotline-curator later.
+retrieved_at: "2026-08-22T00:00:00Z"
+chunks:
+  - source_id: C0101
+    source_url: urn:plotline:curated:C0101
+    source_tier: curated
+    title: "Format: prompt-based utility"
+    text: >-
+      Prompt-based utility series: each episode delivers one copy-pasteable prompt
+      solving a named task, shown running on screen. Audience fit: practitioners who
+      want outcomes, not theory. Feasibility: requires screen recording and the tool
+      itself — no camera. Failure mode: prompt without the on-screen result reads as
+      an ad. Cadence: sustains 2-3x/week.
+    platform: [generic]
+    topic: [format_library, utility]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0102
+    source_url: urn:plotline:curated:C0102
+    source_tier: curated
+    title: "Format: MCP/tool demo"
+    text: >-
+      Tool-demo series: one real workflow automated per episode, cursor-led screen
+      recording, result timestamped. Audience fit: practitioner-to-expert; novices
+      need a slower variant. Feasibility: demands genuine tool access — faked demos
+      are detectable and fatal. Cadence: weekly minimum viable.
+    platform: [generic]
+    topic: [format_library, tool_demo]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0103
+    source_url: urn:plotline:curated:C0103
+    source_tier: curated
+    title: "Format: skill showcase"
+    text: >-
+      Skill showcase: before/after of a real deliverable produced with the skill,
+      process compressed to under 20 seconds. Audience fit: aspirants who want the
+      outcome. Feasibility: needs a genuine portfolio pipeline; recycled examples
+      exhaust in weeks. Cadence: weekly.
+    platform: [generic]
+    topic: [format_library, showcase]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0104
+    source_url: urn:plotline:curated:C0104
+    source_tier: curated
+    title: "Format: role-rotation demo"
+    text: >-
+      Role-rotation: the same tool or method applied to a different profession each
+      episode (recruiter, teacher, lawyer). Audience fit: broad-funnel discovery;
+      each episode recruits a new segment. Feasibility: light — one template, new
+      subject weekly. Failure mode: surface-level takes annoy each profession.
+    platform: [generic]
+    topic: [format_library, role_rotation]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0105
+    source_url: urn:plotline:curated:C0105
+    source_tier: curated
+    title: "Format: myth-bust"
+    text: >-
+      Myth-bust: state a widely-repeated claim, disprove it with a receipt on
+      screen. Audience fit: practitioners tired of hype; drives comment debate.
+      Feasibility: every episode needs an actual test or artifact — opinion-only
+      myth-busting is the generic failure the anti-generic rules target. Cadence:
+      weekly, interleaved with a utility format.
+    platform: [generic]
+    topic: [format_library, myth_bust]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0106
+    source_url: urn:plotline:curated:C0106
+    source_tier: curated
+    title: "Format: challenge / versus"
+    text: >-
+      Challenge format: same task, two contenders (human vs AI, tool A vs tool B),
+      visible scorecard, comment vote. Audience fit: all levels — the versus
+      structure carries its own payoff. Feasibility: medium effort; needs both
+      contenders run honestly. Cadence: weekly anchor; seasons work.
+    platform: [generic]
+    topic: [format_library, challenge]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0107
+    source_url: urn:plotline:curated:C0107
+    source_tier: curated
+    title: "Format: build-in-public diary"
+    text: >-
+      Serialized diary: day-counter opener, one win or disaster per episode, next
+      episode foreshadowed. Audience fit: followers-objective series — serialization
+      converts viewers to followers. Feasibility: requires a real ongoing project;
+      cadence 2-3x/week or the day-count logic breaks.
+    platform: [generic]
+    topic: [format_library, diary, serialization]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0108
+    source_url: urn:plotline:curated:C0108
+    source_tier: curated
+    title: "Format: cost-slasher"
+    text: >-
+      Cost-slasher: name a real recurring cost, replace it on screen with a cheaper
+      or free stack, show the math. Audience fit: conversion-adjacent; strongest
+      with an exact money number in the hook. Feasibility: needs the real invoice
+      or bill as the receipt. Failure mode: unverifiable savings claims.
+    platform: [generic]
+    topic: [format_library, cost_slasher]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0109
+    source_url: urn:plotline:curated:C0109
+    source_tier: curated
+    title: "Format: teardown / audit"
+    text: >-
+      Teardown: audit a real public example (landing page, profile, video) against
+      a stated rubric, on screen. Audience fit: practitioners; positions the
+      creator as the standard-setter. Feasibility: light production, heavy
+      expertise; permission etiquette matters for small accounts.
+    platform: [generic]
+    topic: [format_library, teardown]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0110
+    source_url: urn:plotline:curated:C0110
+    source_tier: curated
+    title: "Format: anchor-style recap"
+    text: >-
+      News recap: fixed 3-story structure, lower-third headlines, explicit no-hype
+      positioning. Audience fit: practitioners who skim news; appointment viewing
+      compounds. Feasibility: requires a sustainable sourcing routine; freshness
+      rule R6 applies hard here. Cadence: strict weekly slot.
+    platform: [generic]
+    topic: [format_library, recap, freshness]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0111
+    source_url: urn:plotline:curated:C0111
+    source_tier: curated
+    title: "Format: POV automation"
+    text: >-
+      POV framing: viewer placed inside a mildly transgressive win ("POV: you
+      automate your job"), split screen with the workflow live. Audience fit:
+      novice-to-practitioner; POV framing lowers the identification barrier.
+      Feasibility: avatar or faceless variants work; demo must be real.
+    platform: [generic]
+    topic: [format_library, pov]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0112
+    source_url: urn:plotline:curated:C0112
+    source_tier: curated
+    title: "Format: listicle with a twist"
+    text: >-
+      Listicle demo: N tools/methods, one demoed live, self-referential or
+      contrarian twist to escape listicle saturation. Audience fit: broad;
+      saturation is the standing risk — the twist and the receipt carry
+      differentiation, per the utility-niche rubric. Cadence: biweekly ceiling.
+    platform: [generic]
+    topic: [format_library, listicle]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0113
+    source_url: urn:plotline:curated:C0113
+    source_tier: curated
+    title: "Format: office-hours Q&A"
+    text: >-
+      Office-hours: answer one real audience question per episode, question shown
+      verbatim on screen. Audience fit: retention play for an existing base, weak
+      for cold reach. Feasibility: trivially light; requires genuine inbound
+      questions — fabricated ones read instantly.
+    platform: [generic]
+    topic: [format_library, qa]
+    content_type: [short_video]
+    claim_type: method
+  - source_id: C0114
+    source_url: urn:plotline:curated:C0114
+    source_tier: curated
+    title: "Format: LinkedIn text-post system"
+    text: >-
+      LinkedIn native: hook line above the fold, one concrete artifact or number
+      per post, swipe-through carousel for depth. Retention rubric is dwell and
+      swipe-through, not watch-time. Audience fit: professional practitioners.
+      Feasibility: writing-only; inspiration must be manually curated (no scraping).
+    platform: [linkedin]
+    topic: [format_library, linkedin, text_post]
+    content_type: [text_post, carousel]
+    claim_type: method
+  - source_id: C0115
+    source_url: urn:plotline:curated:C0115
+    source_tier: curated
+    title: "Format library: choosing and combining"
+    text: >-
+      Choosing formats: match format feasibility to stated tool access and
+      capacity before audience taste; one anchor format plus one experimental
+      slot per 4 episodes preserves the 60/30/10 pillar mix. Two formats maximum
+      per young series — more fragments the audience's expectation loop.
+    platform: [generic]
+    topic: [format_library, strategy]
+    content_type: [short_video, text_post]
+    claim_type: heuristic

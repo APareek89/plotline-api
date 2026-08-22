@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plotline — PRD Addendum 01 (changes only)</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16181D;--paper:#FAFAF8;--card:#fff;--rec:#E5312B;--steel:#5A6270;--line:#E4E2DC;--wash:#F1F0EB;--slab:#1E2430;--slab2:#2A3242;--ok:#1E7A4D;--warn:#B26A00}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 "Archivo",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"Space Mono",monospace}
+main{max-width:920px;margin:0 auto;padding:40px 28px 90px}
+header.cov{border-bottom:2px solid var(--ink);padding-bottom:28px;margin-bottom:8px}
+h1{font-family:"Archivo Black";font-size:clamp(30px,4.4vw,46px);line-height:1.04;text-transform:uppercase;letter-spacing:-.02em}
+section{padding:42px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:none}
+.eyebrow{display:flex;align-items:center;gap:9px;font-family:"Space Mono";font-size:11px;letter-spacing:.14em;color:var(--steel);text-transform:uppercase;margin-bottom:14px}
+.eyebrow::before{content:"";width:8px;height:8px;background:var(--rec)}
+h2{font-family:"Archivo Black";font-size:clamp(21px,2.4vw,28px);text-transform:uppercase;letter-spacing:-.015em;margin-bottom:16px;line-height:1.1}
+h3{font-size:16px;font-weight:700;margin:24px 0 10px}
+h4{font-family:"Space Mono";font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);margin:18px 0 8px}
+p{max-width:76ch;margin-bottom:10px}
+.note{font-size:13px;color:var(--steel);max-width:76ch}
+ul.tight{list-style:none;max-width:78ch}
+ul.tight li{padding:7px 0 7px 20px;position:relative;border-bottom:1px dotted var(--line)}
+ul.tight li::before{content:"—";position:absolute;left:0;color:var(--rec);font-weight:700}
+ul.tight li:last-child{border-bottom:none}
+.verdict{border-left:3px solid var(--ink);background:var(--wash);padding:12px 16px;max-width:78ch;font-size:14px;margin:14px 0}
+.verdict b{font-family:"Space Mono";font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0 6px}
+th{font-family:"Space Mono";font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);text-align:left;padding:8px 12px 8px 0;border-bottom:2px solid var(--ink);vertical-align:bottom}
+td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:hover td{background:var(--wash)}
+.pill{display:inline-block;font-family:"Space Mono";font-size:10px;letter-spacing:.06em;padding:2px 8px;border:1px solid var(--ink);border-radius:99px;white-space:nowrap}
+.pill.red{border-color:var(--rec);color:var(--rec)}
+.pill.dim{border-color:var(--line);color:var(--steel)}
+pre{background:var(--slab);color:#DCE2EC;font-family:"Space Mono",monospace;font-size:11.5px;line-height:1.55;padding:14px 16px;border-radius:10px;overflow-x:auto;margin:10px 0}
+pre b{color:#fff}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:14px 0}
+.flow .step{background:var(--card);border:1.5px solid var(--ink);padding:10px 13px;font-size:12.5px;min-width:130px;flex:1}
+.flow .step b{display:block;font-family:"Space Mono";font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--rec);margin-bottom:3px}
+.flow .arr{align-self:center;font-family:"Space Mono";color:var(--steel)}
+/* wireframe */
+.wf{display:grid;grid-template-columns:150px 1fr 220px;gap:8px;background:var(--wash);border:1px solid var(--line);border-radius:14px;padding:10px;margin:14px 0;font-family:"Space Mono";font-size:9px;color:var(--steel)}
+.wf .col{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:270px;display:flex;flex-direction:column;gap:6px}
+.wf .hd6{font-size:8px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:2px}
+.wf .it{border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+.wf .it.on{border-color:var(--rec);color:var(--ink);font-weight:700}
+.wf .agent{background:var(--slab);color:#C9D2E2;border-radius:8px;padding:6px;border:none}
+.wf .userb{align-self:flex-end;background:var(--wash);border-radius:8px 8px 2px 8px;padding:4px 6px;border:1px solid var(--line)}
+.wf .card{border:1.5px solid #3A4356;background:var(--slab2);color:#C9D2E2;border-radius:6px;padding:4px 6px;margin-top:4px}
+.wf .pbar{margin-top:auto;border:1.5px solid var(--ink);border-radius:10px;padding:5px 6px;display:flex;justify-content:space-between;align-items:center;background:#fff}
+.wf .send{width:14px;height:14px;border-radius:99px;background:var(--rec)}
+.wf .meta{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding:3px 0}
+.wf .acts{display:flex;gap:4px;justify-content:flex-end}
+.wf .ic{width:14px;height:14px;border:1px solid var(--line);border-radius:4px}
+.wf .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.wf .tabs span.on2{color:var(--ink);font-weight:700;border-bottom:2px solid var(--rec)}
+@media(max-width:760px){.wf{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+
+<header class="cov">
+  <div class="eyebrow">PRD Addendum 01 · changes only · applies over PRD v1</div>
+  <h1>Content Studio goes chat-first</h1>
+  <p class="note" style="margin-top:12px">Owner: Anand · 22 Aug 2026 · Reference for panel/thread behavior: Supercomputer app screenshots (2) shared with this brief. Sections 01–06 = new UX + prompt deltas. Section 07 = previously parked changes, now committed. Section 09 maps what this supersedes in v1. Everything not listed here stands as written in v1.</p>
+</header>
+
+<section id="a1">
+  <div class="eyebrow">01 · Content Studio — the transformation</div>
+  <h2>Context blocks in, then everything is a conversation</h2>
+  <div class="flow">
+    <div class="step"><b>Land</b>Context blocks (v1 §3.1 spec unchanged: guided blocks, required/optional flags, uploads, series name). The only form surface in the product.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Morph</b>On submit, the form collapses into a pinned, editable Context Summary card at the top of a new thread. Viewport becomes an agentic chat with the bottom prompt modal.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Thread</b>Agent drives: inspiration set → format options → concepts in batches → feedback verdicts → options → plan. All approvals in-thread (tap or type).</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Detail</b>Clicking any artifact card opens the right detail panel (§02). Prompt bar stays live; "this" targets the open artifact.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Done</b>Final plan approved in-thread → series lands in Plans; thread stays as the series' planning record.</div>
+  </div>
+  <ul class="tight">
+    <li><strong>No stage sidebar anywhere.</strong> Stages are the agent's internal sequence (matching Creative Studio's rule from v1). Left panel = series/threads only (§03).</li>
+    <li><strong>In-thread artifact types:</strong> context_summary · inspiration_set (cards with description + why-it-works; sample-data/disabled state per v1 rules) · format_options (§07.1) · concept · options · plan · escalation. Each renders as a card stack inside an agent message, never as prose.</li>
+    <li><strong>Approvals are dual-path:</strong> every card carries action buttons (Approve / Feedback / Regenerate), and typed commands ("approve c3", "regenerate the second one, punchier") resolve to the same events. Neither path is second-class.</li>
+    <li><strong>Concepts arrive in batches of 3–4 per message</strong> with a one-line frame — never all ten at once, never one at a time.</li>
+    <li><strong>Editing the Context Summary</strong> after planning starts prompts a confirm: "changes context — re-run plan? (concepts already approved are kept unless affected)".</li>
+  </ul>
+</section>
+
+<section id="a2">
+  <div class="eyebrow">02 · Right artifact panel</div>
+  <h2>Click a card, get the full story on the right</h2>
+  <div class="wf" role="img" aria-label="Wireframe: left series rail, center thread, right detail panel">
+    <div class="col">
+      <div class="hd6">Series</div>
+      <div class="it on">● AI Content — 01</div>
+      <div class="it">AI Content — 02</div>
+      <div class="it">GlowLab Launch — 01</div>
+      <div class="it">+ New series</div>
+    </div>
+    <div class="col">
+      <div class="hd6">Thread — AI Content — 01</div>
+      <div class="it">▣ Context Summary (pinned · edit)</div>
+      <div class="agent">Agent · 3 concepts for week 1:
+        <div class="card">c1 · "Fired my editor" · CCS 92</div>
+        <div class="card">c2 · "AI edits while I sleep" · 84</div>
+        <div class="card">c3 · "Reels die at 3s" · 71</div>
+      </div>
+      <div class="userb">approve c1, show options</div>
+      <div class="pbar"><span>Tweak anything…</span><span class="send"></span></div>
+    </div>
+    <div class="col">
+      <div class="acts"><span class="ic"></span><span class="ic"></span><span class="ic"></span><span class="ic"></span></div>
+      <div class="tabs"><span class="on2">Concept</span><span>Activity</span></div>
+      <div class="it" style="min-height:60px">Full CCF card: description · creative direction · hook · element table w/ evidence + feedback downgrades</div>
+      <div class="meta"><span>CCS</span><span>92 · QUALIFIED</span></div>
+      <div class="meta"><span>Evidence coverage</span><span>64% data-backed</span></div>
+      <div class="meta"><span>Slot</span><span>Mon · Wk1</span></div>
+      <div class="meta"><span>Status</span><span>Approved</span></div>
+      <div class="acts" style="margin-top:auto"><span class="it on">Approve</span><span class="it">Regenerate</span></div>
+    </div>
+  </div>
+  <table>
+    <tr><th style="width:22%">Region</th><th>Spec</th></tr>
+    <tr><td>Open / close</td><td>Opens on click of any artifact card. One panel at a time; clicking another card swaps content (no stacking). Close: ✕, Esc, or clicking the thread. Desktop ≥1200px: panel (420–480px) sits beside the thread, thread compresses — no overlay. 768–1199px: overlay with scrim. Mobile: full-screen sheet with back.</td></tr>
+    <tr><td>Header actions</td><td>Top-right, icon buttons in reference order: download (generated assets only) · expand · overflow ⋮ (copy link, view JSON) · close. <strong>Expand</strong> = full-width takeover; this is where the plan's timeline lives with drag-to-reorder — never crammed into the 440px panel.</td></tr>
+    <tr><td>Tabs</td><td><strong>Concept</strong> (or Plan/Asset — the artifact itself) · <strong>Activity</strong> (version history for this artifact: proposed → feedback downgrades with reasons → refined → approved, each timestamped). Mirrors the reference's Generation / Chat History split.</td></tr>
+    <tr><td>Body — concept</td><td>Full CCF card exactly as specced in v1 §3.8 (description, creative direction, hook, element rows with evidence tags and visible downgrades), then metadata rows (icon · label · value): CCS + verdict, evidence coverage %, slot, format, platform, status, created. PROVISIONAL badge here when coverage &lt; 40% (§07.3).</td></tr>
+    <tr><td>Body — plan</td><td>Series summary + concept list with statuses; Expand for the timeline board. Approve-plan is a primary action in the panel footer AND in-thread — same event.</td></tr>
+    <tr><td>Prompt-bar link</td><td>While a panel is open, the prompt bar shows a context chip ("c3 · Reels die at 3s ✕"). Messages resolve "this / it" to that artifact; chip dismissible.</td></tr>
+    <tr><td>Deep link</td><td>URL carries thread + artifact id; reload restores thread scroll + open panel.</td></tr>
+  </table>
+</section>
+
+<section id="a3">
+  <div class="eyebrow">03 · Left panel &amp; thread naming</div>
+  <h2>Series only, numbered threads</h2>
+  <ul class="tight">
+    <li><strong>Contents:</strong> series/project names only — no stages, no settings. Grouped: Active · Done. "+ New series" routes to context blocks; "DIY thread" (Creative Studio) stays in that tab's rail per v1.</li>
+    <li><strong>Numbering:</strong> threads of one series are ordinal: <span class="mono">AI Content — 01</span>, <span class="mono">— 02</span>… Zero-padded 2 digits, assigned at thread creation, never reused or renumbered on delete. The Content Studio planning thread is — 01 by convention; per-post Creative Studio threads continue the sequence.</li>
+    <li><strong>Names</strong> come from the required series-name field (v1 rule). Rename allowed from the rail (kebab menu) — renames propagate to Plans; numbers don't change.</li>
+    <li><strong>States:</strong> active thread = red left-bar + dot; unread agent activity = dot on the series row; truncate long names with tooltip; search field appears at &gt;8 series.</li>
+  </ul>
+</section>
+
+<section id="a4">
+  <div class="eyebrow">04 · UX fundamentals</div>
+  <h2>The basics, specified — not assumed</h2>
+  <table>
+    <tr><th style="width:20%">Area</th><th>Rule</th></tr>
+    <tr><td>Loading</td><td>Agent work shows labeled steps, not a spinner: "retrieving evidence → drafting concepts → feedback pass → validating". Text streams; artifact cards appear as skeletons that fill. Long media jobs (Phase 2) show per-shot progress bars.</td></tr>
+    <tr><td>Honest empties</td><td>"No evidence in DB", "sample data — pipeline pending", "insufficient data for saturation" render as designed states (muted, dashed), never as silent gaps or fake confidence. The honesty rules of v1 are UI states, not footnotes.</td></tr>
+    <tr><td>Errors</td><td>Validation failure after retries → in-thread error card: what failed, one Retry action, never a stack trace. Network loss → thread persists locally, prompt bar disables with a reconnect note.</td></tr>
+    <tr><td>Destructive confirm</td><td>Regenerate (overwrites a concept), context edits mid-plan, and thread delete get a confirm; approvals don't.</td></tr>
+    <tr><td>Keyboard</td><td>Cmd/Ctrl+Enter send · Esc closes panel · / focuses prompt bar · ↑ edits last user message.</td></tr>
+    <tr><td>Accessibility</td><td>Panel is an aria-labeled complementary region with focus trap while overlaying; all actions reachable by tab; card actions have text labels (icons never alone); contrast ≥ 4.5:1 on both light thread and dark studio surfaces; prefers-reduced-motion kills the morph animation and streaming shimmer.</td></tr>
+    <tr><td>Motion</td><td>One signature transition only: context form → summary card collapse (≤300ms). Panel slides ≤200ms. Nothing else animates.</td></tr>
+    <tr><td>Persistence</td><td>Threads restore scroll position, open panel, and unsent prompt-bar draft per thread.</td></tr>
+  </table>
+</section>
+<section id="a5">
+  <div class="eyebrow">05 · Interaction contract (adds to §3.9)</div>
+  <h2>The envelope every agent message travels in</h2>
+  <p>This is the one thing Claude Code must implement first — the UI renders cards from it, approvals flow back through it, and the prompt deltas below depend on it.</p>
+<pre><b>// AgentMessage — every agent turn, all studios</b>
+AgentMessage {
+  thread_id
+  text: string(≤2 short sentences)      // conversational envelope only
+  artifacts [{
+    type: "context_summary"|"inspiration_set"|"format_options"|"concept"|
+          "plan"|"options"|"escalation"|"confidence_card"|"script_package"|
+          "brand_kit"|"final_delivery"
+    id, title,
+    payload: &lt;the §3.9 schema for that type — unchanged&gt;
+    actions [{ id, label, style:"primary"|"secondary"|"danger", event }]
+  }]
+  question: string | null                // at most ONE
+}
+<b>// UserEvent — both input paths normalize to this</b>
+UserEvent {
+  thread_id
+  type: "text" | "action"
+  text?: string                          // free typing
+  action?: { artifact_id, event }        // button tap
+  panel_focus?: artifact_id              // set while a detail panel is open
+}
+// Server-side: typed approvals ("approve c3") are parsed to action
+// events; both paths hit the same handler. Validators unchanged (§3.9).</pre>
+</section>
+
+<section id="a6">
+  <div class="eyebrow">06 · Prompt deltas (§11)</div>
+  <h2>Exact text to append — nothing else in §11 changes</h2>
+  <h4>Append to Shared agent policy</h4>
+<pre>CONVERSATIONAL PROTOCOL
+8. You speak inside a thread. Every reply is an AgentMessage envelope:
+   text ≤2 short sentences, artifacts[] as structured payloads, at most
+   ONE question. The UI renders artifacts as cards — never restate an
+   artifact's content in text, never present a plan as prose.
+9. Reference artifacts by id ("concept c3"), not by re-describing them.
+10. Deliver concepts in batches of 3–4 artifacts per message, each batch
+   framed in one line.
+11. If the incoming UserEvent carries panel_focus, resolve "this/it" to
+   that artifact.
+12. Action events and typed approvals are the same signal. Never ask the
+   user to confirm what an action event already confirmed.</pre>
+  <h4>Append to Planner agent</h4>
+<pre>DELIVERY (thread mode)
+- PASS 0.5 (new, before PASS 1): propose 2–3 series FORMATS as
+  format_options — {format_id, name, vehicle, why_fits (evidence rules
+  apply), effort, cadence_fit}. Draw from the format-library corpus and
+  inspiration retrieval. Wait for the user's pick/edit; PASS 1 concepts
+  are episodes of chosen formats.
+- Emit concepts as artifact batches per the protocol. On refine, emit
+  only changed concepts (diff rule unchanged) with a one-line summary
+  of what changed and why, citing the feedback verdict ids.</pre>
+  <h4>Append to Feedback agent</h4>
+<pre>- Your element_verdicts and lenses are rendered verbatim in the
+  artifact's Activity tab — write reasons for the creator's eyes:
+  concrete, one sentence each, no meta-commentary about being an AI.
+- New lens inputs (§07): saturation returns "insufficient_data" below
+  the niche asset threshold; cross-platform evidence must be flagged
+  and downgraded to PRINCIPLE; apply the anti-generic rules R1–R7.</pre>
+  <p class="note">Creative director + brand-kit prompts: unchanged except rule 8–12 inheritance via shared policy.</p>
+</section>
+
+<section id="a7">
+  <div class="eyebrow">07 · Committed batch (previously parked)</div>
+  <h2>Format stage, anti-generic rules, red-team fixes</h2>
+
+  <h3>7.1 Format stage + intake fields</h3>
+  <ul class="tight">
+    <li><strong>PASS 0.5</strong> as specced in §06: planner proposes 2–3 repeatable formats before any concepts; user picks in-thread. Concepts become episodes; Plans shows format per series.</li>
+    <li><strong>Format library</strong> = new KB corpus dimension: entries like prompt-based utility, MCP/tool demo, skill showcase, role-rotation demo, myth-bust, challenge — each with audience-fit notes and feasibility requirements. Seeded manually (~15 entries), enriched by the curator later.</li>
+    <li><strong>Three new context fields (§3.1):</strong> audience sophistication (novice / practitioner / expert) · tool access ("what can you actually demo") · positioning depth (beginner-guide vs power-user). All required — R1 and format feasibility depend on them.</li>
+  </ul>
+
+  <h3>7.2 Anti-generic rules R1–R7</h3>
+  <table>
+    <tr><th style="width:8%">#</th><th style="width:32%">Rule</th><th style="width:38%">Test</th><th>Enforced by</th></tr>
+    <tr><td>R1</td><td>Audience-knowledge floor</td><td>Concept states "assumed known" vs "the new thing"; new-thing inside the audience's known set → reject</td><td>Feedback lens</td></tr>
+    <tr><td>R2</td><td>Receipt required</td><td>Advice payloads name a demonstrable artifact in creative_direction</td><td>Validator (field) + lens (is it proof)</td></tr>
+    <tr><td>R3</td><td>Specificity floor</td><td>Hook contains ≥1 of {role, number, artifact, outcome}; banned-abstraction lexicon ("game-changer", "boost productivity"…)</td><td>Validator (lexicon) + lens</td></tr>
+    <tr><td>R4</td><td>Angle saturation, not topic</td><td>Feedback articulates the packaging delta vs nearest neighbors in one sentence; can't → downgrade</td><td>Feedback lens</td></tr>
+    <tr><td>R5</td><td>Minus-hook test</td><td>Strip the hook; remainder reads as documentation → kill flag</td><td>Feedback lens</td></tr>
+    <tr><td>R6</td><td>Freshness</td><td>Tool/trend references need a trend-corpus citation with as_of ≤ 45d</td><td>Validator (date) — active once trends corpus ships</td></tr>
+    <tr><td>R7</td><td>Effort–value symmetry</td><td>L-effort + generic payload → reject</td><td>Feedback lens</td></tr>
+  </table>
+  <p class="note">Placement: mechanical checks live in the server-side validator (prompts drift, validators don't); judgment checks are feedback-agent lenses; the planner prompt carries them only as generation guidance. Rule telemetry logged per concept for monthly tuning.</p>
+
+  <h3>7.3 Red-team fixes (from the Phase-1 simulation)</h3>
+  <table>
+    <tr><th style="width:34%">Fix</th><th>Spec</th></tr>
+    <tr><td>LinkedIn coverage</td><td>Add linkedin to platform enums + text-post/carousel content types; retention rubric for text = dwell/swipe-through, not watch-time; corpus sources: official creator resources + expert algorithm studies; inspiration for LinkedIn = manual curation + user-submitted links only (post-hiQ, scraping it is the worst legal terrain)</td></tr>
+    <tr><td>Saturation guard</td><td>Niche asset count &lt; 25 → saturation lens returns "insufficient data", never a rating</td></tr>
+    <tr><td>Cross-platform evidence</td><td>Retrieval hard-filters platform; mismatched citations downgraded to PRINCIPLE by the feedback agent</td></tr>
+    <tr><td>Evidence-coverage badge</td><td>Coverage % (data-backed weight share) shown beside CCS everywhere; &lt; 40% → plan and concepts carry a PROVISIONAL badge regardless of CCS</td></tr>
+    <tr><td>Niche coverage gate</td><td>"Supported niche" requires ≥30 inspiration assets + ≥15 platform-matched KB chunks; below → labeled provisional at context time, before the plan disappoints</td></tr>
+    <tr><td>Thin-plan escalation</td><td>&gt;40% of concepts &lt; 70 after the single refine → escalation artifact in-thread: seed inspiration / broaden niche / accept provisional</td></tr>
+  </table>
+
+  <h3>7.4 Differentiation rubric — utility niches</h3>
+  <p>For utility content (prompts, tools, how-to): Differentiation = <strong>distinctive packaging + receipts on a possibly saturated topic</strong>, not novel information. Topic repetition is acceptable; angle-and-package sameness is the failure. Rubric text updates inside the element definition; weights unchanged.</p>
+</section>
+
+<section id="a8">
+  <div class="eyebrow">08 · Post-Phase-1 build (pointer only)</div>
+  <h2>Curator: trends + daily inspiration</h2>
+  <p><span class="pill">plotline-curator</span> — one repo, three GitHub Actions workflows: trends feed (daily/weekly, TTL 30–60d enforced at retrieval, powers R6) · daily Apify inspiration ingestion (velocity becomes real with 24h resampling; ~$15–45/mo to Apify; DynamoDB 1 WCU is ample) · evals on PR (planted-flaw catch-rate as CI). Builds after Phase 1 v1; Codex brief to be written in the bootstrap-compatible format then. Trend evidence supports Hook/Freshness only — never substitutes Audience evidence.</p>
+</section>
+
+<section id="a9">
+  <div class="eyebrow">09 · Supersession map</div>
+  <h2>What this changes in v1</h2>
+  <table>
+    <tr><th style="width:26%">v1 reference</th><th>Status after this addendum</th></tr>
+    <tr><td>§3.1 User context</td><td>Extended: 3 new required fields (7.1); blocks remain the only form surface</td></tr>
+    <tr><td>§3.4 Agent pipeline</td><td>+ PASS 0.5 format stage</td></tr>
+    <tr><td>§3.8 CCF</td><td>+ evidence-coverage % beside CCS, PROVISIONAL badge rule, Differentiation rubric note (7.4)</td></tr>
+    <tr><td>§3.9 Schemas</td><td>+ AgentMessage / UserEvent envelope (05); artifact payload schemas unchanged</td></tr>
+    <tr><td>§10 Intelligence sources</td><td>+ saturation insufficient-data guard, platform hard filter; trends corpus w/ TTL noted as future</td></tr>
+    <tr><td>§11 Prompts</td><td>+ conversational protocol, planner delivery + PASS 0.5, feedback lens additions (06)</td></tr>
+    <tr><td>§12 Content Studio row</td><td><strong>Replaced</strong> by 01–04: chat-first, no stage sidebar, right artifact panel, numbered-thread rail</td></tr>
+    <tr><td>§12 Plans / My Space / DS rows</td><td>Unchanged</td></tr>
+    <tr><td>§15 Phase 1 scope</td><td>+ envelope, right panel, format stage, R1–R7 validators/lenses. Exit gate unchanged</td></tr>
+    <tr><td>Demo v2 (html)</td><td>Now partially stale: shows a stage sidebar and non-thread Content Studio. Rebuild on request after build starts — the PRD + this addendum are the source of truth</td></tr>
+  </table>
+</section>
+
+</main>
+</body>
+</html>
