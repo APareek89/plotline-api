@@ -8,15 +8,17 @@ from __future__ import annotations
 import asyncio
 import os
 import json
+import re
 import shutil
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import config, creative, orchestrator, store
+from app import brand_extract, campaign, config, creative, orchestrator, store
 from app import thread as thread_driver
 from app.agents.runner import AgentHardFail
 from app.orchestrator import run_events
@@ -143,7 +145,11 @@ def create_series(body: SeriesCreateBody) -> dict[str, Any]:
 
 @app.get("/api/series")
 def list_series() -> list[dict[str, Any]]:
-    return store.list_series()
+    """Content series only. A campaign is a series row too, but it carries a
+    CampaignContext the content surfaces can't render — GET /api/campaigns is
+    the authoritative list for those."""
+    campaign_ids = {thread["series_id"] for thread in store.list_threads(kind="campaign")}
+    return [series for series in store.list_series() if series["id"] not in campaign_ids]
 
 
 @app.get("/api/series/{series_id}")
@@ -235,6 +241,8 @@ def post_event(thread_id: str, body: UserEvent) -> dict[str, Any]:
     try:
         if thread["kind"] == "creative":
             creative.handle_event(body)
+        elif thread["kind"] == "campaign":
+            campaign.handle_event(body)
         else:
             thread_driver.handle_event(body)
     except ValueError as exc:
@@ -360,14 +368,17 @@ def edit_prompt(thread_id: str, slot: str, body: PromptEditBody) -> dict[str, An
 class DiyBody(BaseModel):
     kind: str  # image | video | audio
     prompt: str
-    model_tier: str = "final"  # draft | final | pro (images)
+    model_tier: Literal["draft", "final", "pro"] = "final"  # images; the fixed stack, not a model id
     ratio: str = "9:16"
     duration_s: float = 4.0
 
 
 @app.post("/api/diy/generate")
 def diy_generate(body: DiyBody) -> dict[str, Any]:
-    """§06 DIY: same prompt-artifact → asset pair, cost shown, no agent."""
+    """§06 DIY: same prompt-artifact → asset pair, cost shown, no agent.
+    model_tier picks among the FIXED stack (config.MEDIA_MODELS image_draft/
+    final/pro) — it is not model selection, which stays unavailable behind the
+    disabled Settings gear."""
     from app.fal_client import MediaError, estimate_cost, generate
 
     cost = estimate_cost(body.kind, duration_s=body.duration_s,
@@ -389,6 +400,237 @@ def diy_generate(body: DiyBody) -> dict[str, Any]:
 @app.get("/api/diy/assets")
 def diy_assets() -> list[dict[str, Any]]:
     return [a for a in store.list_assets() if a["params"].get("diy")]
+
+
+# --------------------------- Addendum-03: Marketing Studio — campaigns ------
+
+CAMPAIGN_BLOCKS = ("product", "campaign", "brand")
+
+
+def _campaign_or_404(campaign_id: str) -> dict[str, Any]:
+    series = store.get_series(campaign_id)  # a campaign IS a series row
+    if not series:
+        raise HTTPException(404, "campaign not found")
+    return series
+
+
+class CampaignCreateBody(BaseModel):
+    name: str
+
+
+@app.post("/api/campaigns")
+def create_campaign(body: CampaignCreateBody) -> dict[str, Any]:
+    """Step 0: the blank landing's only block. Name is the Campaigns-tab
+    handle and the thread numbering prefix, so it must be unique."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, "Naming is required: give the campaign a name")
+    if any(row["name"].strip().lower() == name.lower() for row in list_campaigns()):
+        raise HTTPException(422, f"A campaign named '{name}' already exists — pick another name")
+    return campaign.start_campaign(name)
+
+
+@app.get("/api/campaigns")
+def list_campaigns() -> list[dict[str, Any]]:
+    """My Campaigns rows. Campaign series are the ones carrying a campaign
+    thread; thread_id is the latest one, which the Open CTA lands on."""
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for thread in store.list_threads(kind="campaign"):  # newest first
+        series_id = thread["series_id"]
+        if series_id in seen:
+            continue
+        seen.add(series_id)
+        series = store.get_series(series_id)
+        if not series:
+            continue
+        context = series["context"]
+        rows.append({
+            "id": series_id,
+            "name": series["name"],
+            "objective": (context.get("campaign") or {}).get("objective"),
+            "status": series["status"],
+            "creative_count": len(store.list_ad_cards(series_id)),
+            "spend_credits": round(store.campaign_spend(series_id) / creative.CREDIT_USD, 1),
+            "thread_id": thread["id"],
+        })
+    return rows
+
+
+@app.get("/api/campaigns/{campaign_id}")
+def get_campaign(campaign_id: str) -> dict[str, Any]:
+    series = _campaign_or_404(campaign_id)
+    return {
+        "id": campaign_id,
+        "name": series["name"],
+        "context": series["context"],
+        "status": series["status"],
+        "cards_done": campaign.cards_done(series["context"]),
+        "threads": store.get_series_threads(campaign_id),
+        "ad_cards": store.list_ad_cards(campaign_id),
+    }
+
+
+@app.put("/api/campaigns/{campaign_id}/blocks/{block}")
+def put_campaign_block(campaign_id: str, block: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """Step 2 cards / path-b elicitation — both write the identical schema."""
+    _campaign_or_404(campaign_id)
+    if block not in CAMPAIGN_BLOCKS:
+        raise HTTPException(422, f"unknown block '{block}' — expected one of {list(CAMPAIGN_BLOCKS)}")
+    try:
+        context = campaign.save_block(campaign_id, block, body)
+    except ValueError as exc:  # pydantic ValidationError included
+        raise HTTPException(422, f"{block} details invalid: {exc}") from exc
+    return {"context": context, "cards_done": campaign.cards_done(context)}
+
+
+class BrandFetchBody(BaseModel):
+    url: str
+
+
+@app.post("/api/campaigns/{campaign_id}/brand/fetch")
+def brand_fetch(campaign_id: str, body: BrandFetchBody) -> dict[str, Any]:
+    """Fetch from URL — a SYSTEM extractor pipeline, never an agent tool.
+    Returns candidates only: nothing is saved until the user confirms the card."""
+    _campaign_or_404(campaign_id)
+    url = body.url.strip()
+    if not url:
+        raise HTTPException(422, "Brand URL is required to fetch")
+    return brand_extract.extract(url)
+
+
+def _pdf_text(raw: bytes) -> str:
+    """Best-effort PDF text with the stdlib only (no PDF library in the venv):
+    inflate the content streams and take the string operands. Deliberately
+    crude — enough for a typed policy, empty for a scanned one."""
+    import zlib
+
+    chunks: list[bytes] = []
+    for match in re.finditer(rb"stream\r?\n(.*?)endstream", raw, re.S):
+        blob = match.group(1)
+        try:
+            blob = zlib.decompress(blob)
+        except zlib.error:
+            if b"Tj" not in blob and b"TJ" not in blob:
+                continue  # binary image/font stream, not page text
+        chunks += re.findall(rb"\((?:\\.|[^\\()])*\)", blob)
+    text = b" ".join(c[1:-1] for c in chunks).decode("latin-1", "replace")
+    return re.sub(r"[ \t]+", " ", re.sub(r"\\([()\\])", r"\1", text)).strip()
+
+
+def _policy_text(upload_id: Optional[str]) -> tuple[str, list[str]]:
+    """Text of the uploaded Brand Policy Document. Unreadable file → empty
+    text plus an honest note; never invented content."""
+    if not upload_id:
+        return "", ["no Brand Policy Document uploaded — candidates come from the product description only"]
+    rows = store.get_uploads([upload_id])
+    if not rows:
+        return "", [f"policy upload {upload_id} not found"]
+    upload, path = rows[0], Path(rows[0]["path"])
+    if not path.exists():
+        return "", [f"policy file missing on disk ({upload['filename']})"]
+    suffix = path.suffix.lower()
+    if suffix in (".txt", ".md", ".markdown"):
+        return path.read_text(encoding="utf-8", errors="replace"), []
+    if suffix == ".pdf":
+        text = _pdf_text(path.read_bytes())
+        if not text:
+            return "", [f"couldn't read text out of {upload['filename']} "
+                        "(scanned or encoded PDF) — add the claims by hand"]
+        return text, [f"{upload['filename']} read with a best-effort PDF parser — check the candidates"]
+    return "", [f"unsupported policy format '{suffix or 'unknown'}' — upload .txt, .md or .pdf"]
+
+
+@app.post("/api/campaigns/{campaign_id}/claims/extract")
+def claims_extract(campaign_id: str) -> dict[str, Any]:
+    """Compliance without a new form field: CANDIDATE claims + banned words
+    from the policy doc and product description. The user one-tap confirms
+    them in the Brand card — the confirmed list is the source of truth."""
+    series = _campaign_or_404(campaign_id)
+    context = series["context"]
+    brand, product = context.get("brand") or {}, context.get("product") or {}
+    policy_text, notes = _policy_text(brand.get("policy_upload_id"))
+    out = brand_extract.extract_claims(policy_text, product.get("description", ""))
+    if not out["approved_claims"] and not out["banned_words"]:
+        notes.append("nothing extractable — add claims and banned words yourself")
+    return {**out, "notes": notes}
+
+
+@app.post("/api/campaigns/{campaign_id}/start")
+def start_campaign(campaign_id: str) -> dict[str, Any]:
+    """Step 3 kick-off: all cards ✓ → rumination runs in the thread."""
+    series = _campaign_or_404(campaign_id)
+    missing = campaign.missing_blocks(series["context"])
+    if missing:
+        raise HTTPException(422, f"Campaign context incomplete — still needed: {', '.join(missing)}")
+    try:
+        campaign.begin_rumination(campaign_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.get("/api/templates")
+def templates() -> list[dict[str, Any]]:
+    """Step 4: static samples from samples/templates/manifest.json. Empty
+    until the owner drops files in — the picker then offers Skip only."""
+    return campaign.templates()
+
+
+# ------------------------------------------------- Addendum-03: ad cards ----
+
+
+@app.get("/api/ad-cards")
+def ad_cards(campaign_id: Optional[str] = None) -> list[dict[str, Any]]:
+    return store.list_ad_cards(campaign_id)
+
+
+@app.get("/api/ad-cards/{card_id}")
+def ad_card(card_id: str) -> dict[str, Any]:
+    card = store.get_ad_card(card_id)
+    if not card:
+        raise HTTPException(404, "ad card not found")
+    return card
+
+
+@app.get("/api/ad-cards/{card_id}/bundle")
+def ad_card_bundle(card_id: str):
+    """Export bundle — zip of media + copy_<platform>.txt + meta.json."""
+    import io
+    import zipfile
+
+    card = store.get_ad_card(card_id)
+    if not card:
+        raise HTTPException(404, "ad card not found")
+    naming = re.sub(r"[^A-Za-z0-9_.-]+", "_", card.get("naming") or card_id)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for platform, text in (card.get("placements") or {}).items():
+            zf.writestr(f"copy_{platform}.txt", text)
+        zf.writestr("meta.json", json.dumps(card, indent=2, default=str))
+        for m in card.get("media") or []:
+            asset_id = m["url"].rstrip("/").split("/")[-2] if m["url"].endswith("/file") else None
+            asset = store.get_asset(asset_id) if asset_id else None
+            if asset:
+                p = Path(asset["path"])
+                if p.exists():
+                    zf.writestr(f"media/{naming}_{m['params'].get('prompt_id', p.stem)}{p.suffix}", p.read_bytes())
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{card_id}.zip"'})
+
+
+@app.post("/api/ad-cards/{card_id}/mark-live")
+def mark_live(card_id: str) -> dict[str, Any]:
+    """Live is a campaign-level fact too: the row in My Campaigns flips with
+    the card, and Live campaigns start showing the results-paste nudge."""
+    card = store.get_ad_card(card_id)
+    if not card:
+        raise HTTPException(404, "ad card not found")
+    card["status"] = "live"
+    store.save_ad_card(card)
+    store.set_campaign_status(card["campaign_id"], "live")
+    return card
 
 
 # ------------------------------------------------------------------- runs ---

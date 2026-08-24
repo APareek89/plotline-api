@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `3400b39` (plotline-api) · `399a798` (plotline-web)
+last-synced: `d640a86` (plotline-api) · `f99ffdc` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
@@ -8,6 +8,14 @@ last-synced: `3400b39` (plotline-api) · `399a798` (plotline-web)
 > UPDATE on concrete events: before every checkpoint commit · end of every phase ·
 > low-context signal (secondary). Snapshot, not journal; re-stamp `last-synced`.
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
+
+## NEXT SESSION — read docs/NEXT-SESSION-PROMPT.md FIRST
+Owner shipped Addendum-03 (2 files in ~/Downloads: content-engine-prd-addendum-03.html +
+marketing-studio-demo_1.html) — copy both into docs/ and treat them as HIGHEST precedence.
+CLEAN-SLATE FRONTEND: nothing from the old product survives (no Avatar/Creative/Content Studio,
+no Plans/My Space, no old design system). Three tabs only: Campaign Studio · My Campaigns ·
+My Brand. Backend is leveraged, not rebuilt. Stopped mid-run: council CHAIR was in flight on
+campaign srs_5e7715873a / thread thr_42eb12a760 — finish that first.
 
 ## PIVOT (declared Fri 22 Aug, work starts next session)
 Plotline → MARKETING STUDIO per docs/SYSTEM-PROMPT-v2-marketing-studio.md — the

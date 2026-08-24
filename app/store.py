@@ -135,6 +135,21 @@ def _init(conn: sqlite3.Connection) -> None:
             created_at REAL NOT NULL
         );
 
+        -- Addendum-03 §Step 8: Ad Cards — the campaign deliverable. A campaign
+        -- IS a series row, so campaign_id is a series id; variant sets share a
+        -- variant_group_id and differ by variant_id.
+        CREATE TABLE IF NOT EXISTS ad_cards (
+            id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            option_id TEXT NOT NULL,
+            variant_group_id TEXT,
+            variant_id TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            data TEXT NOT NULL,
+            created_at REAL NOT NULL
+        );
+
         -- Generated assets (mock or fal) + full generation audit trail.
         CREATE TABLE IF NOT EXISTS assets (
             id TEXT PRIMARY KEY,
@@ -168,6 +183,11 @@ def _init(conn: sqlite3.Connection) -> None:
     if "production_status" not in cols:
         # Plans slot lifecycle (§01): planned | in_production | ready | posted
         conn.execute("ALTER TABLE concept_state ADD COLUMN production_status TEXT DEFAULT 'planned'")
+    # Addendum-03: variant columns for dev DBs whose ad_cards predates them.
+    ad_cols = {r[1] for r in conn.execute("PRAGMA table_info(ad_cards)").fetchall()}
+    for col in ("variant_group_id", "variant_id"):
+        if col not in ad_cols:
+            conn.execute(f"ALTER TABLE ad_cards ADD COLUMN {col} TEXT")
     conn.commit()
 
 
@@ -387,6 +407,19 @@ def get_series_threads(series_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def list_threads(kind: Optional[str] = None) -> list[dict[str, Any]]:
+    """All threads, newest series first — `kind='campaign'` is how the
+    Campaigns list separates campaign series from content series."""
+    with _lock:
+        if kind:
+            rows = get_conn().execute(
+                "SELECT * FROM threads WHERE kind = ? ORDER BY created_at DESC, ordinal DESC", (kind,)
+            ).fetchall()
+        else:
+            rows = get_conn().execute("SELECT * FROM threads ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
 def set_thread_stage(thread_id: str, stage: str) -> None:
     with _lock:
         get_conn().execute("UPDATE threads SET stage = ? WHERE id = ?", (stage, thread_id))
@@ -542,6 +575,72 @@ def get_generation_log(thread_id: str) -> list[dict[str, Any]]:
             "SELECT * FROM generation_log WHERE thread_id = ? ORDER BY created_at", (thread_id,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ------------------------------------ Addendum-03: campaigns + ad cards -----
+
+# My Campaigns lifecycle (v2 §My Campaigns). Stored in series.status — a
+# campaign IS a series row, so there is one status column, not two.
+CAMPAIGN_STATUSES = ("draft", "planned", "in_production", "ready", "live")
+
+
+def save_ad_card(card: dict[str, Any]) -> None:
+    with _lock:
+        get_conn().execute(
+            """INSERT INTO ad_cards (id, campaign_id, thread_id, option_id, variant_group_id,
+                                     variant_id, status, data, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET status = excluded.status,
+                 variant_group_id = excluded.variant_group_id,
+                 variant_id = excluded.variant_id, data = excluded.data""",
+            (card["id"], card["campaign_id"], card["thread_id"], card["option_id"],
+             card.get("variant_group_id"), card.get("variant_id"), card.get("status", "draft"),
+             json.dumps(card, default=str), card.get("created_at") or _now()),
+        )
+        get_conn().commit()
+
+
+def get_ad_card(card_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute("SELECT data FROM ad_cards WHERE id = ?", (card_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def list_ad_cards(campaign_id: Optional[str] = None) -> list[dict[str, Any]]:
+    with _lock:
+        if campaign_id:
+            rows = get_conn().execute(
+                "SELECT data FROM ad_cards WHERE campaign_id = ? ORDER BY created_at DESC", (campaign_id,)
+            ).fetchall()
+        else:
+            rows = get_conn().execute("SELECT data FROM ad_cards ORDER BY created_at DESC").fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def set_campaign_status(campaign_id: str, status: str) -> None:
+    if status not in CAMPAIGN_STATUSES:
+        raise ValueError(f"unknown campaign status {status!r} — expected one of {list(CAMPAIGN_STATUSES)}")
+    set_series_status(campaign_id, status)
+
+
+def get_campaign_status(campaign_id: str) -> str:
+    """Empty string when the campaign doesn't exist — callers 404 on that
+    rather than being handed a plausible-looking 'draft'."""
+    with _lock:
+        row = get_conn().execute("SELECT status FROM series WHERE id = ?", (campaign_id,)).fetchone()
+    return row["status"] if row else ""
+
+
+def campaign_spend(campaign_id: str) -> float:
+    """Spend-to-date in USD: every asset generated in any thread of this
+    campaign, mock ($0) or fal. 0.0 when nothing has been generated."""
+    with _lock:
+        row = get_conn().execute(
+            """SELECT COALESCE(SUM(a.cost), 0) AS total FROM assets a
+               JOIN threads t ON t.id = a.thread_id WHERE t.series_id = ?""",
+            (campaign_id,),
+        ).fetchone()
+    return float(row["total"] or 0.0)
 
 
 # -------------------------------------------------------------------- runs --

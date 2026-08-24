@@ -1,0 +1,757 @@
+"""Addendum-03 (Marketing Studio v2) acceptance tests — one test per check in
+the v2 §Acceptance-checks list, plus the invariants those checks stand on.
+
+MOCK_LLM + MOCK_MEDIA are forced on HERE ONLY (the product runs real models):
+zero network, zero spend, deterministic. Long campaign work normally rides a
+daemon thread — `_spawn` is made synchronous so the flow is assertable without
+sleeping on it. Everything else is the real driver: real validators, real
+council, real store.
+"""
+from __future__ import annotations
+
+import json
+
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+from app import brand_extract, campaign, ccs as ccs_mod, config, creative, main, orchestrator, store
+from app.agents import campaign_mock
+from app.schemas import (
+    AdCard,
+    AgentMessage,
+    CampaignContext,
+    CampaignDetail,
+    CampaignOptions,
+    Feedback,
+    ModelConfirm,
+    SeatReview,
+    UserEvent,
+    objective_family,
+)
+from app.validators import AgentValidationError, validate_feedback
+
+SETTINGS_TOOLTIP = "Model selection coming — using recommended models"
+
+PRODUCT = {
+    "name": "Ledger",
+    "description": "invoicing app that saves 4 hours a month and files GST in 60 seconds",
+    "image_upload_ids": ["up_1", "up_2", "up_3"],
+}
+CAMPAIGN = {
+    "objective": "conversions",
+    "target_audience": "indie founders 25-40 who file their own GST",
+    "platforms": ["instagram_reels", "linkedin"],
+    "description": "Q3 self-serve push",
+    "creative_type": "image",
+}
+BRAND = {
+    "url": "https://ledger.example",
+    "palette": ["#0E1116", "#4353FF"],
+    "font": "Inter",
+    "tagline": "File it once",
+    "approved_claims": ["files GST in 60 seconds", "saves 4 hours a month"],
+    "banned_words": ["guaranteed"],
+    "claims_confirmed": True,
+}
+
+TEMPLATE_MANIFEST = {
+    "templates": [{
+        "id": "t1", "label": "Hard flash", "thumb": "/samples/t1.png", "type": "image",
+        "style_descriptors": ["brutalist grain", "hard direct flash"],
+    }]
+}
+
+
+# ----------------------------------------------------------------- fixtures --
+
+
+@pytest.fixture(autouse=True)
+def marketing_env(monkeypatch, tmp_path, local_rag):
+    monkeypatch.setattr(config, "MOCK_LLM", True)      # conftest sets it; be explicit
+    monkeypatch.setattr(config, "MOCK_MEDIA", True)    # zero spend, zero network
+    monkeypatch.setattr(config, "ASSET_DIR", tmp_path / "assets")
+    config.ASSET_DIR.mkdir(parents=True, exist_ok=True)
+    # campaign.py binds `rag` at import — point it at the same in-process routing
+    # client the autouse conftest fixture builds for everyone else.
+    monkeypatch.setattr(campaign, "rag", local_rag)
+    campaign._WORKSPACES.clear()
+    creative._WORKSPACES.clear()
+
+    def _sync(thread_id, fn, *args):
+        campaign._ws(thread_id)["retry"] = (fn, args)  # Retry still has a target
+        fn(*args)
+
+    monkeypatch.setattr(campaign, "_spawn", _sync)
+
+
+@pytest.fixture
+def template_library(monkeypatch, tmp_path):
+    """samples/templates/manifest.json with one style reference in it — the
+    shipped manifest is empty, which makes step 4 auto-skip."""
+    folder = tmp_path / "samples" / "templates"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "manifest.json").write_text(json.dumps(TEMPLATE_MANIFEST))
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    return TEMPLATE_MANIFEST["templates"][0]
+
+
+# ------------------------------------------------------------------ helpers --
+
+
+def _act(thread_id: str, artifact_id: str, event: str) -> None:
+    campaign.handle_event(UserEvent(thread_id=thread_id, type="action",
+                                    action={"artifact_id": artifact_id, "event": event}))
+
+
+def _text(thread_id: str, text: str) -> None:
+    campaign.handle_event(UserEvent(thread_id=thread_id, type="text", text=text))
+
+
+def _envelopes(thread_id: str) -> list[dict]:
+    return [m["envelope"] for m in store.get_messages(thread_id) if m["role"] == "agent"]
+
+
+def _artifacts(thread_id: str, kind: str) -> list[dict]:
+    return [a for env in _envelopes(thread_id) for a in env.get("artifacts", []) if a["type"] == kind]
+
+
+def _first_seq(thread_id: str, kind: str) -> int:
+    """Message sequence of the first agent turn carrying this artifact type."""
+    for message in store.get_messages(thread_id):
+        if message["role"] != "agent":
+            continue
+        if any(a["type"] == kind for a in message["envelope"].get("artifacts", [])):
+            return message["seq"]
+    raise AssertionError(f"no {kind} artifact on thread {thread_id}")
+
+
+def _filled(campaign_id: str, creative_type: str = "image") -> tuple[str, str]:
+    """Steps 0-2 via path a: named campaign + three saved cards."""
+    started = campaign.start_campaign(campaign_id)
+    cid, tid = started["campaign_id"], started["thread"]["id"]
+    campaign.save_block(cid, "product", PRODUCT)
+    campaign.save_block(cid, "campaign", {**CAMPAIGN, "creative_type": creative_type})
+    campaign.save_block(cid, "brand", BRAND)
+    return cid, tid
+
+
+def _ruminated(name: str, creative_type: str = "image") -> tuple[str, str]:
+    """…through step 3: options on the thread, awaiting an approval."""
+    cid, tid = _filled(name, creative_type)
+    campaign.begin_rumination(cid)
+    return cid, tid
+
+
+# ------------------------------------------- check 1: path b == path a schema --
+
+
+def _scripted_intake(monkeypatch, blocks: dict) -> None:
+    """campaign_mock ships no intake mock (prose parsing has no deterministic
+    stand-in), so path b gets a scripted parser: it only ever ADDS the block the
+    message names, exactly like the real intake agent is told to."""
+    def fake_intake(payload, dispatcher):
+        context = dict(payload["context"])
+        message = payload["message"].lower()
+        for block, data in blocks.items():
+            if block in message and context.get(block) is None:
+                context[block] = data
+                break
+        return context
+
+    monkeypatch.setattr(campaign_mock, "mock_campaign_intake", fake_intake, raising=False)
+
+
+def test_path_b_fills_the_identical_campaign_context(monkeypatch):
+    """Conversational intake is elicitation UX, not a second data model: the
+    stored context is byte-identical to the one the three cards write."""
+    _scripted_intake(monkeypatch, {"product": PRODUCT, "campaign": CAMPAIGN,
+                                   "brand": {**BRAND, "claims_confirmed": False}})
+
+    structured_id, _ = _filled("Path A")
+
+    started = campaign.start_campaign("Path B")
+    conversational_id, tid = started["campaign_id"], started["thread"]["id"]
+    _text(tid, "help me define the campaign")
+    assert campaign._ws(tid)["sub_mode"] == "conversational"
+    for turn in ("the product is Ledger", "campaign objective is conversions", "brand details next"):
+        _text(tid, turn)
+    campaign.save_block(conversational_id, "brand", {"claims_confirmed": True})  # the one-tap confirm
+
+    path_a = store.get_series(structured_id)["context"]
+    path_b = store.get_series(conversational_id)["context"]
+    assert CampaignContext.model_validate(path_a) and CampaignContext.model_validate(path_b)
+    assert {k: v for k, v in path_a.items() if k != "name"} == \
+           {k: v for k, v in path_b.items() if k != "name"}
+    assert campaign.cards_done(path_b) == {"product": True, "campaign": True, "brand": True}
+    assert campaign.missing_blocks(path_b) == []
+
+    # ≤1 question per turn, and progress chips track the same three blocks
+    progress = _artifacts(tid, "intake_progress")
+    assert [p["payload"]["next_field"] for p in progress[1:]] == [
+        "product", "campaign", "brand", "brand.claims_confirmed", None]
+    for envelope in _envelopes(tid):
+        AgentMessage.model_validate(envelope)
+
+
+def test_path_b_intake_may_not_rename_drop_or_self_confirm():
+    """The intake agent is a parser with eyes: the campaign name, the already
+    filled blocks and the claims confirmation are the user's, not its own."""
+    current = CampaignContext.model_validate(
+        {"name": "Keep me", "product": PRODUCT, "brand": {**BRAND, "claims_confirmed": False}})
+    renamed = current.model_copy(update={"name": "Renamed by the agent"})
+    dropped = current.model_copy(update={"product": None})
+    self_confirmed = current.model_copy(
+        update={"brand": current.brand.model_copy(update={"claims_confirmed": True})})
+
+    for bad, needle in ((renamed, "name must stay"),
+                        (dropped, "dropped the already-filled product"),
+                        (self_confirmed, "claims_confirmed is the user's one-tap confirmation")):
+        with pytest.raises(AgentValidationError) as exc:
+            campaign._validate_intake(bad, current)
+        assert needle in str(exc.value)
+    assert campaign._validate_intake(current, current) is current
+
+
+# ------------------------------------- check 2: brand fetch is user-confirmable --
+
+
+def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves(monkeypatch):
+    started = campaign.start_campaign("Brand fetch")
+    cid = started["campaign_id"]
+    campaign.save_block(cid, "product", PRODUCT)
+
+    extracted = {"palette": ["#0E1116", "#4353FF", "#E5312B"], "font": "Inter",
+                 "logo_url": "https://ledger.example/logo.png", "tagline": "File it once",
+                 "source_url": "https://ledger.example", "notes": []}
+    calls: list[str] = []
+
+    def fake_extract(url, timeout=12.0):
+        calls.append(url)          # system pipeline, never an agent tool
+        return extracted
+
+    monkeypatch.setattr(brand_extract, "extract", fake_extract)
+
+    fetched = main.brand_fetch(cid, main.BrandFetchBody(url="ledger.example"))
+    assert calls == ["ledger.example"]
+    assert fetched["palette"] and fetched["font"] and fetched["logo_url"] and fetched["tagline"]
+
+    # nothing landed: the fetch is a candidate set, the Brand card is the truth
+    assert store.get_series(cid)["context"]["brand"] is None
+    assert campaign.cards_done(store.get_series(cid)["context"])["brand"] is False
+
+    candidates = main.claims_extract(cid)
+    assert "saves 4 hours a month" in " ".join(candidates["approved_claims"])
+    assert store.get_series(cid)["context"]["brand"] is None  # candidates aren't saved either
+
+    # unconfirmed claims block the whole rumination, by name
+    campaign.save_block(cid, "campaign", CAMPAIGN)
+    campaign.save_block(cid, "brand", {"url": "https://ledger.example",
+                                       "approved_claims": candidates["approved_claims"]})
+    with pytest.raises(HTTPException) as exc:
+        main.start_campaign(cid)
+    assert exc.value.status_code == 422 and "claims_confirmed" in exc.value.detail
+
+    # the user edits what the extractor proposed, then confirms — their edit wins
+    saved = campaign.save_block(cid, "brand", {
+        "palette": extracted["palette"][:2],           # dropped the third colour
+        "font": "Inter Tight",                         # corrected the font
+        "tagline": extracted["tagline"],
+        "claims_confirmed": True,
+    })
+    assert saved["brand"]["palette"] == ["#0E1116", "#4353FF"]
+    assert saved["brand"]["font"] == "Inter Tight"
+    assert campaign.missing_blocks(saved) == []
+    assert main.start_campaign(cid) == {"ok": True}
+
+
+# ------------------------------------------- check 3: unmapped claim → kill flag --
+
+
+def test_unmapped_claim_produces_a_kill_flag_and_withholds_the_option(monkeypatch):
+    """Brand seat holds the kill flag: a persuasion claim outside the CONFIRMED
+    approved list is killed, and a killed option never reaches the user."""
+    dispatcher = orchestrator._dispatcher(set())
+    review = SeatReview.model_validate(campaign_mock.mock_seat(
+        {"context": {"brand": {"approved_claims": ["files GST in 60 seconds"]}},
+         "draft": {"concepts": [{"id": "o1", "claims_used": ["3x faster than QuickBooks"]}]}},
+        dispatcher, "brand"))
+    assert review.kill_recommendation and "3x faster than QuickBooks" in review.kill_recommendation
+
+    seat_of = campaign_mock.mock_seat
+
+    def brand_seat_kills(payload, dispatcher, seat):
+        out = seat_of(payload, dispatcher, seat)
+        if seat == "brand":
+            out["kill_recommendation"] = "unsubstantiated claim: '3x faster than QuickBooks' is not confirmed"
+        return out
+
+    monkeypatch.setattr(campaign_mock, "mock_seat", brand_seat_kills)
+    cid, tid = _ruminated("Killed")
+
+    assert _artifacts(tid, "campaign_option") == []     # nothing shipped
+    assert _artifacts(tid, "escalation")[-1]["title"] == "All options kill-flagged"
+    downgrades = [a for a in store.get_artifact_activity(tid, "o1") if a["event"] == "downgraded"]
+    assert downgrades and "unsubstantiated_claim" in downgrades[0]["detail"]
+    assert store.get_campaign_status(cid) == "draft"    # never promoted to planned
+
+
+def test_unmapped_claim_never_reaches_the_campaign_detail(monkeypatch):
+    """The same rule as code, one layer down: claims_used ⊆ confirmed claims is
+    a hard validation on the detail, not a prompt instruction."""
+    cid, tid = _ruminated("Claim gate")
+    context = campaign._context_of(cid)
+    detail_of = campaign_mock.mock_campaign_detail
+
+    with pytest.raises(AgentValidationError) as exc:
+        campaign._validate_detail(
+            CampaignDetail.model_validate({
+                **detail_of({"context": context.model_dump(mode="json")}, None),
+                "claims_used": ["3x faster than QuickBooks"],
+            }),
+            context, None)
+    assert "3x faster than QuickBooks" in str(exc.value) and "kill flag" in str(exc.value)
+
+    def unmapped_detail(payload, dispatcher):
+        return {**detail_of(payload, dispatcher), "claims_used": ["3x faster than QuickBooks"]}
+
+    monkeypatch.setattr(campaign_mock, "mock_campaign_detail", unmapped_detail)
+    _act(tid, "o1", "approve")
+    assert _artifacts(tid, "campaign_detail") == []     # no detail, no generation path
+    assert _artifacts(tid, "escalation")[-1]["title"].startswith("The campaign detail kept failing")
+    assert store.list_assets(tid) == []
+
+
+# ------------------------------------ check 4: Skip = no style constraint at all --
+
+
+def test_skip_on_templates_leaves_no_style_constraint(template_library):
+    picked_style = template_library["style_descriptors"]
+
+    cid, tid = _ruminated("Skipped")
+    _act(tid, "o1", "approve")
+    picker = _artifacts(tid, "template_picker")[-1]
+    assert picker["payload"]["skip_allowed"] is True
+    assert {a["event"] for a in picker["actions"]} == {"pick_t1", "skip"}
+
+    _act(tid, "templates", "skip")
+    detail = _artifacts(tid, "campaign_detail")[-1]["payload"]["detail"]
+    assert detail["style_ref"] is None
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+
+    prompts = [s["visual_prompt"] for s in detail["shots"]]
+    prompts += [store.get_asset(i["asset_id"])["params"]["prompt"] for i in campaign._ws(tid)["items"]]
+    for descriptor in picked_style:
+        assert not any(descriptor in p for p in prompts), f"{descriptor!r} leaked after Skip"
+    assert all("style reference" not in p.lower() for p in prompts)
+    assert all(store.get_asset(i["asset_id"])["params"]["style_ref"] is None
+               for i in campaign._ws(tid)["items"])
+
+    # …and the same flow WITH a template proves the descriptors do travel when picked
+    cid2, tid2 = _ruminated("Styled")
+    _act(tid2, "o1", "approve")
+    _act(tid2, "templates", "pick_t1")
+    styled = _artifacts(tid2, "campaign_detail")[-1]["payload"]["detail"]
+    assert styled["style_ref"]["id"] == "t1"
+    _act(tid2, "detail", "generate_creative")
+    _act(tid2, "confirm", "generate_single")
+    styled_prompts = [store.get_asset(i["asset_id"])["params"]["prompt"]
+                      for i in campaign._ws(tid2)["items"]]
+    assert all(all(d in p for d in picked_style) for p in styled_prompts)
+
+
+def test_skip_is_enforced_on_the_detail_not_just_requested():
+    """A planner that returns a style_ref after Skip is rejected outright."""
+    cid, _ = _filled("Skip gate")
+    context = campaign._context_of(cid)
+    detail = CampaignDetail.model_validate(
+        campaign_mock.mock_campaign_detail(
+            {"context": context.model_dump(mode="json"),
+             "template": {"id": "t1", "type": "image", "style_descriptors": ["brutalist grain"]}},
+            None))
+    assert detail.style_ref is not None
+    with pytest.raises(AgentValidationError) as exc:
+        campaign._validate_detail(detail, context, None)   # template=None → Skip
+    assert "style_ref must be null" in str(exc.value)
+
+
+# ------------------------------- check 5: the Settings icon is honestly disabled --
+
+
+def _request_body_properties(spec: dict) -> set[tuple[str, str]]:
+    """(path, property) for every property reachable from any request body."""
+    schemas = spec.get("components", {}).get("schemas", {})
+    found: set[tuple[str, str]] = set()
+    for path, operations in spec["paths"].items():
+        queue: list = []
+        for operation in operations.values():
+            if not isinstance(operation, dict):
+                continue
+            for media in ((operation.get("requestBody") or {}).get("content") or {}).values():
+                queue.append(media.get("schema") or {})
+        seen: set[str] = set()
+        while queue:
+            node = queue.pop()
+            if not isinstance(node, dict):
+                continue
+            ref = node.get("$ref")
+            if ref:
+                key = ref.rsplit("/", 1)[-1]
+                if key not in seen:
+                    seen.add(key)
+                    queue.append(schemas.get(key, {}))
+                continue
+            for prop, sub in (node.get("properties") or {}).items():
+                found.add((path, prop))
+                queue.append(sub)
+            for key in ("items", "additionalProperties"):
+                if isinstance(node.get(key), dict):
+                    queue.append(node[key])
+            for key in ("anyOf", "oneOf", "allOf"):
+                queue.extend(node.get(key) or [])
+    return found
+
+
+def test_settings_icon_is_disabled_and_hides_no_live_capability():
+    """The icon is rendered-but-disabled with a tooltip; that is honest only if
+    nothing behind it takes a model. The whole API is swept: no path, no query
+    or path parameter, and no request-body field names a model — with ONE
+    documented exception, the pre-Addendum-03 DIY route, whose `model_tier`
+    picks among the fixed stack (draft/final/pro) and can never name a model."""
+    assert ModelConfirm.model_fields["settings_note"].default == SETTINGS_TOOLTIP
+
+    spec = main.app.openapi()
+    assert not [p for p in spec["paths"] if "model" in p.lower()]
+    for path, operations in spec["paths"].items():
+        for operation in operations.values():
+            if not isinstance(operation, dict):
+                continue
+            for parameter in operation.get("parameters") or []:
+                assert "model" not in parameter["name"].lower(), f"{path} takes {parameter['name']}"
+
+    model_ish = {(path, prop) for path, prop in _request_body_properties(spec)
+                 if "model" in prop.lower()}
+    assert model_ish == {("/api/diy/generate", "model_tier")}
+    assert "model" not in main.DiyBody.model_fields            # a tier, never a model id
+    assert {f"image_{tier}" for tier in ("draft", "final", "pro")} <= set(config.MEDIA_MODELS)
+
+    # the campaign surfaces are extra="forbid" — a smuggled override 422s
+    campaign_id, _ = _filled("No overrides")
+    for block, override in (("campaign", {"model": "fal-ai/some-other-model"}),
+                            ("product", {"image_model": "x"}),
+                            ("brand", {"video_model": "x"})):
+        with pytest.raises(HTTPException) as exc:
+            main.put_campaign_block(campaign_id, block, override)
+        assert exc.value.status_code == 422
+    with pytest.raises(ValidationError):
+        UserEvent(thread_id="t1", type="action",
+                  action={"artifact_id": "confirm", "event": "generate_single", "model": "x"})
+
+
+def test_model_confirm_names_the_fixed_stack_whatever_the_user_types():
+    cid, tid = _ruminated("Fixed stack", creative_type="video")
+    _act(tid, "o1", "approve")
+
+    _text(tid, "use fal-ai/flux-pro instead of veo")   # there is no such lever
+    assert _envelopes(tid)[-1]["text"] == "Didn't catch a campaign command."
+
+    _act(tid, "detail", "generate_creative")
+    confirm = _artifacts(tid, "model_confirm")[-1]["payload"]["confirm"]
+    assert confirm["recommended_model"] == config.MEDIA_MODELS["video"]
+    assert confirm["reason"] and confirm["settings_note"] == SETTINGS_TOOLTIP
+
+    _act(tid, "confirm", "generate_single")
+    assert store.list_assets(tid)
+    assert all("flux" not in json.dumps(a["params"]) for a in store.list_assets(tid))
+
+
+# --------------------- check 6: every asset in the Creative tab, params + cost --
+
+
+def test_every_generated_asset_lands_in_the_creative_set_with_params_and_cost():
+    cid, tid = _ruminated("Creative tab", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+
+    items = _artifacts(tid, "creative_set")[-1]["payload"]["items"]
+    assert items and items == campaign._ws(tid)["items"]
+
+    surfaced = {i["asset_id"] for i in items} | {i["cover_asset_id"] for i in items if i["cover_asset_id"]}
+    assert surfaced == {a["id"] for a in store.list_assets(tid)}, "a generated asset never surfaced"
+
+    log = store.get_generation_log(tid)
+    for item in items:
+        assert item["preview_url"].endswith(f"/{item['asset_id']}/file")
+        assert item["status"] == "ready" and item["ratio"] and item["cost"] is not None
+        for asset_id in (item["asset_id"], item["cover_asset_id"]):
+            if not asset_id:
+                continue
+            asset = store.get_asset(asset_id)
+            params = asset["params"]
+            assert params["model"] and params["prompt"] and params["ratio"] == item["ratio"]
+            assert set(params) >= {"model", "prompt", "ratio", "seed", "variant_id",
+                                   "source_slot", "product_pack", "style_ref"}
+            assert float(asset["cost"]) == pytest.approx(
+                float(next(g["cost"] for g in log if g["asset_id"] == asset_id)))
+    assert campaign._ws(tid)["spent"] == pytest.approx(sum(a["cost"] for a in store.list_assets(tid)))
+
+
+def test_a_rerolled_asset_surfaces_too_and_the_audit_trail_survives():
+    cid, tid = _ruminated("Re-roll", creative_type="image")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+    slot = campaign._ws(tid)["items"][0]["slot"]
+    before = {a["id"] for a in store.list_assets(tid)}
+
+    _act(tid, "creative", f"reroll_{slot}")
+    fresh = [a for a in store.list_assets(tid) if a["id"] not in before]
+    assert len(fresh) == 1 and fresh[0]["slot"] == slot        # per-asset only
+    latest = _artifacts(tid, "creative_set")[-1]["payload"]["items"]
+    assert [i["asset_id"] for i in latest] == [fresh[0]["id"]]
+    assert store.get_asset(fresh[0]["id"])["params"]["reroll"] is True
+    # the superseded asset leaves the Creative tab but never the generation log
+    log = store.get_generation_log(tid)
+    assert {g["asset_id"] for g in log} >= before | {fresh[0]["id"]}
+    assert any(g["event"] == "reroll" for g in log)
+
+
+# ------------------- check 7: the single-vs-variants question precedes generation --
+
+
+def test_no_generation_without_a_model_confirm_and_an_explicit_event():
+    # video → 2 shots, so every count (single, 2, 3) is genuinely offerable;
+    # a 1-shot image detail correctly offers fewer (see the sibling test).
+    cid, tid = _ruminated("Gate", creative_type="video")
+    _act(tid, "o1", "approve")
+    assert store.get_thread(tid)["stage"] == "detail"
+
+    _act(tid, "confirm", "generate_single")            # jumping the gate
+    assert store.list_assets(tid) == []
+    assert _artifacts(tid, "model_confirm") == []
+    assert _artifacts(tid, "creative_set") == []
+    assert _envelopes(tid)[-1]["text"].startswith("Nothing changed")
+
+    _act(tid, "detail", "generate_creative")
+    confirm_seq = _first_seq(tid, "model_confirm")
+    payload = _artifacts(tid, "model_confirm")[-1]
+    assert payload["payload"]["cost_single"] > 0        # cost BEFORE any spend
+    assert {a["event"] for a in payload["actions"]} >= {
+        "generate_single", "generate_variants_2", "generate_variants_3"}
+    assert _envelopes(tid)[-1]["question"] and "variants" in _envelopes(tid)[-1]["question"].lower()
+    assert store.list_assets(tid) == []                 # the card alone renders nothing
+
+    _act(tid, "confirm", "generate_single")
+    assert _first_seq(tid, "creative_set") > confirm_seq
+    assert store.list_assets(tid)
+
+
+def test_a_variant_set_is_never_generated_without_an_explicit_count():
+    cid, tid = _ruminated("Count")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+
+    _act(tid, "confirm", "generate_variants_0")         # button with no count
+    assert store.list_assets(tid) == []
+    assert _envelopes(tid)[-1]["question"] == "Two variants or three?"
+
+    _text(tid, "give me variants")                      # typed, still no count
+    assert store.list_assets(tid) == []
+    assert _envelopes(tid)[-1]["text"] == "Variants need a count."
+
+    _text(tid, "2 variants")                            # explicit count
+    assert {i["variant_id"] for i in campaign._ws(tid)["items"]} == {"A", "B"}
+
+
+def test_variants_carry_distinct_deltas_and_share_one_variant_group_id():
+    cid, tid = _ruminated("Variants", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+
+    specs = _artifacts(tid, "model_confirm")[-1]["payload"]["confirm"]["variants_proposed"]
+    assert [s["variant_id"] for s in specs] == ["A", "B", "C"]
+    assert len({s["delta"] for s in specs}) == len(specs)          # named, distinct
+    assert len({s["hypothesis"] for s in specs}) == len(specs)
+    assert all(s["cost_usd"] > 0 for s in specs)
+
+    _act(tid, "confirm", "generate_variants_3")
+    ws = campaign._ws(tid)
+    rendered: dict[str, list[str]] = {}
+    for item in ws["items"]:
+        rendered.setdefault(item["variant_id"], []).append(
+            store.get_asset(item["asset_id"])["params"]["prompt"])
+    assert set(rendered) == {"A", "B", "C"}
+    # deltas are MECHANICAL: a named delta that changed nothing is a rewording
+    assert rendered["B"] != rendered["A"] and rendered["C"] != rendered["A"]
+
+    _act(tid, "creative", "accept_all")
+    cards = store.list_ad_cards(cid)
+    assert {c["variant_id"] for c in cards} == {"A", "B", "C"}
+    assert len({c["variant_group_id"] for c in cards}) == 1
+    assert all(c["variant_group_id"] for c in cards)
+    assert len({c["naming"] for c in cards}) == 3
+
+
+def test_single_shot_variants_are_not_identical_renders():
+    cid, tid = _ruminated("Single shot", creative_type="image")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    assert len(campaign._ws(tid)["detail"]["shots"]) == 1
+    _act(tid, "confirm", "generate_variants_2")
+
+    by_variant: dict[str, list[str]] = {}
+    for item in campaign._ws(tid)["items"]:
+        by_variant.setdefault(item["variant_id"], []).append(
+            store.get_asset(item["asset_id"])["params"]["prompt"])
+    assert by_variant["B"] != by_variant["A"]
+
+
+# ------------------------------------------- check 8: Ad Card spec-table guard --
+
+
+def test_ad_card_fails_on_a_missing_or_off_spec_ratio():
+    cid, tid = _ruminated("Ad Card")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+    _act(tid, "creative", "accept_all")
+
+    card = store.list_ad_cards(cid)[0]
+    assert AdCard.model_validate(card)
+    # every ratio on the card is a ratio we actually rendered — no phantom crops
+    assert set(card["ratios"]) == {m["ratio"] for m in card["media"]}
+    assert set(card["placements"]) == set(CAMPAIGN["platforms"])
+
+    for broken, needle in (
+        ({**card, "ratios": []}, "at least 1 item"),
+        ({k: v for k, v in card.items() if k != "ratios"}, "Field required"),
+        ({**card, "ratios": ["3:2"]}, "outside the placement spec table"),
+        ({**card, "ratios": ["9:16", "2:1"]}, "outside the placement spec table"),
+        ({**card, "creative_type": "carousel"}, "creative_type"),
+    ):
+        with pytest.raises(ValidationError) as exc:
+            AdCard.model_validate(broken)
+        assert needle in str(exc.value)
+
+
+def test_ad_card_credits_account_for_every_paid_render(monkeypatch):
+    """MOCK_MEDIA renders at $0, which hides cost bugs — price the mock renders
+    with the same estimator the confirm card quotes from, then compare."""
+    from app.fal_client import estimate_cost, generate as real_generate
+
+    def priced(kind, prompt, **kwargs):
+        out = real_generate(kind, prompt, **kwargs)
+        return {**out, "cost": estimate_cost(kind, duration_s=kwargs.get("duration_s", 4.0),
+                                             tier=kwargs.get("tier", "final"))}
+
+    monkeypatch.setattr(campaign, "generate", priced)
+
+    cid, tid = _ruminated("Card cost", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    quoted = _artifacts(tid, "model_confirm")[-1]["payload"]["cost_single"]
+    _act(tid, "confirm", "generate_single")
+    _act(tid, "creative", "accept_all")
+
+    card = store.list_ad_cards(cid)[0]
+    assert store.campaign_spend(cid) == pytest.approx(quoted)      # we spent the quote
+    assert card["total_cost_credits"] == pytest.approx(
+        round(store.campaign_spend(cid) / creative.CREDIT_USD, 1))
+
+
+# ------------------------------------------------ check 9: campaign lifecycle --
+
+
+def test_campaign_lifecycle_lands_in_the_store():
+    cid, tid = _filled("Lifecycle")
+    assert store.get_campaign_status(cid) == "draft"
+
+    campaign.begin_rumination(cid)
+    assert store.get_campaign_status(cid) == "planned"
+
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    assert store.get_campaign_status(cid) == "planned"      # confirming spends nothing
+
+    _act(tid, "confirm", "generate_single")
+    assert store.get_campaign_status(cid) == "in_production"
+
+    _act(tid, "creative", "accept_all")
+    assert store.get_campaign_status(cid) == "ready"
+
+    card = store.list_ad_cards(cid)[0]
+    _act(tid, card["id"], "mark_live")
+    assert store.get_campaign_status(cid) == "live"
+    assert store.get_ad_card(card["id"])["status"] == "live"
+    assert store.get_thread(tid)["stage"] == "done"
+
+    row = next(r for r in main.list_campaigns() if r["id"] == cid)
+    assert row["status"] == "live" and row["creative_count"] == 1
+    assert row["objective"] == "conversions" and row["thread_id"] == tid
+    assert row["spend_credits"] == pytest.approx(
+        round(store.campaign_spend(cid) / creative.CREDIT_USD, 1))
+
+    with pytest.raises(ValueError):
+        store.set_campaign_status(cid, "archived")          # only the five states
+    for envelope in _envelopes(tid):
+        AgentMessage.model_validate(envelope)               # ≤2 sentences, ≤1 question
+
+
+# ----------------------------------------- check 10: blind council + one chair --
+
+
+def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeypatch):
+    seen: list[dict] = []
+    dispatchers: list = []                 # held so identity comparison is meaningful
+    seat_of = campaign_mock.mock_seat
+
+    def spy(payload, dispatcher, seat):
+        seen.append({"seat": seat, "payload": payload})
+        dispatchers.append(dispatcher)
+        return seat_of(payload, dispatcher, seat)
+
+    monkeypatch.setattr(campaign_mock, "mock_seat", spy)
+    cid, tid = _ruminated("Council")
+
+    assert [s["seat"] for s in seen[:3]] == ["performance", "brand", "platform"]
+    assert len(dispatchers) == len(set(id(d) for d in dispatchers))   # a fresh slice each
+    for record in seen:
+        payload = record["payload"]
+        assert "seats" not in payload and "feedback" not in payload   # no sight of each other
+        assert not any("kill_recommendation" in json.dumps(v, default=str)
+                       for k, v in payload.items() if k != "draft")
+        # no planner self-ratings travel to a seat
+        assert all(c["element_scores"] == [] for c in payload["draft"]["concepts"])
+        assert payload["options"] and payload["stage"] == "campaign_options"
+
+    # …and the chair consolidates into the UNCHANGED v1 Feedback schema
+    context = campaign._context_of(cid)
+    shadow = campaign._shadow_context(context)
+    options = CampaignOptions(options=list(campaign._ws(tid)["options"].values()))
+    plan = campaign._shadow_plan(context, options, shadow)
+    retrieved: set[str] = set()
+    niche = campaign._niche_asset_count(shadow)
+    feedback, reviews = campaign._run_council(context, shadow, options, plan, retrieved, niche)
+
+    assert isinstance(feedback, Feedback) and set(Feedback.model_fields) == {"concept_verdicts"}
+    assert len(reviews) == 3 and all(isinstance(r, SeatReview) for r in reviews)
+    assert {r.seat for r in reviews} == {"performance", "brand", "platform"}
+
+    family = objective_family(shadow.objective)
+    required = set(ccs_mod.applicable_elements(family))
+    assert {v.concept_id for v in feedback.concept_verdicts} == {c.id for c in plan.concepts}
+    for verdict in feedback.concept_verdicts:
+        assert {e.element for e in verdict.element_verdicts} >= required
+        assert verdict.lenses.saturation.insufficient_data is (niche < 25)
+        assert verdict.ccs_final == ccs_mod.compute_ccs(family, ccs_mod.final_ratings_of(verdict))
+    # the v1 validator accepts it untouched — no campaign-shaped escape hatch
+    assert validate_feedback(feedback, plan, shadow, campaign.rag,
+                             retrieved_ids=retrieved, niche_asset_count=niche) is feedback
+
+    # every seat's score is in the audit trail, not just in the chair's head
+    logged = [a["detail"] for a in store.get_artifact_activity(tid, "council")]
+    assert len(logged) >= 3
+    assert {seat for seat in ("performance", "brand", "platform")
+            if any(seat in detail for detail in logged)} == {"performance", "brand", "platform"}

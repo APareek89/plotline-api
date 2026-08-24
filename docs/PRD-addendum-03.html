@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plotline — PRD Addendum 03 · Marketing Studio (changes only)</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16181D;--paper:#FAFAF8;--card:#fff;--rec:#E5312B;--steel:#5A6270;--line:#E4E2DC;--wash:#F1F0EB;--slab:#1E2430;--slab2:#2A3242;--ok:#1E7A4D;--warn:#B26A00}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 "Archivo",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"Space Mono",monospace}
+main{max-width:920px;margin:0 auto;padding:40px 28px 90px}
+header.cov{border-bottom:2px solid var(--ink);padding-bottom:28px;margin-bottom:8px}
+h1{font-family:"Archivo Black";font-size:clamp(30px,4.4vw,46px);line-height:1.04;text-transform:uppercase;letter-spacing:-.02em}
+section{padding:42px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:none}
+.eyebrow{display:flex;align-items:center;gap:9px;font-family:"Space Mono";font-size:11px;letter-spacing:.14em;color:var(--steel);text-transform:uppercase;margin-bottom:14px}
+.eyebrow::before{content:"";width:8px;height:8px;background:var(--rec)}
+h2{font-family:"Archivo Black";font-size:clamp(21px,2.4vw,28px);text-transform:uppercase;letter-spacing:-.015em;margin-bottom:16px;line-height:1.1}
+h3{font-size:16px;font-weight:700;margin:24px 0 10px}
+h4{font-family:"Space Mono";font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);margin:18px 0 8px}
+p{max-width:76ch;margin-bottom:10px}
+.note{font-size:13px;color:var(--steel);max-width:76ch}
+ul.tight{list-style:none;max-width:78ch}
+ul.tight li{padding:7px 0 7px 20px;position:relative;border-bottom:1px dotted var(--line)}
+ul.tight li::before{content:"—";position:absolute;left:0;color:var(--rec);font-weight:700}
+ul.tight li:last-child{border-bottom:none}
+.verdict{border-left:3px solid var(--ink);background:var(--wash);padding:12px 16px;max-width:78ch;font-size:14px;margin:14px 0}
+.verdict b{font-family:"Space Mono";font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0 6px}
+th{font-family:"Space Mono";font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);text-align:left;padding:8px 12px 8px 0;border-bottom:2px solid var(--ink);vertical-align:bottom}
+td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:hover td{background:var(--wash)}
+.pill{display:inline-block;font-family:"Space Mono";font-size:10px;letter-spacing:.06em;padding:2px 8px;border:1px solid var(--ink);border-radius:99px;white-space:nowrap}
+.pill.red{border-color:var(--rec);color:var(--rec)}
+.pill.dim{border-color:var(--line);color:var(--steel)}
+pre{background:var(--slab);color:#DCE2EC;font-family:"Space Mono",monospace;font-size:11.5px;line-height:1.55;padding:14px 16px;border-radius:10px;overflow-x:auto;margin:10px 0}
+pre b{color:#fff}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:14px 0}
+.flow .step{background:var(--card);border:1.5px solid var(--ink);padding:10px 13px;font-size:12.5px;min-width:130px;flex:1}
+.flow .step b{display:block;font-family:"Space Mono";font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--rec);margin-bottom:3px}
+.flow .arr{align-self:center;font-family:"Space Mono";color:var(--steel)}
+/* addendum-03 additions — same idiom, no new house style */
+.add{color:var(--rec);font-weight:700}
+.sw{display:inline-block;width:13px;height:13px;border-radius:3px;border:1px solid var(--line);vertical-align:-2px;margin-right:7px}
+/* wireframe */
+.wf{display:grid;grid-template-columns:150px 1fr 220px;gap:8px;background:var(--wash);border:1px solid var(--line);border-radius:14px;padding:10px;margin:14px 0;font-family:"Space Mono";font-size:9px;color:var(--steel)}
+.wf .col{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:270px;display:flex;flex-direction:column;gap:6px}
+.wf .hd6{font-size:8px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:2px}
+.wf .it{border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+.wf .it.on{border-color:var(--rec);color:var(--ink);font-weight:700}
+.wf .agent{background:var(--slab);color:#C9D2E2;border-radius:8px;padding:6px;border:none}
+.wf .userb{align-self:flex-end;background:var(--wash);border-radius:8px 8px 2px 8px;padding:4px 6px;border:1px solid var(--line)}
+.wf .card{border:1.5px solid #3A4356;background:var(--slab2);color:#C9D2E2;border-radius:6px;padding:4px 6px;margin-top:4px}
+.wf .pbar{margin-top:auto;border:1.5px solid var(--ink);border-radius:10px;padding:5px 6px;display:flex;justify-content:space-between;align-items:center;background:#fff}
+.wf .send{width:14px;height:14px;border-radius:99px;background:#4353FF}
+.wf .meta{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding:3px 0}
+.wf .acts{display:flex;gap:4px;justify-content:flex-end}
+.wf .ic{width:14px;height:14px;border:1px solid var(--line);border-radius:4px}
+.wf .tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.wf .tabs span.on2{color:var(--ink);font-weight:700;border-bottom:2px solid var(--rec)}
+@media(max-width:760px){.wf{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+
+<header class="cov">
+  <div class="eyebrow">PRD Addendum 03 · changes only · applies over PRD v1 + Addenda 01–02</div>
+  <h1>Plotline becomes Marketing Studio</h1>
+  <p class="note" style="margin-top:12px">Owner: Anand · 24 Aug 2026 · Governing brief: <span class="mono">docs/SYSTEM-PROMPT-v2-marketing-studio.md</span>. Precedence: <strong>v2 &gt; Addendum-02 &gt; Addendum-01 &gt; PRD v1</strong>. Sections 01–06 = the new mode. Section 07 = the acceptance checks the build is measured against. Section 08 maps what this changes, keeps and retires. Everything not listed here stands as written. Nothing architectural is invented: this re-maps the existing machine — envelope, panels, validators, fal media stack, RAG — onto the owner's flow. Items marked <span class="add">✚</span> are fills the brief asked this document to specify.</p>
+</header>
+
+<section id="a1">
+  <div class="eyebrow">01 · Where it sits</div>
+  <h2>Two tabs: Campaign Studio, My Campaigns</h2>
+  <p>Marketing Studio is a <strong>mode</strong>, not a rewrite. The top nav for this mode is <span class="mono">Campaign Studio · My Campaigns</span>. A campaign is a series row (<span class="mono">series.name</span> = campaign name, <span class="mono">series.context</span> = CampaignContext); its threads are the existing threads table with <span class="mono">kind='campaign'</span>; the Ad Card reuses the Post Card table shape. No new storage concept enters the product.</p>
+  <ul class="tight">
+    <li><strong>Campaign Studio</strong> — the working surface. Blank landing → campaign name → intake → thread. When the user already has ≥1 campaign, the studio's top bar carries a <strong>+ New campaign</strong> tab/action.</li>
+    <li><strong>My Campaigns</strong> — the home of finished and in-flight work (§06). Replaces Plans for this mode.</li>
+    <li><strong>The thread is still the product.</strong> Addendum-01's chat-first model is inherited wholesale: agent drives, artifacts render as cards inside agent messages, approvals are dual-path (tap or type), no stage sidebar anywhere.</li>
+    <li><strong>Dark, scoped.</strong> The Marketing Studio surfaces run the <span class="mono">--ms-*</span> dark token set (§03). Existing light Plotline screens keep working — the dark theme is scoped to this mode's wrapper, the old pages are not globally inverted.</li>
+    <li><strong>What it supersedes:</strong> the v1 §12 Content Studio row (already replaced once by Addendum-01) is renamed and re-landed as Campaign Studio; v1's Plans row becomes My Campaigns; Addendum-01's right-panel tab pair changes; Addendum-02's creative director is re-seated as the creative orchestrator. Full map in §08.</li>
+  </ul>
+  <div class="wf" role="img" aria-label="Wireframe: campaigns rail, centre thread, right panel with Context and Creative tabs">
+    <div class="col">
+      <div class="hd6">Campaigns</div>
+      <div class="it on">● GlowLab Serum — 01</div>
+      <div class="it">GlowLab Serum — 02</div>
+      <div class="it">Q4 Retargeting — 01</div>
+      <div class="it">+ New campaign</div>
+    </div>
+    <div class="col">
+      <div class="hd6">Thread — GlowLab Serum — 01</div>
+      <div class="it">▣ Product ✓ · Campaign ✓ · Brand ✓</div>
+      <div class="agent">Agent · 3 campaign options:
+        <div class="card">o1 · "The 3am shelf" · approve / regen</div>
+        <div class="card">o2 · "Dermatologist's own" · approve / regen</div>
+        <div class="card">o3 · "28 days, one jar"</div>
+      </div>
+      <div class="userb">approve o1</div>
+      <div class="pbar"><span>+ Images 0/8 · Tweak anything… ⚙</span><span class="send"></span></div>
+    </div>
+    <div class="col">
+      <div class="acts"><span class="ic"></span><span class="ic"></span><span class="ic"></span><span class="ic"></span></div>
+      <div class="tabs"><span class="on2">Context</span><span>Creative</span><span>⋮</span></div>
+      <div class="it" style="min-height:60px">Campaign detail v2 — shots / prompt set, copy, CTA, claims used, style ref</div>
+      <div class="meta"><span>Objective</span><span>conversions</span></div>
+      <div class="meta"><span>Creative type</span><span>video · 4 shots</span></div>
+      <div class="meta"><span>Claims used</span><span>2 of 5 confirmed</span></div>
+      <div class="meta"><span>Spend</span><span>3.2 credits</span></div>
+      <div class="acts" style="margin-top:auto"><span class="it on">Generate creative</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="a2">
+  <div class="eyebrow">02 · The flow — steps 0 to 8</div>
+  <h2>Name it, fill three cards, then it is a conversation</h2>
+  <div class="flow">
+    <div class="step"><b>0–1</b>Blank landing → campaign name → two path cards (structured or conversational)</div>
+    <div class="arr">→</div>
+    <div class="step"><b>2</b>Three detail cards: Product · Campaign · Brand, each a modal</div>
+    <div class="arr">→</div>
+    <div class="step"><b>3–4</b>Rumination → 2–3 campaign options → approve → optional template</div>
+    <div class="arr">→</div>
+    <div class="step"><b>5–6</b>Campaign detail in the Context tab → refine loop with versioned diffs</div>
+    <div class="arr">→</div>
+    <div class="step"><b>7–8</b>Model confirm + single/variants → Creative tab → Ad Card</div>
+  </div>
+
+  <table>
+    <tr><th style="width:14%">Step</th><th style="width:44%">States the user sees</th><th>✚ Fills specified here</th></tr>
+    <tr>
+      <td><strong>0 · Blank landing</strong></td>
+      <td>Near-blank canvas, one block: <span class="mono">&lt;Campaign Name&gt;</span> — "Give a name to your campaign." Empty (placeholder) · typing · invalid · submitted. The name is required: it is the My Campaigns handle and the thread numbering root (<span class="mono">&lt;Campaign&gt; — 01</span>, Addendum-01 §03 numbering unchanged).</td>
+      <td><span class="add">✚</span> Enter submits. Inline validation: non-empty, unique per workspace. Error renders under the field, the primary stays disabled until it clears.</td>
+    </tr>
+    <tr>
+      <td><strong>1 · Two path cards</strong></td>
+      <td>Two choices, equal weight: <strong>a) Provide Campaign Details</strong> (structured) · <strong>b) Help me define campaign</strong> (conversational).</td>
+      <td><span class="add">✚</span> Path b is an in-thread elicitation: the agent asks for the same fields, <strong>≤1 question per turn</strong>, and shows progress chips — <span class="mono">Product ✓ · Campaign … · Brand ✗</span> — as an <span class="mono">intake_progress</span> artifact. It writes the <em>identical</em> CampaignContext schema; it is elicitation UX, not a second data model. The user may switch to path a at any time and half-filled cards persist.</td>
+    </tr>
+    <tr>
+      <td><strong>2 · Three detail cards</strong></td>
+      <td>Three cards sit between the nav and the prompt modal; each opens a modal popup. Card states: empty · partial · ✓ saved. See 2.1.</td>
+      <td><span class="add">✚</span> Popup UX basics: field-level validation, save-per-card (card shows ✓), Esc closes with the draft kept, upload previews, required/optional flags. <span class="add">✚</span> Compliance without a new form field — see 2.2.</td>
+    </tr>
+    <tr>
+      <td><strong>3 · Rumination → options</strong></td>
+      <td>All three cards ✓ → the thread shows <strong>labeled agent steps</strong>: retrieving evidence → drafting options → council review. Never a bare spinner. Output: 2–3 <span class="mono">campaign_option</span> cards — name-line, description, short storyline, objective echo, why-it-fits. Actions per card: <strong>Approve · Regenerate</strong>. Free-text refinement from the prompt modal targets the options.</td>
+      <td>No fill needed — inherits Addendum-01 §04 (labeled loading, honest empties, error cards) and the v1 evidence rules: why-it-fits cites retrieved <span class="mono">source_ids</span> or says "no evidence in DB". R1–R7 anti-generic rules apply to storylines.</td>
+    </tr>
+    <tr>
+      <td><strong>4 · Templates (optional)</strong></td>
+      <td>After approval: a <span class="mono">template_picker</span> of curated thumbnails (image or video style references), plus one <strong>Skip</strong>. Sources: static samples from <span class="mono">samples/templates/manifest.json</span> (id, thumb, type, style descriptors) — owner supplies the files. Empty-manifest state is a first-class state, not an error (§03 disabled states).</td>
+      <td><span class="add">✚</span> Semantics: a selected template is a <strong>style/composition reference injected into downstream image/video prompts</strong> — it constrains look, never copy. <strong>Skip = no style constraint</strong> at all (<span class="mono">style_ref</span> stays null).</td>
+    </tr>
+    <tr>
+      <td><strong>5 · Campaign detail</strong></td>
+      <td>The planner produces the campaign detail; it opens in the right panel's <strong>Context</strong> tab: detailed script (video) or image prompt set (statics), plus shot/slide structure, copy, CTA, claims used. In-thread the agent asks one question: "Generate creative?"</td>
+      <td><span class="add">✚</span> The detail is an artifact (<span class="mono">campaign_detail</span>), so panel deep-link, one-panel-at-a-time and the prompt-bar context chip all inherit Addendum-01 §02 unchanged.</td>
+    </tr>
+    <tr>
+      <td><strong>6 · Refine loop</strong></td>
+      <td>The user prompts changes to the script/prompt set from the modal. The agent <strong>edits only what was named</strong>, shows the diff, and the Context tab updates in place with a version marker (<span class="mono">v1 → v2</span>, change note in <span class="mono">changes[]</span>).</td>
+      <td>No fill needed — this is the v1 diff-only refine rule applied to <span class="mono">CampaignDetail</span>.</td>
+    </tr>
+    <tr>
+      <td><strong>7 · Generate Creative</strong></td>
+      <td>A <span class="mono">model_confirm</span> card posts <em>before</em> anything renders: recommended image/video model, one-line reason, cost, and the note that Settings will later allow overrides (disabled now). The same card asks <strong>"One creative, or variants?"</strong> See 2.3.</td>
+      <td>No fill needed — cost-before-generate, draft-first offer on video, and per-asset re-roll are existing invariants (Addendum-02 rules 8–9) and are not weakened here.</td>
+    </tr>
+    <tr>
+      <td><strong>8 · Creative tab</strong></td>
+      <td>Generated images/videos land in the right panel's <strong>Creative</strong> sub-tab as a grid: per-item status, preview, download, re-roll, "use as reference". The accepted set plus copy assembles the <strong>Ad Card</strong> — per-placement copy, ratios, naming string, export bundle — which lands in the thread and in My Campaigns.</td>
+      <td>No fill needed — Ad Card is the v1 deliverable spec re-pointed at campaigns; assembly waits for per-asset acceptance (Addendum-02 rule 10).</td>
+    </tr>
+  </table>
+
+  <h3>2.1 The three cards (path a)</h3>
+  <table>
+    <tr><th style="width:22%">Card</th><th>Fields</th></tr>
+    <tr><td>Enter Product Details</td><td>Name · description · images. <strong>3–8 images</strong> — these become the product pack, i.e. the consistency lock carried verbatim into every downstream prompt.</td></tr>
+    <tr><td>Enter Campaign Details</td><td><strong>Objective</strong> (awareness / traffic / conversions — drives the CCF weights) · target audience · platform(s) · optional description · <strong>creative type wanted</strong> (video or image).</td></tr>
+    <tr><td>Enter Brand Details</td><td>Brand URL · colour palette selection · font · logo · <strong>Fetch from URL</strong> · Brand Policy Document (optional upload). Fetch runs the <strong>system extractor pipeline</strong> — palette, font, logo, tagline — and the user confirms or edits the result. Extraction is a system pipeline, <em>never</em> an agent tool.</td></tr>
+  </table>
+
+  <h3>2.2 <span class="add">✚</span> Compliance without a new form field</h3>
+  <p>Approved claims and banned words are <strong>extracted</strong> from the Brand Policy Document and the product description, then shown to the user for <strong>one-tap confirmation inside the Brand card</strong>. The agent produces candidates only; it never sets <span class="mono">claims_confirmed</span> itself. The confirmed list is the claims source of truth, and the kill-flag lens is unchanged: a persuasion claim that maps to nothing on that list is a kill flag, not a warning.</p>
+
+  <h3>2.3 Model confirm, single vs variants</h3>
+  <ul class="tight">
+    <li><strong>Single (default)</strong> generates one creative.</li>
+    <li><strong>Variants</strong> → the orchestrator proposes 2–3, each with a <strong>named delta</strong> (different hook / visual treatment / copy angle — never rewordings), a per-variant cost, and a test hypothesis ("B tests hook vs A"). <strong>The user picks the count.</strong></li>
+    <li><strong>Variant sets share a <span class="mono">variant_group_id</span></strong> on their Ad Cards, so the set is legible later in My Campaigns and in performance memory.</li>
+    <li><strong>The question always precedes generation.</strong> No variant set is ever generated without an explicit count choice, and no generation runs without a visible cost plus an explicit UserEvent.</li>
+  </ul>
+</section>
+
+<section id="a3">
+  <div class="eyebrow">03 · Theme, panel, prompt modal</div>
+  <h2>Dark surface, two tabs, one persistent prompt bar</h2>
+
+  <h3>3.1 Tokens — extend, never replace</h3>
+  <p>The <span class="mono">--ms-*</span> set is added to the existing token system and scoped to Marketing Studio surfaces. The typography system is unchanged. Contrast is ≥4.5:1 everywhere.</p>
+  <table>
+    <tr><th style="width:24%">Token</th><th style="width:16%">Value</th><th>Role</th></tr>
+    <tr><td class="mono">--ms-bg</td><td><span class="sw" style="background:#0E1116"></span><span class="mono">#0E1116</span></td><td>App background</td></tr>
+    <tr><td class="mono">--ms-surface</td><td><span class="sw" style="background:#171B23"></span><span class="mono">#171B23</span></td><td>Panels, rails, cards</td></tr>
+    <tr><td class="mono">--ms-elev</td><td><span class="sw" style="background:#1E242E"></span><span class="mono">#1E242E</span></td><td>Raised surfaces — modals, popovers, chips</td></tr>
+    <tr><td class="mono">--ms-line</td><td><span class="sw" style="background:#2A3140"></span><span class="mono">#2A3140</span></td><td>Dividers and card borders</td></tr>
+    <tr><td class="mono">--ms-text</td><td><span class="sw" style="background:#FFFFFF"></span><span class="mono">#FFFFFF</span></td><td>Primary type</td></tr>
+    <tr><td class="mono">--ms-text-2</td><td><span class="sw" style="background:#A6B0C0"></span><span class="mono">#A6B0C0</span></td><td>Secondary type, meta rows, labels</td></tr>
+    <tr><td class="mono">--ms-blue</td><td><span class="sw" style="background:#4353FF"></span><span class="mono">#4353FF</span></td><td><strong>Primary action fill</strong> — Generate, Approve (blue pills)</td></tr>
+    <tr><td class="mono">--ms-blue-hover</td><td><span class="sw" style="background:#5A6AFF"></span><span class="mono">#5A6AFF</span></td><td>Primary hover</td></tr>
+    <tr><td class="mono">--ms-ok</td><td><span class="sw" style="background:#39C36A"></span><span class="mono">#39C36A</span></td><td>Ready / accepted / Live</td></tr>
+    <tr><td class="mono">--ms-warn</td><td><span class="sw" style="background:#E8A13C"></span><span class="mono">#E8A13C</span></td><td>In production, stale-results nudge, no-evidence chip</td></tr>
+    <tr><td class="mono">--ms-danger</td><td><span class="sw" style="background:#E5312B"></span><span class="mono">#E5312B</span></td><td>Kill flags, destructive confirms, failures</td></tr>
+  </table>
+  <p class="note">Accent-as-fill and accent-as-type are different jobs: <span class="mono">--ms-blue</span> is a button fill against white type; accent-coloured <em>text</em> on a dark surface needs a lighter derived value to clear 4.5:1. The same applies to danger. Derived text/border values are implementation detail of the token file — the eleven tokens above are the contract.</p>
+
+  <h3>3.2 The right panel</h3>
+  <table>
+    <tr><th style="width:22%">Region</th><th>Spec</th></tr>
+    <tr><td>Tabs</td><td><strong>Context</strong> — the campaign detail: script or image prompt set, shot/slide structure, copy, CTA, claims used, style ref, version marker; plus campaign meta. <strong>Creative</strong> — the generated-output grid (per-item status, preview, download, re-roll, "use as reference").</td></tr>
+    <tr><td>Activity</td><td>Moves <strong>under the panel's ⋮ menu</strong>. It does not vanish: the <span class="mono">generation_log</span> audit invariant is intact — every generation's params and cost stay inspectable. Activity simply leaves the tab row to make space for Creative.</td></tr>
+    <tr><td>Open / close / deep link</td><td>Unchanged from Addendum-01 §02: opens on any artifact card click, one panel at a time, ✕/Esc/click-thread to close, responsive rules identical, URL carries thread + artifact id.</td></tr>
+    <tr><td>Header actions</td><td>Unchanged order: download (generated assets only) · expand · overflow ⋮ (now also Activity, copy link, view JSON) · close.</td></tr>
+  </table>
+
+  <h3>3.3 The prompt modal (persistent, all threads)</h3>
+  <table>
+    <tr><th style="width:22%">Element</th><th>Spec</th></tr>
+    <tr><td>+ upload</td><td>Attach control with a visible counter — <span class="mono">Images 0/8</span>. Matches the reference-screenshot pattern.</td></tr>
+    <tr><td>Prompt field</td><td>Free text. Targets the open artifact when a panel is open (context chip, Addendum-01 §02). Typed approvals resolve to the same events as button taps.</td></tr>
+    <tr><td>Ratio / count chips</td><td>Reference-screenshot pattern; the model chip sits bottom-right.</td></tr>
+    <tr><td>Generate</td><td>Blue pill, <span class="mono">--ms-blue</span>. Never fires without a preceding cost display and an explicit UserEvent.</td></tr>
+    <tr><td><strong>Settings icon</strong></td><td><strong>Rendered but disabled.</strong> Tooltip, verbatim: <span class="mono">"Model selection coming — using recommended models"</span>. It is never fake-functional and carries <em>no dead click</em> — it announces itself as disabled and does nothing. The model stack stays fixed: NB2/NB images, Veo 3.1 Fast video, Kokoro/MiniMax voice.</td></tr>
+  </table>
+  <div class="verdict"><b>Why the icon exists at all</b>Showing the affordance and telling the truth about it beats hiding a planned capability. The failure mode this rules out is the dead click — an enabled-looking control that swallows the tap and does nothing.</div>
+</section>
+
+<section id="a4">
+  <div class="eyebrow">04 · Agent chain</div>
+  <h2>intake → planner → evaluator → creative orchestrator</h2>
+  <div class="flow">
+    <div class="step"><b>Intake</b>Parser with eyes; no advice. Normalizes path a/b into CampaignContext; runs the extraction-confirm loops (brand fetch, claims).</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Planner</b>Campaign options (step 3), then the campaign detail (step 5). Evidence rules, R1–R7, diff-only refines: unchanged.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Evaluator</b>Agent Council: three blind seats + a chair. Consolidates into the single, unchanged Feedback schema. One refine loop.</div>
+    <div class="arr">→</div>
+    <div class="step"><b>Orchestrator</b>Everything after step 5: model confirm, single/variants, generation, seam QA, Creative tab, Ad Card, status lifecycle.</div>
+  </div>
+
+  <h3>4.1 The Agent Council (this is the change)</h3>
+  <p>v1's single feedback agent becomes a <strong>council</strong>, following the owner's Agent Council reference (intake → analyst draft → reviewer agents including custom stakeholder reviewers → revised final). The Feedback schema itself does not change.</p>
+  <table>
+    <tr><th style="width:24%">Seat</th><th>Lenses · what it holds</th></tr>
+    <tr><td><strong>Performance Marketer</strong></td><td>Hook, offer, angle-fatigue. Owns the saturation lens, including the insufficient-data rule below the niche asset threshold.</td></tr>
+    <tr><td><strong>Brand Guardian</strong></td><td>Tone, claims versus the confirmed approved list, banned words, visual consistency with palette/logo/tagline. <strong>Holds the kill flag.</strong></td></tr>
+    <tr><td><strong>Platform Specialist</strong></td><td>Placement, format, ad policy.</td></tr>
+    <tr><td><strong>Chair</strong></td><td>Consolidates the seats into the single Feedback schema: final rating authority, mandatory lens coverage, <span class="mono">ccs_final</span>, fixes, kill flags. Where seats disagree it judges and names the seat; it never averages blindly and never drops a kill recommendation silently.</td></tr>
+  </table>
+  <ul class="tight">
+    <li><strong>Blind by construction.</strong> Each seat scores without the planner's ratings and without sight of the other seats, grounded only in its own RAG slice.</li>
+    <li><strong>One refine loop.</strong> Unchanged from v1 — the council does not iterate to consensus.</li>
+    <li><strong>Seats are editable prompt files</strong> (<span class="mono">prompts/council/seat_*.md</span>, <span class="mono">prompts/council/chair.md</span>), mirroring the reference app's editable agent prompts. Optional user-added stakeholder seats ("My CMO") come later; three seats ship as the default bench.</li>
+    <li><strong>All v1 mechanics intact:</strong> mandatory lens coverage, the CCS recomputation on the server (the chair's <span class="mono">ccs_final</span> is advisory), two-layer citation validation, the platform hard filter and cross-platform downgrade to PRINCIPLE.</li>
+  </ul>
+
+  <h3>4.2 Creative orchestrator</h3>
+  <p>Owns everything after step 5: script/prompt maintenance, model recommendation and the confirm card, the single-vs-variants question, generation jobs, seam QA, Creative-tab population, Ad Card assembly including <span class="mono">variant_group_id</span>, and the status lifecycle in My Campaigns. It <strong>inherits the Addendum-02 creative-director rules verbatim</strong> — editable prompts used as written and never "improved", per-asset acceptance, no generation without a visible cost and an explicit event, post-delivery edits reopen the card and are logged — and adds only the model-confirm card, the variants discipline, and Ad Card assembly. It never generates a variant set unasked.</p>
+</section>
+
+<section id="a5">
+  <div class="eyebrow">05 · Schemas</div>
+  <h2>The campaign contract</h2>
+  <p>Paths a and b write the <em>same</em> CampaignContext. Everything downstream keys off it.</p>
+<pre><b>// ---- context: one schema, two intake paths ----</b>
+CampaignContext {
+  name                                  <b>// required, unique per workspace</b>
+  product  : ProductBlock  | null
+  campaign : CampaignBlock | null
+  brand    : BrandBlock    | null
+  .complete = product &amp;&amp; campaign &amp;&amp; brand &amp;&amp; brand.claims_confirmed
+}
+ProductBlock  { name, description, image_upload_ids[]      <b>// 3-8 = product pack</b> }
+CampaignBlock { objective: awareness|traffic|conversions,  <b>// drives CCF weights</b>
+                target_audience, platforms[], description?,
+                creative_type: video|image }
+BrandBlock    { url?, palette[], font?, logo_upload_id?, tagline?,
+                policy_upload_id?,
+                approved_claims[], banned_words[],         <b>// extracted candidates</b>
+                claims_confirmed: bool }                   <b>// user one-tap ONLY</b>
+
+<b>// ---- step 3: options ----</b>
+CampaignOption  { option_id, name_line, description, storyline,
+                  objective_echo, why_it_fits,
+                  evidence[] }          <b>// source_ids or honest "no evidence in DB"</b>
+CampaignOptions { options[2..3] }
+
+<b>// ---- step 4: templates (style only, never copy) ----</b>
+TemplateRef { id, type: image|video, style_descriptors[] }
+<b>// Skip =&gt; style_ref stays null =&gt; no style constraint injected anywhere.</b>
+
+<b>// ---- step 5/6: the detail, versioned in place ----</b>
+DetailShot     { slot, duration_s?, visual_prompt, vo_or_copy? }
+CampaignDetail { creative_type, shots[1..], copy_primary, cta,
+                 claims_used[],        <b>// MUST be a subset of confirmed claims</b>
+                 style_ref: TemplateRef|null,
+                 version, changes[] }  <b>// refine-loop diff log</b>
+
+<b>// ---- step 7: always before generation ----</b>
+VariantSpec  { variant_id, delta, hypothesis, cost_usd }   <b>// delta is NAMED, never a reword</b>
+ModelConfirm { recommended_model, reason, cost_usd,
+               settings_note = "Model selection coming — using recommended models",
+               variants_proposed[] }
+
+<b>// ---- step 8: the deliverable ----</b>
+AdCard { id, campaign_id, thread_id, option_id,
+         variant_group_id?, variant_id?,          <b>// a variant set shares the group id</b>
+         creative_type,
+         placements { platform: copy },
+         ratios[1..],                             <b>// spec table: 9:16 1:1 16:9 4:5</b>
+         naming,                                  <b>// brand_campaign_option_variant_ratio</b>
+         media[], total_cost_credits,
+         status: draft|ready|live, created_at }
+
+<b>// ---- evaluator ----</b>
+SeatReview { seat: performance|brand|platform,
+             element_scores[1..], kill_recommendation?, fixes[] }
+<b>// The chair consolidates SeatReview[] into the UNCHANGED Feedback schema.</b></pre>
+
+  <h4>Envelope additions — seven new artifact types</h4>
+  <p class="note">The AgentMessage / UserEvent envelope of Addendum-01 §05 is unchanged. Only the <span class="mono">ArtifactType</span> union grows.</p>
+<pre><b>// ArtifactType += these seven. Payload keys are the render contract.</b>
+intake_progress : { filled:{product,campaign,brand}, next_field|null }
+                  actions: —                                <b>// display only</b>
+campaign_option : { option: CampaignOption }
+                  actions: approve · regenerate
+template_picker : { templates:[TemplateRef+thumb], skip_allowed:true }
+                  actions: pick_&lt;id&gt; · skip
+campaign_detail : { detail: CampaignDetail }
+                  actions: generate_creative
+model_confirm   : { confirm: ModelConfirm }
+                  actions: generate_single · generate_variants_2 · generate_variants_3
+creative_set    : { items:[{asset_id, slot, kind, preview_url,
+                            status, cost, variant_id?}] }
+                  actions: accept_all · reroll_&lt;slot&gt; · use_as_reference_&lt;slot&gt;
+ad_card         : { card: AdCard }
+                  actions: mark_live</pre>
+  <p class="note"><span class="mono">creative_set</span> is an envelope payload shape, not a stored object — the items are asset rows, and the Ad Card is what persists.</p>
+</section>
+
+<section id="a6">
+  <div class="eyebrow">06 · My Campaigns</div>
+  <h2>Main tab 2 — lifecycle, spend, and the results loop</h2>
+  <table>
+    <tr><th style="width:24%">Column / control</th><th>Spec</th></tr>
+    <tr><td>Name · objective</td><td>The campaign name from step 0 and the objective from the campaign block.</td></tr>
+    <tr><td>Status</td><td>Lifecycle: <strong>Draft → Planned → In production → Ready → Live</strong>. Campaign-level. Distinct from the per-card <span class="mono">AdCard.status</span> (draft / ready / live), which tracks one deliverable.</td></tr>
+    <tr><td>Creative count</td><td>Ad Cards produced for this campaign.</td></tr>
+    <tr><td>Spend to date</td><td>Credits, summed from the asset costs across the campaign's threads. Every generation is already logged with its params and cost; this is that log, totalled.</td></tr>
+    <tr><td>Primary CTAs</td><td><strong>Open</strong> · <strong>Generate next creative</strong>. "Generate next creative" opens the next thread step — it never itself generates, because generation requires a cost display and an explicit event.</td></tr>
+    <tr><td>Results-paste nudge</td><td>Shown on <strong>Live</strong> campaigns only: paste CTR / CPC / CPA / ROAS.</td></tr>
+    <tr><td>Performance memory key</td><td>Pasted results are keyed <span class="mono">brand × angle × format × placement</span>. That key is why a variant set sharing a <span class="mono">variant_group_id</span> stays legible after the fact.</td></tr>
+  </table>
+</section>
+
+<section id="a7">
+  <div class="eyebrow">07 · Acceptance checks</div>
+  <h2>What the build is measured against</h2>
+  <p class="note">Checks are quoted verbatim from the governing brief. The right column names the surface that proves each one — it adds no behaviour.</p>
+  <table>
+    <tr><th style="width:5%">#</th><th style="width:52%">Check (verbatim)</th><th>Proved by</th></tr>
+    <tr><td>1</td><td>path b fills the identical schema as path a</td><td>Conversational intake writes CampaignContext; the same <span class="mono">.complete</span> gate opens step 3 either way.</td></tr>
+    <tr><td>2</td><td>brand-URL fetch populates and is user-confirmable</td><td>Fetch from URL runs the system extractor; palette/font/logo/tagline land in the Brand card as editable, confirmable values.</td></tr>
+    <tr><td>3</td><td>unmapped persuasion claim → kill flag</td><td>Brand Guardian seat holds the kill flag; the chair maps any seat's kill recommendation to a KillFlag and never drops one silently.</td></tr>
+    <tr><td>4</td><td>Skip on templates yields no style constraint</td><td><span class="mono">style_ref</span> stays null; no style descriptors are injected into any downstream prompt.</td></tr>
+    <tr><td>5</td><td>Settings icon is honestly disabled (tooltip, no dead click)</td><td>Rendered, announces itself disabled, tooltip <span class="mono">"Model selection coming — using recommended models"</span>, no click handler.</td></tr>
+    <tr><td>6</td><td>every generated asset appears in Creative tab with params + cost</td><td>Creative-tab grid is fed from the asset rows; the <span class="mono">generation_log</span> audit under ⋮ carries params and cost per asset.</td></tr>
+    <tr><td>7</td><td>the single-vs-variants question always precedes generation, variants carry distinct deltas + a shared variant_group_id, and no variant set is generated without an explicit count choice</td><td><span class="mono">model_confirm</span> is emitted before any generation and its actions are the only route to generate; variant Ad Cards share <span class="mono">variant_group_id</span> and carry named deltas plus hypotheses.</td></tr>
+    <tr><td>8</td><td>Ad Card fails validation on missing ratio or spec-table breach</td><td><span class="mono">ratios</span> is non-empty and every entry must be in the placement spec table (9:16 · 1:1 · 16:9 · 4:5); violation raises, it does not warn.</td></tr>
+  </table>
+</section>
+
+<section id="a8">
+  <div class="eyebrow">08 · Supersession map</div>
+  <h2>What this changes, keeps, retires</h2>
+  <table>
+    <tr><th style="width:28%">Reference</th><th>Status after this addendum</th></tr>
+    <tr><td>PRD v1 §3.1 User context</td><td><strong>Replaced for this mode</strong> by CampaignContext (product / campaign / brand blocks + confirmed claims). The Content Studio context blocks stand unchanged for content planning.</td></tr>
+    <tr><td>PRD v1 §3.4 Agent pipeline</td><td><strong>Re-mapped</strong>: intake → planner → evaluator → creative orchestrator (§04).</td></tr>
+    <tr><td>PRD v1 feedback agent</td><td><strong>Councilized</strong>: three blind seats + chair. The Feedback schema, CCS recomputation, mandatory lens coverage, kill flags and the single refine loop are all unchanged.</td></tr>
+    <tr><td>PRD v1 §3.9 Schemas</td><td><strong>Extended</strong>: the campaign contract set (§05). Existing payload schemas unchanged.</td></tr>
+    <tr><td>PRD v1 §12 Content Studio row</td><td><strong>Renamed and re-landed</strong> as Campaign Studio. Already replaced once by Addendum-01 §01–04; the chat-first model survives, the landing and intake change.</td></tr>
+    <tr><td>PRD v1 §12 Plans row</td><td><strong>Becomes My Campaigns</strong> (§06). Planned / In production / Ready survive; Posted becomes <strong>Live</strong>; spend and results-paste are added.</td></tr>
+    <tr><td>PRD v1 §12 Design system</td><td><strong>Extended, not replaced</strong>: the <span class="mono">--ms-*</span> dark set is added and scoped to Marketing Studio surfaces. Typography unchanged; light screens keep working.</td></tr>
+    <tr><td>Addendum-01 §01 chat-first thread</td><td><strong>Kept wholesale</strong> — agent-driven thread, artifacts as cards, dual-path approvals, no stage sidebar.</td></tr>
+    <tr><td>Addendum-01 §02 panel tabs</td><td><strong>Changed</strong>: Concept | Activity becomes <strong>Context | Creative</strong>, with Activity under the ⋮ menu. Open/close, one-at-a-time, deep-link and header-action rules unchanged.</td></tr>
+    <tr><td>Addendum-01 §03 thread numbering</td><td><strong>Kept</strong> — <span class="mono">&lt;Campaign&gt; — 01</span>, zero-padded, never renumbered. The rail lists campaigns.</td></tr>
+    <tr><td>Addendum-01 §04 UX fundamentals</td><td><strong>Kept</strong> — labeled agent steps, honest empties, error cards, destructive confirms, keyboard map, accessibility, persistence.</td></tr>
+    <tr><td>Addendum-01 §05 envelope</td><td><strong>Extended</strong>: seven new ArtifactTypes (§05). AgentMessage / UserEvent shape unchanged.</td></tr>
+    <tr><td>Addendum-01 §06 prompt deltas</td><td><strong>Kept</strong>, plus new prompt files: campaign intake, campaign planner, three council seats, chair, campaign orchestrator.</td></tr>
+    <tr><td>Addendum-01 §7.2 R1–R7</td><td><strong>Kept</strong>, now applied to campaign storylines and options as well as concepts.</td></tr>
+    <tr><td>Addendum-01 §7.3 red-team fixes</td><td><strong>Kept</strong> — saturation insufficient-data guard, platform hard filter, cross-platform downgrade, evidence-coverage % and the PROVISIONAL badge.</td></tr>
+    <tr><td>Addendum-02 creative director</td><td><strong>Re-seated</strong> as the creative orchestrator. Rules 7–12 inherited verbatim; rules 13–15 added (model confirm, variants discipline, Ad Card assembly).</td></tr>
+    <tr><td>Addendum-02 confidence card → route → script sequence</td><td><strong>Retired for this mode.</strong> Campaign detail (step 5) plus the model-confirm card (step 7) replace it. The DIY Creative Studio path keeps the original sequence.</td></tr>
+    <tr><td>Addendum-02 Post Card</td><td><strong>Becomes the Ad Card</strong> here: per-placement copy, ratios, naming string, export bundle, plus variant grouping. Post Card is unchanged where Creative Studio still runs.</td></tr>
+    <tr><td>Addendum-02 lifecycle Planned/In production/Ready/Posted</td><td><strong>Extended</strong> to Draft → Planned → In production → Ready → Live at campaign level; the 72h results nudge becomes the Live results-paste nudge.</td></tr>
+    <tr><td>Addendum-02 <span class="mono">MOCK_MEDIA=1</span> default</td><td><strong>Retired from the product.</strong> This mode runs real models (<span class="mono">MOCK_LLM=0</span>, <span class="mono">MOCK_MEDIA=0</span>); deterministic mocks exist for tests only. No mock-only path ships in the product.</td></tr>
+    <tr><td>Model stack</td><td><strong>Unchanged and fixed</strong>: NB2/NB images, Veo 3.1 Fast video, Kokoro/MiniMax voice. Selection is not user-configurable yet — hence the honestly disabled Settings icon.</td></tr>
+    <tr><td><span class="mono">generation_log</span> audit</td><td><strong>Kept intact.</strong> It moves under the panel's ⋮ menu; it does not disappear.</td></tr>
+    <tr><td>Avatar Studio · My Space · DIY <span class="mono">/creative</span></td><td><strong>Unchanged.</strong> This addendum replaces the nav for the Marketing Studio mode only.</td></tr>
+    <tr><td>Demo v2 (html)</td><td><strong>Still stale</strong> (already flagged in Addendum-01 §09), and now further so. The PRD plus Addenda 01–03 are the source of truth.</td></tr>
+  </table>
+  <div class="verdict"><b>Standing rule</b>No invented benchmarks, limits or policy text. Honesty surfaces stay everywhere — PROVISIONAL, no-evidence, insufficient-data, sample-data. Never weaken an invariant to simplify: surface the conflict instead. At most one clarifying question per agent turn.</div>
+</section>
+
+</main>
+</body>
+</html>

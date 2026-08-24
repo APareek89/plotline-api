@@ -322,6 +322,14 @@ ArtifactType = Literal[
     "asset_set",
     "voice_options",
     "post_card",
+    # Addendum-03 (Marketing Studio v2)
+    "campaign_option",
+    "template_picker",
+    "campaign_detail",
+    "model_confirm",
+    "creative_set",
+    "ad_card",
+    "intake_progress",
 ]
 
 ActionStyle = Literal["primary", "secondary", "danger"]
@@ -464,6 +472,162 @@ class PostCard(Strict):
     results_pasted: bool = False
     created_at: float = 0.0
     generation_log_ref: str = ""
+
+
+# -------------------- Addendum-03 (Marketing Studio v2): campaign contracts ---
+
+CampaignObjective = Literal["awareness", "traffic", "conversions"]
+CreativeType = Literal["video", "image"]
+
+
+class ProductBlock(Strict):
+    name: str
+    description: str
+    image_upload_ids: list[str] = Field(default_factory=list, max_length=8)  # 3-8 → product pack / consistency lock
+
+
+class CampaignBlock(Strict):
+    objective: CampaignObjective  # drives CCF weights (awareness→followers_reach, traffic→engagement, conversions→conversions)
+    target_audience: str
+    platforms: list[Platform] = Field(min_length=1)
+    description: Optional[str] = None
+    creative_type: CreativeType = "image"
+
+
+class BrandBlock(Strict):
+    url: Optional[str] = None
+    palette: list[str] = Field(default_factory=list)  # hex
+    font: Optional[str] = None
+    logo_upload_id: Optional[str] = None
+    tagline: Optional[str] = None
+    policy_upload_id: Optional[str] = None
+    # ✚ compliance without a new form field: extracted from policy doc +
+    # product description, then ONE-TAP CONFIRMED by the user. Confirmed list
+    # = claims source of truth (kill-flag lens unchanged).
+    approved_claims: list[str] = Field(default_factory=list)
+    banned_words: list[str] = Field(default_factory=list)
+    claims_confirmed: bool = False
+
+
+class CampaignContext(Strict):
+    """Paths a and b write THIS identical schema — path b is elicitation UX,
+    not a different data model."""
+
+    name: str
+    product: Optional[ProductBlock] = None
+    campaign: Optional[CampaignBlock] = None
+    brand: Optional[BrandBlock] = None
+
+    @property
+    def complete(self) -> bool:
+        return bool(
+            self.product and self.campaign and self.brand and self.brand.claims_confirmed
+        )
+
+
+class CampaignOption(Strict):
+    option_id: str  # o1, o2, o3
+    name_line: str
+    description: str = Field(max_length=400)
+    storyline: str = Field(max_length=400)
+    objective_echo: str
+    why_it_fits: str
+    evidence: list[Evidence] = Field(default_factory=list)  # source_ids or honest gap
+
+
+class CampaignOptions(Strict):
+    options: list[CampaignOption] = Field(min_length=2, max_length=3)
+
+
+class TemplateRef(Strict):
+    """Selected template = style/composition reference injected into
+    downstream prompts — constrains look, never copy. Skip = None upstream."""
+
+    id: str
+    type: Literal["image", "video"]
+    style_descriptors: list[str] = Field(default_factory=list)
+
+
+class DetailShot(Strict):
+    slot: str  # shot_01 | slide_01
+    duration_s: Optional[float] = None
+    visual_prompt: str
+    vo_or_copy: Optional[str] = None
+
+
+class CampaignDetail(Strict):
+    """Step 5 artifact → right-panel Context tab. Script (video) or image
+    prompt set (statics) + structure, copy, CTA, claims used."""
+
+    creative_type: CreativeType
+    shots: list[DetailShot] = Field(min_length=1)
+    copy_primary: str
+    cta: str
+    claims_used: list[str] = Field(default_factory=list)  # must ⊆ confirmed claims
+    style_ref: Optional[TemplateRef] = None
+    version: int = 1
+    changes: list[str] = Field(default_factory=list)  # refine-loop diff log
+
+
+class VariantSpec(Strict):
+    variant_id: str  # A, B, C
+    delta: str  # named delta — different hook / visual treatment / copy angle, never rewordings
+    hypothesis: str  # "B tests hook vs A"
+    cost_usd: float
+
+
+class ModelConfirm(Strict):
+    """Step 7 card — always precedes generation."""
+
+    recommended_model: str
+    reason: str
+    cost_usd: float
+    settings_note: str = "Model selection coming — using recommended models"
+    variants_proposed: list[VariantSpec] = Field(default_factory=list)
+
+
+class AdCard(Strict):
+    """The deliverable (v1 Ad Card spec): per-placement copy, ratios, naming
+    string, export bundle. Lands in thread + My Campaigns."""
+
+    id: str
+    campaign_id: str  # series id
+    thread_id: str
+    option_id: str
+    variant_group_id: Optional[str] = None
+    variant_id: Optional[str] = None
+    creative_type: CreativeType
+    placements: dict[str, str]  # platform → copy
+    ratios: list[str] = Field(min_length=1)
+    naming: str  # e.g. brand_campaign_option_variant_ratio
+    media: list[PostMedia] = Field(default_factory=list)
+    total_cost_credits: float = 0.0
+    status: Literal["draft", "ready", "live"] = "ready"
+    created_at: float = 0.0
+
+    @model_validator(mode="after")
+    def _spec_table(self) -> "AdCard":
+        allowed = {"9:16", "1:1", "16:9", "4:5"}
+        bad = [r for r in self.ratios if r not in allowed]
+        if bad:
+            raise ValueError(f"ratio(s) {bad} outside the placement spec table {sorted(allowed)}")
+        return self
+
+
+class SeatScore(Strict):
+    element: ElementName
+    rating: Rating
+    reason: str
+    evidence: list[Evidence] = Field(default_factory=list)
+
+
+class SeatReview(Strict):
+    """One blind council seat's output (Addendum-03 evaluator)."""
+
+    seat: Literal["performance", "brand", "platform"]
+    element_scores: list[SeatScore] = Field(min_length=1)
+    kill_recommendation: Optional[str] = None
+    fixes: list[Fix] = Field(default_factory=list)
 
 
 # --------------------------------------------- Phase-2 contracts (defined) ---
