@@ -9,6 +9,15 @@ last-synced: `3400b39` (plotline-api) · `399a798` (plotline-web)
 > low-context signal (secondary). Snapshot, not journal; re-stamp `last-synced`.
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
 
+## PIVOT (declared Fri 22 Aug, work starts next session)
+Plotline → MARKETING STUDIO per docs/SYSTEM-PROMPT-v2-marketing-studio.md — the
+GOVERNING brief for all new work. Precedence: v2 > Addendum-02 > Addendum-01 > PRD v1.
+Re-map the existing machine (envelope, panels, validators, fal stack, RAG, council-
+izing the feedback agent); invent nothing architectural. Produce its OUTPUTS in
+order (Addendum-03 doc → schemas → agent prompts → UI copy map → acceptance checks)
+BEFORE implementing. The Monday items below fold in: do the real-mode retest first
+(the council/planner run on real mode), fal-spend decision stands.
+
 ## Monday pickup (2026-08-25) — state as of Fri 22 Aug EOD
 - Feedback-1 (Google Doc) APPLIED app-wide: full-bleed layout (rail flush left, chat fills
   width, panel = 40%, nav spans window), context form fits one viewport, Plans/DIY densified.
