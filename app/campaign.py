@@ -907,6 +907,10 @@ def _run_options(context: CampaignContext, shadow: CreatorContext, retrieved: se
         schema=CampaignOptions,
         dispatcher=_dispatcher(retrieved, context=shadow),
         validate=lambda o: _validate_options(o, retrieved, previous=previous, flagged=flagged),
+        # The prompt quotes the SAME lexicon the validator matches on, so the
+        # two can never drift: R2 is a literal substring check, and describing
+        # it in prose made the planner satisfy its spirit but fail the check.
+        prompt_replacements={"receipt_cues": ", ".join(f'"{c}"' for c in _RECEIPT_CUES)},
         mock_fn=campaign_mock.mock_campaign_options,
     )
     return options

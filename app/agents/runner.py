@@ -22,6 +22,18 @@ from app.validators import AgentValidationError
 T = TypeVar("T", bound=BaseModel)
 
 
+class AgentTruncated(ValueError):
+    """The model hit the output cap mid-answer (stop_reason=max_tokens).
+
+    Subclasses ValueError so the §3.9 retry loop picks it up — but it is NOT a
+    validation failure and must never be parsed as one: extended-thinking
+    tokens share the output budget, so a truncated response is a *complete
+    prefix of valid JSON*, which json.loads reports as a confusing delimiter
+    error. Naming it here keeps the honesty invariant: nothing silently
+    accepted, and the retry tells the model the real reason.
+    """
+
+
 class AgentHardFail(RuntimeError):
     """Validation still failing after max retries — surfaced to the user,
     never silently accepted or repaired (§3.9)."""
@@ -135,7 +147,7 @@ def _llm_call(
     import anthropic
 
     client = anthropic.Anthropic()
-    kwargs: dict[str, Any] = dict(model=model, max_tokens=16000, system=system)
+    kwargs: dict[str, Any] = dict(model=model, max_tokens=config.MAX_OUTPUT_TOKENS, system=system)
     if "sonnet-4-6" in model:
         kwargs["thinking"] = {"type": "adaptive"}
     if use_tools:
@@ -143,7 +155,13 @@ def _llm_call(
 
     convo = list(messages)
     for _ in range(16):  # tool-loop cap
-        resp = client.messages.create(messages=convo, **kwargs)
+        # Stream, always. A budget big enough for a thinking chair + a large
+        # Feedback object implies a generation the SDK refuses to run
+        # non-streamed ("Streaming is required for operations that may take
+        # longer than 10 minutes"). The final message has the same shape, so
+        # everything below is unchanged.
+        with client.messages.stream(messages=convo, **kwargs) as stream:
+            resp = stream.get_final_message()
         if resp.stop_reason == "tool_use":
             convo.append({"role": "assistant", "content": resp.content})
             results = []
@@ -162,7 +180,19 @@ def _llm_call(
         if resp.stop_reason == "pause_turn":
             convo.append({"role": "assistant", "content": resp.content})
             continue
-        return next((b.text for b in resp.content if b.type == "text"), "")
+        if resp.stop_reason == "max_tokens":
+            # Never hand a truncated body to the JSON parser — it is a valid
+            # prefix, so the parser blames syntax and hides the real cause.
+            usage = getattr(resp, "usage", None)
+            thinking = getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None)
+            raise AgentTruncated(
+                f"output hit the {config.MAX_OUTPUT_TOKENS}-token cap before the answer was complete "
+                f"(generated {getattr(usage, 'output_tokens', '?')} tokens"
+                + (f", {thinking} of them thinking" if thinking else "")
+                + ") — the response is incomplete, not invalid"
+            )
+        # join every text block: one long answer can arrive as several.
+        return "".join(b.text for b in resp.content if b.type == "text")
     raise RuntimeError("tool loop exceeded 16 iterations")
 
 
@@ -188,8 +218,10 @@ def run_agent(
     started = time.time()
 
     last_error: Optional[str] = None
+    last_truncated = False
     for attempt in range(config.MAX_VALIDATION_RETRIES + 1):
         log.attempts = attempt + 1
+        raw_text: Optional[str] = None
         try:
             if config.MOCK_LLM:
                 if mock_fn is None:
@@ -207,12 +239,22 @@ def run_agent(
                         {
                             "role": "user",
                             "content": (
-                                "Your previous output failed validation. Fix ONLY what is invalid "
-                                "and return the full corrected JSON.\nVALIDATION ERROR:\n" + last_error
+                                (
+                                    "Your previous output was CUT OFF before it finished — it exceeded "
+                                    "the output budget. The structure was not wrong; it was too long. "
+                                    "Return the SAME JSON shape, complete, but materially shorter: keep "
+                                    "every required key, cut prose in reason/claim/note fields to one "
+                                    "tight sentence each.\nREASON:\n"
+                                    if last_truncated
+                                    else "Your previous output failed validation. Fix ONLY what is invalid "
+                                    "and return the full corrected JSON.\nVALIDATION ERROR:\n"
+                                )
+                                + last_error
                             ),
                         }
                     )
                 text = _llm_call(model, system, messages, dispatcher, use_tools)
+                raw_text = text
                 data = unwrap_envelope(extract_json(text), schema)
 
             obj = schema.model_validate(data)
@@ -226,7 +268,12 @@ def run_agent(
             return obj, log
         except (ValidationError, AgentValidationError, ValueError, json.JSONDecodeError) as exc:
             last_error = str(exc)
+            last_truncated = isinstance(exc, AgentTruncated)
             log.validation_errors.append(last_error[:2000])
+            # Keep the body that failed. Without it a truncation and a genuine
+            # schema bug read identically in the log, which is what made this
+            # class of failure cost a full re-run to diagnose.
+            _persist_raw(log, attempt, raw_text)
 
     log.duration_s = time.time() - started
     _persist_log(log)
@@ -256,3 +303,12 @@ def _persist_log(log: RunLog) -> None:
     path: Path = config.LOG_DIR / "agent_runs.jsonl"
     with path.open("a") as fh:
         fh.write(json.dumps(log.to_dict(), default=str) + "\n")
+
+
+def _persist_raw(log: RunLog, attempt: int, raw: Optional[str]) -> None:
+    """Dump the exact body that failed to parse/validate, next to the run log."""
+    if not raw:
+        return
+    raw_dir: Path = config.LOG_DIR / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / f"{log.run_id}-{log.agent}-attempt{attempt + 1}.txt").write_text(raw)

@@ -10,12 +10,27 @@ last-synced: `d640a86` (plotline-api) · `f99ffdc` (plotline-web)
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
 
 ## NEXT SESSION — read docs/NEXT-SESSION-PROMPT.md FIRST
-Owner shipped Addendum-03 (2 files in ~/Downloads: content-engine-prd-addendum-03.html +
-marketing-studio-demo_1.html) — copy both into docs/ and treat them as HIGHEST precedence.
+Addendum-03 landed in docs/ (owner's files, HIGHEST precedence): `PRD-addendum-03-ui.html`
+(behavioral spec) + `marketing-studio-demo.html` (the DESIGN CONTRACT). The old generated
+one is kept as `PRD-addendum-03-generated.html` — reference only, NOT authoritative.
 CLEAN-SLATE FRONTEND: nothing from the old product survives (no Avatar/Creative/Content Studio,
 no Plans/My Space, no old design system). Three tabs only: Campaign Studio · My Campaigns ·
-My Brand. Backend is leveraged, not rebuilt. Stopped mid-run: council CHAIR was in flight on
-campaign srs_5e7715873a / thread thr_42eb12a760 — finish that first.
+My Brand. Backend is leveraged, not rebuilt.
+
+## REAL-MODE BUG CLASS #3 — silent truncation (fixed 2026-08-24)
+The chair was NOT failing on prompt size as predicted. Root cause found by probe:
+`thinking` tokens share the `max_tokens` budget, the response came back
+`stop_reason=max_tokens`, and `runner._llm_call` returned the truncated text WITHOUT
+checking stop_reason — so `json.loads` blamed syntax ("Expecting ',' delimiter") and hid
+a pure overflow. Fixes: `AgentTruncated` raised on stop_reason=max_tokens (retryable, and
+the retry now tells the model it was CUT OFF, not invalid); all text blocks joined (was
+first-only); `config.MAX_OUTPUT_TOKENS` 16000→32000; **streaming is now mandatory** (the
+SDK refuses non-streamed calls whose budget implies >10min); raw failing body persisted to
+`data/runs/raw/` — that capture is what made the next bug findable in one run, not three.
+Then bug #4, same species as #1/#2: R2 receipt is a LITERAL substring check but the prompt
+described it in prose, so the planner wrote "camera holds on the screen" (fails) instead of
+"on-screen" (passes). Prompt now has the lexicon INJECTED from `validators._RECEIPT_CUES`
+via prompt_replacements, so prompt and check cannot drift. planner 1.2.0→1.3.0.
 
 ## PIVOT (declared Fri 22 Aug, work starts next session)
 Plotline → MARKETING STUDIO per docs/SYSTEM-PROMPT-v2-marketing-studio.md — the
@@ -86,6 +101,8 @@ events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tab
   MOCK_LLM=1 with devrag as primary+aux (sample data, no AWS/Anthropic in cloud);
   render-start.sh boots both. CAVEATS: free tier spins down (~50s cold start); SQLite on
   ephemeral disk — threads/series reset on redeploy; autoDeploy on push to master.
+- ✅ 101/101 tests (23 in test_marketing.py — 19 acceptance floor + 4 new: truncation never
+  parsed as complete, multi-block joins, prompt/validator lexicon drift guard, R2 floor)
 - ▶ Loop.MD status: offered (awaiting user's answer)
 
 ## Pending points

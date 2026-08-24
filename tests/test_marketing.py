@@ -755,3 +755,127 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     assert len(logged) >= 3
     assert {seat for seat in ("performance", "brand", "platform")
             if any(seat in detail for detail in logged)} == {"performance", "brand", "platform"}
+
+
+def test_a_truncated_agent_response_is_never_parsed_as_if_complete(monkeypatch):
+    """Extended-thinking tokens share the output budget, so an over-long answer
+    comes back as a *valid prefix* of JSON. Parsing it blames syntax and hides
+    the real cause — which cost a full real-mode council run to diagnose. The
+    runner must name the overflow instead, and keep the body that failed."""
+    from app.agents import runner
+
+    class _Details:
+        thinking_tokens = 9000
+
+    class _Usage:
+        output_tokens = 16000
+        output_tokens_details = _Details()
+
+    class _Block:
+        type = "text"
+        # a complete prefix of a real Feedback object — parses as a delimiter error
+        text = '{"concept_verdicts": [{"concept_id": "o1", "element_verdicts": [{"reason": "the brand seat flagged'
+
+    class _Resp:
+        stop_reason = "max_tokens"
+        content = [_Block()]
+        usage = _Usage()
+
+    class _Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get_final_message(self):
+            return _Resp()
+
+    class _Messages:
+        def stream(self, **kwargs):
+            return _Stream()
+
+    class _Client:
+        messages = _Messages()
+
+    monkeypatch.setattr("anthropic.Anthropic", lambda *a, **k: _Client())
+
+    with pytest.raises(runner.AgentTruncated) as excinfo:
+        runner._llm_call("claude-sonnet-4-6", "sys", [{"role": "user", "content": "x"}], None, False)
+
+    message = str(excinfo.value)
+    assert "incomplete, not invalid" in message      # honest about WHICH failure it is
+    assert "thinking" in message                     # names the budget contention
+    assert "delimiter" not in message                # never reported as a syntax bug
+    # and it is retryable (ValueError) so the loop re-asks for a shorter answer
+    assert isinstance(excinfo.value, ValueError)
+
+
+def test_a_long_answer_split_across_text_blocks_is_not_silently_halved(monkeypatch):
+    """`next(...)` took only the FIRST text block; a long council verdict that
+    arrives in two blocks would have been truncated by the runner itself."""
+    from app.agents import runner
+
+    class _B:
+        def __init__(self, text):
+            self.type = "text"
+            self.text = text
+
+    class _Resp:
+        stop_reason = "end_turn"
+        content = [_B('{"a": 1,'), _B(' "b": 2}')]
+        usage = None
+
+    class _Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get_final_message(self):
+            return _Resp()
+
+    class _Messages:
+        def stream(self, **kwargs):
+            return _Stream()
+
+    class _Client:
+        messages = _Messages()
+
+    monkeypatch.setattr("anthropic.Anthropic", lambda *a, **k: _Client())
+
+    text = runner._llm_call("claude-sonnet-4-6", "sys", [{"role": "user", "content": "x"}], None, False)
+    assert json.loads(text) == {"a": 1, "b": 2}
+
+
+def test_the_planner_prompt_quotes_the_same_receipt_lexicon_the_validator_enforces():
+    """R2 is a literal substring check. When the prompt only described it in
+    prose the planner wrote storylines that satisfied the *intent* ("camera
+    holds on the screen") and failed the *check* — a real-mode-only bug that
+    burned a full run. The lexicon is injected from validators so the prompt
+    and the check cannot drift apart."""
+    from app.agents.runner import build_system
+    from app.validators import _RECEIPT_CUES
+
+    replacements = {"receipt_cues": ", ".join(f'"{c}"' for c in _RECEIPT_CUES)}
+    system, version = build_system("campaign_planner", replacements)
+
+    assert "{receipt_cues}" not in system          # substituted, not left dangling
+    for cue in _RECEIPT_CUES:                      # every cue the check accepts is stated
+        assert f'"{cue}"' in system, f"{cue!r} enforced but never shown to the planner"
+    # and the prompt says the quiet part: intent is not enough
+    assert "LITERALLY" in system
+    assert version == "1.3.0"
+
+
+def test_a_storyline_that_only_gestures_at_proof_still_fails_r2():
+    """Guards the floor the prompt fix stands on — the fix is to the PROMPT,
+    never to the check. A camera move must remain a failure."""
+    from app.validators import _RECEIPT_CUES
+
+    gesturing = "the camera holds on the monitor as the glare visibly shrinks to warm light"
+    assert not any(cue in gesturing.lower() for cue in _RECEIPT_CUES)
+
+    receipted = "a split screen shows the same monitor before and after, with a -40% callout"
+    assert any(cue in receipted.lower() for cue in _RECEIPT_CUES)

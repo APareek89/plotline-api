@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marketing Studio — interactive demo v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0E1116;--sur:#171B23;--elev:#1E242E;--line:#2A3140;--tx:#FFFFFF;--tx2:#A9B3C4;--blue:#4353FF;--blueh:#5A6AFF;--ok:#39C36A;--warn:#E8A13C;--dgr:#E5312B}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font:14.5px/1.55 "Archivo",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
+.mono{font-family:"Space Mono",monospace}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+/* top */
+.top{display:flex;align-items:center;gap:16px;padding:11px 20px;background:var(--sur);border-bottom:1px solid var(--line)}
+.logo{font-family:"Archivo Black";font-size:16.5px;letter-spacing:.01em}
+.logo i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--blue);margin-left:5px}
+.sim{font-family:"Space Mono";font-size:9px;letter-spacing:.12em;color:var(--tx2);border:1px solid var(--line);padding:2px 7px;border-radius:999px}
+.nav{display:flex;gap:4px}
+.nav button{font-size:13px;padding:7px 13px;border-radius:9px;color:var(--tx2)}
+.nav button.on{background:var(--blue);color:#fff;font-weight:600}
+.right{margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.jump{font-family:"Space Mono";font-size:9px;padding:4px 8px;border:1px solid var(--line);border-radius:999px;color:var(--tx2)}
+.jump.on{border-color:var(--blue);color:#fff}
+.reset{font-family:"Space Mono";font-size:10px;border:1px solid var(--dgr);color:var(--dgr);border-radius:999px;padding:4px 10px}
+/* studio sub-bar */
+.subbar{display:none;align-items:center;gap:12px;padding:8px 20px;background:#12151C;border-bottom:1px solid var(--line);font-size:13px;color:var(--tx2)}
+.subbar.show{display:flex}
+.subbar b{color:#fff;font-weight:600}
+.subbar .newc{margin-left:auto;border:1.5px dashed var(--line);border-radius:999px;padding:6px 13px;color:var(--tx2);font-size:12.5px}
+.subbar .newc:hover{border-color:var(--blue);color:#fff}
+/* layout */
+.wrap{flex:1;display:flex;min-height:0;position:relative}
+.stagewrap{flex:1;display:flex;flex-direction:column;min-width:0}
+.stage{flex:1;overflow:auto;padding:28px 32px 12px;display:flex;flex-direction:column}
+.center{margin:auto;text-align:center;max-width:580px;width:100%}
+/* panel */
+.panel{width:0;transition:width .18s;border-left:1px solid var(--line);background:var(--sur);overflow:hidden;display:flex;flex-direction:column}
+.panel.open{width:520px}
+.panel.wide{width:780px}
+.phead{display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line)}
+.phead b{font-size:14px}
+.phead .sp{margin-left:auto;display:flex;gap:6px}
+.pic{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;font-size:13px;color:var(--tx2)}
+.pic:hover{color:#fff;border-color:var(--tx2)}
+.ptabs{display:flex;gap:2px;padding:10px 18px 0}
+.ptabs button{font-size:13px;padding:8px 14px;border-radius:9px 9px 0 0;color:var(--tx2);border-bottom:2px solid transparent}
+.ptabs button.on{color:#fff;border-bottom-color:var(--blue);font-weight:600}
+.pbody{flex:1;overflow:auto;padding:18px;font-size:13.5px}
+/* blocks */
+.hd{font-family:"Archivo Black";font-size:21px;text-transform:uppercase;letter-spacing:.005em;margin-bottom:5px}
+.sub{font-size:13px;color:var(--tx2);margin-bottom:18px}
+.namein{width:100%;background:var(--elev);border:1px solid var(--line);border-radius:12px;padding:15px 16px;font-size:16.5px;color:#fff;text-align:center}
+.namein:focus{outline:2px solid var(--blue)}
+.btn{background:var(--blue);color:#fff;border-radius:999px;padding:10px 20px;font-weight:600;font-size:13.5px}
+.btn:hover{background:var(--blueh)}
+.btn.ghost{background:none;border:1.5px solid var(--line);color:var(--tx2)}
+.btn.ghost:hover{border-color:var(--tx2);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.paths{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:660px;margin:18px auto 0}
+.pathc{background:var(--sur);border:1.5px solid var(--line);border-radius:16px;padding:24px 20px;text-align:left}
+.pathc:hover{border-color:var(--blue)}
+.pathc b{display:block;font-size:15px;margin-bottom:6px}
+.pathc span{font-size:12.5px;color:var(--tx2)}
+.dcards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:860px;margin:0 auto;width:100%}
+.dcard{background:var(--sur);border:1.5px solid var(--line);border-radius:16px;padding:18px;text-align:left;position:relative}
+.dcard:hover{border-color:var(--blue)}
+.dcard b{display:block;font-size:14px;margin-bottom:5px}
+.dcard span{font-size:12px;color:var(--tx2)}
+.dcard.done{border-color:var(--ok)}
+.dcard .tick{position:absolute;top:13px;right:13px;color:var(--ok);font-weight:700;display:none}
+.dcard.done .tick{display:block}
+/* thread */
+.thread{max-width:720px;width:100%;margin:0 auto;flex:1}
+.who{font-family:"Space Mono";font-size:9px;color:var(--tx2);letter-spacing:.08em;margin:13px 0 5px 4px}
+.ai{background:var(--elev);border:1px solid var(--line);border-radius:14px;padding:13px 15px;max-width:660px;font-size:13.5px}
+.me{background:#E9ECF4;color:#10131A;border-radius:14px 14px 4px 14px;padding:9px 13px;max-width:440px;margin-left:auto;font-size:13.5px}
+.rum{font-family:"Space Mono";font-size:11.5px;color:var(--tx2);line-height:2.05}
+.rum .done{color:var(--ok)}
+.oc{border:1.5px solid var(--line);border-radius:12px;background:var(--sur);padding:13px;margin-top:10px}
+.oc.sel{border-color:var(--ok)}
+.oc h5{font-size:14px;margin-bottom:4px}
+.oc .st{font-size:12.5px;color:var(--tx2);margin:5px 0}
+.oc .why{border-left:3px solid var(--blue);padding-left:9px;font-size:11.5px;color:var(--tx2);margin-top:7px}
+.act{display:inline-block;font-family:"Space Mono";font-size:10px;border:1px solid var(--line);border-radius:999px;padding:5px 11px;margin:8px 8px 0 0;color:#fff;cursor:pointer}
+.act.p{background:var(--blue);border-color:var(--blue)}
+.act.g{border-color:var(--ok);color:var(--ok)}
+.act:hover{border-color:var(--blueh)}
+.tpls{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:10px;margin-top:10px}
+.tpl{aspect-ratio:9/13;border-radius:12px;border:2px solid transparent;display:flex;align-items:flex-end;padding:9px;font-family:"Space Mono";font-size:9.5px;color:#fff;cursor:pointer;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.tpl:hover,.tpl.sel{border-color:var(--blue)}
+/* panel content */
+.srow{display:grid;grid-template-columns:38px 1fr 58px;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13px}
+.srow .n,.srow .d{font-family:"Space Mono";font-size:10px;color:var(--tx2)}
+.srow .d{text-align:right}
+.v2{font-family:"Space Mono";font-size:9px;color:var(--warn)}
+.meta{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dotted var(--line);padding:8px 0;font-size:13px}
+.meta span:first-child{color:var(--tx2);flex-shrink:0}
+.meta span:last-child{text-align:right}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.cre{border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+.cre .im{aspect-ratio:9/16;display:flex;align-items:flex-end;padding:9px;font-family:"Space Mono";font-size:9.5px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.cre .cb{display:flex;justify-content:space-between;padding:7px 9px;font-family:"Space Mono";font-size:9.5px;color:var(--tx2);background:var(--elev)}
+.cre .cb button{color:var(--tx2)} .cre .cb button:hover{color:#fff}
+/* my campaigns grid (reference-image pattern) */
+.projbar{display:flex;align-items:center;gap:10px;max-width:1060px;margin:0 auto 18px;width:100%;flex-wrap:wrap}
+.ftab{font-size:13px;padding:7px 14px;border-radius:999px;color:var(--tx2);border:1px solid transparent}
+.ftab.on{background:var(--elev);color:#fff;font-weight:600}
+.srch{margin-left:auto;background:var(--sur);border:1px solid var(--line);border-radius:10px;padding:8px 12px;color:#fff;font:13px "Archivo";min-width:200px}
+.srch:focus{outline:1.5px solid var(--blue)}
+.sortl{font-family:"Space Mono";font-size:10px;color:var(--tx2)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:18px;max-width:1060px;margin:0 auto;width:100%}
+.pc{text-align:left}
+.pthumb{aspect-ratio:16/10;border-radius:14px;background:var(--sur);border:1px solid var(--line);display:grid;place-items:center;color:#3A4356;font-size:30px;overflow:hidden;cursor:pointer}
+.pthumb:hover{border-color:var(--blue)}
+.pthumb .collage{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;width:100%;height:100%;gap:2px}
+.pthumb .collage i{display:block}
+.prow2{display:flex;align-items:center;gap:8px;padding:9px 2px 0}
+.prow2 .fold{color:var(--blue);font-size:13px}
+.prow2 .nm{font-size:13.5px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat{font-family:"Space Mono";font-size:8.5px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--tx2)}
+.stat.ready{color:var(--ok);border-color:var(--ok)}
+.stat.live{color:var(--blue);border-color:var(--blue)}
+.keb{color:var(--tx2);padding:2px 6px;border-radius:6px}
+.keb:hover{background:var(--elev);color:#fff}
+.pnote{font-family:"Space Mono";font-size:9px;color:var(--warn);padding:4px 2px 0}
+/* my brand */
+.brandwrap{max-width:760px;margin:0 auto;width:100%}
+.bcardx{background:var(--sur);border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:14px}
+.bcardx h5{font-size:14px;margin-bottom:12px}
+.pal{display:flex;gap:8px}
+.sw{width:30px;height:30px;border-radius:8px;border:1px solid var(--line)}
+.claims{display:flex;flex-wrap:wrap;gap:7px}
+.claim{font-family:"Space Mono";font-size:9.5px;border:1px solid var(--warn);color:var(--warn);border-radius:99px;padding:4px 9px;cursor:pointer}
+.claim.ok{border-color:var(--ok);color:var(--ok)}
+.claim.ban{border-color:var(--dgr);color:var(--dgr)}
+/* prompt modal — no LLM label */
+.pmwrap{padding:10px 32px 18px}
+.pm{max-width:720px;margin:0 auto;background:var(--sur);border:1px solid var(--line);border-radius:20px;padding:11px 13px;box-shadow:0 6px 24px rgba(0,0,0,.4)}
+.pm input{width:100%;background:none;border:none;color:#fff;font:14px "Archivo";padding:5px 5px 11px}
+.pm input:focus{outline:none}
+.pmrow{display:flex;align-items:center;gap:9px}
+.cir{width:32px;height:32px;border-radius:999px;border:1px solid var(--line);display:grid;place-items:center;color:var(--tx2);font-size:15px;position:relative}
+.cir:hover{color:#fff;border-color:var(--tx2)}
+.cir.dis{opacity:.45;cursor:not-allowed}
+.cir.dis:hover::after{content:"Model selection coming — using recommended";position:absolute;bottom:120%;left:0;background:#000;border:1px solid var(--line);padding:5px 8px;border-radius:8px;font:9px "Space Mono";white-space:nowrap;color:var(--tx2)}
+.attach{font-family:"Space Mono";font-size:10px;color:var(--tx2);border:1px solid var(--line);border-radius:999px;padding:5px 10px}
+.send{margin-left:auto;width:34px;height:34px;border-radius:999px;background:var(--blue);color:#fff;display:grid;place-items:center;font-size:15px}
+.send:hover{background:var(--blueh)}
+/* guide */
+.guide{padding:8px 32px;background:#0A0C10;border-top:1px solid var(--line);font-family:"Space Mono";font-size:10.5px;color:var(--tx2);display:flex;gap:10px;align-items:center}
+.guide b{color:var(--blue)}
+/* modal */
+.ovl{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;place-items:center;z-index:20}
+.ovl.open{display:grid}
+.modal{width:min(540px,92vw);background:var(--sur);border:1px solid var(--line);border-radius:16px;padding:20px;max-height:88vh;overflow:auto}
+.modal h4{font-size:15px;margin-bottom:3px}
+.modal .g{font-size:12px;color:var(--tx2);margin-bottom:14px}
+.fld{margin-bottom:11px}
+.fld label{display:flex;gap:6px;font-family:"Space Mono";font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx2);margin-bottom:5px}
+.fld label .rq{color:var(--dgr)}
+.fld input,.fld textarea,.fld select{width:100%;background:var(--elev);border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:#fff;font:13px "Archivo"}
+.fld input:focus,.fld textarea:focus{outline:1.5px solid var(--blue)}
+.imrow{display:flex;gap:7px}
+.imtile{width:56px;height:56px;border-radius:9px;border:1.5px dashed var(--line);display:grid;place-items:center;color:var(--tx2);font-size:17px}
+.mfoot{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#000;border:1px solid var(--line);color:#fff;font-family:"Space Mono";font-size:10.5px;padding:8px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:30;pointer-events:none}
+.toast.show{opacity:1}
+@media(max-width:980px){.panel.open,.panel.wide{position:absolute;right:0;top:0;bottom:0;width:min(520px,94vw);z-index:10;box-shadow:-10px 0 30px rgba(0,0,0,.5)}.dcards{grid-template-columns:1fr}.paths{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="logo">MARKETING STUDIO<i></i></div>
+  <span class="sim">SIMULATION</span>
+  <div class="nav">
+    <button id="nav-studio" class="on" onclick="go('studio')">Campaign Studio</button>
+    <button id="nav-camps" onclick="go('camps')">My Campaigns</button>
+    <button id="nav-brand" onclick="go('brand')">My Brand</button>
+  </div>
+  <div class="right" id="jumps"></div>
+  <button class="reset" onclick="hardReset()">Reset</button>
+</div>
+<div class="subbar" id="subbar"></div>
+<div class="wrap">
+  <div class="stagewrap">
+    <div class="stage" id="stage"></div>
+    <div class="pmwrap" id="pmwrap"></div>
+  </div>
+  <aside class="panel" id="panel">
+    <div class="phead">
+      <b id="ptitle">Campaign detail</b>
+      <div class="sp">
+        <button class="pic" onclick="toast('Download — wired in build')">⤓</button>
+        <button class="pic" onclick="togglePanelWide()">⤢</button>
+        <button class="pic" onclick="toast('Copy link · View JSON · Activity — in build')">⋮</button>
+        <button class="pic" onclick="closePanel()">✕</button>
+      </div>
+    </div>
+    <div class="ptabs">
+      <button id="tab-ctx" class="on" onclick="ptab('ctx')">Context</button>
+      <button id="tab-cre" onclick="ptab('cre')">Creative</button>
+    </div>
+    <div class="pbody" id="pbody"></div>
+  </aside>
+</div>
+<div class="guide" id="guide"></div>
+<div class="ovl" id="ovl"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toastEl"></div>
+<script>
+/* Marketing Studio interactive demo v2 — scripted simulation, no real agents. */
+const S = {
+  view:'studio', step:'name', name:'',
+  cards:{p:false,c:false,b:false}, fetched:false, claims:[false,false,false], refMedia:false,
+  brandSaved:false,
+  options:[], regenerated:false, chosen:null, refinedOpt:false,
+  template:null, scriptV:1, panel:false, ptab:'ctx', panelWide:false,
+  confirming:false, genMode:null, genCount:1, generating:false, creativeReady:false,
+  rerolled:{},
+  archTab:'current', sort:'recent', search:'',
+  campaigns:[
+    {nm:'Festive Push', obj:'Awareness', status:'Live', count:3, cost:'6.0', archived:false, sample:true,
+     grads:['linear-gradient(160deg,#F7971E,#FFD200)','linear-gradient(160deg,#834D9B,#D04ED6)','linear-gradient(160deg,#11998E,#38EF7D)','linear-gradient(160deg,#1A2980,#26D0CE)']},
+    {nm:'My ads', obj:'Traffic', status:'Draft', count:0, cost:'0.0', archived:false, sample:true, grads:null},
+    {nm:'Winter Teasers', obj:'Conversions', status:'Live', count:2, cost:'4.0', archived:true, sample:true,
+     grads:['linear-gradient(160deg,#56CCF2,#2F80ED)','linear-gradient(160deg,#FF9966,#FF5E62)','linear-gradient(160deg,#FFD26F,#3677FF)','linear-gradient(160deg,#F2994A,#EB5757)']}
+  ]
+};
+const STEPS=['name','paths','details','options','templates','script','creative','camps','brand'];
+const OPTS_BASE=[
+ {id:'o1',t:'"Label Math"',d:'Price-anchored ingredient check: the ₹3,000 bottle vs GlowLab at ₹599, receipts on screen.',
+  st:'Storyline: flip a premium-style bottle to its label → "2% of this" overlay → GlowLab % + price anchor at 0:08 → patch-test cutaway → "check your label" CTA.',
+  why:'Why it fits: ingredient-callout hooks show 90+ day longevity in the ad library [REF lib:M204] · PAS structure benchmarks in beauty, n=41 [STAT s:41] · conversions objective → offer + proof weighted.'},
+ {id:'o2',t:'"Derm\'s 3 Words"',d:'Borrowed-authority testimonial: a derm\'s advice as the reveal, product as the resolution.',
+  st:'Storyline: "my dermatologist said 3 words…" → the words on screen → application shot → offer + CTA.',
+  why:'Why it fits: authority-skit format trends in beauty UGC [REF lib:M270] · no hard claim the brand must substantiate — Brand Guardian pre-cleared.'}
+];
+const OPT3={id:'o3',t:'"Texture Truth"',d:'Silent side-by-side texture test — captions only, no talking head.',
+  st:'Storyline: two swatches, macro texture pull, absorb-timer overlay, price tag last frame.',
+  why:'Why it fits: silent-demo ads hold attention with sound off [PRINCIPLE — muted] · low production, product pack only.'};
+const TPLS=[['UGC Selfie','linear-gradient(160deg,#FF5E62,#B33771)'],['Studio Product','linear-gradient(160deg,#2F80ED,#0E2A55)'],['Split Compare','linear-gradient(160deg,#F2994A,#7A3CE8)'],['Motion Macro','linear-gradient(160deg,#11998E,#1A2980)']];
+const SHOTS=[['01','Hook — bottle flip + "2% of this" overlay','0–4s'],['02','Label close-up + ₹3,000 vs ₹599 price anchor','4–10s'],['03','Patch-test cutaway, timer overlay','10–16s'],['04','CTA — "check your label" + offer end-card','16–20s']];
+const VAR_GRADS={A:'linear-gradient(160deg,#FF9966,#FF5E62)',B:'linear-gradient(160deg,#FFD26F,#3677FF)',C:'linear-gradient(160deg,#56CCF2,#2F80ED)'};
+const $=id=>document.getElementById(id);
+let toastT=null;
+function toast(m){const t=$('toastEl');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2200);}
+
+/* ---------- nav / jumps ---------- */
+function go(v){S.view=v;render();}
+function jumpTo(step){
+  if(step==='camps'){S.view='camps';render();return;}
+  if(step==='brand'){S.view='brand';render();return;}
+  S.view='studio';
+  const i=STEPS.indexOf(step);
+  if(i>=1&&!S.name)S.name='GlowLab Summer Push';
+  if(i>=3){S.cards={p:true,c:true,b:true};S.fetched=true;S.claims=[true,true,true];S.refMedia=true;S.brandSaved=true;S.options=[...OPTS_BASE];}
+  if(i>=4)S.chosen='o1';
+  if(i>=5)S.template='skip';
+  if(i>=6){S.panel=true;S.ptab='ctx';}
+  if(i>=7){S.genMode='variants';S.genCount=2;S.creativeReady=true;S.ptab='cre';ensureCampaignRow('Ready');}
+  S.step=step;render();
+}
+function hardReset(){location.reload();}
+function newCampaign(){S.view='studio';S.step='name';S.name='';S.cards={p:false,c:false,b:false};S.fetched=S.brandSaved;S.claims=S.brandSaved?[true,true,true]:[false,false,false];S.refMedia=false;S.options=[];S.regenerated=false;S.chosen=null;S.refinedOpt=false;S.template=null;S.scriptV=1;S.panel=false;S.confirming=false;S.genMode=null;S.genCount=1;S.creativeReady=false;S.rerolled={};render();}
+
+/* ---------- flow ---------- */
+function setName(){const v=$('nameIn').value.trim();if(!v){toast('Give the campaign a name first');return;}S.name=v;S.step='paths';render();}
+function pickPath(p){S.step=p==='b'?'elicit':'details';render();}
+function elicitDone(){S.cards={p:true,c:true,b:true};S.fetched=true;S.claims=[true,true,true];S.brandSaved=true;S.step='details';render();toast('Elicitation filled the same three cards');}
+function openCard(k){renderModal(k,false,false);$('ovl').classList.add('open');}
+function closeModal(){$('ovl').classList.remove('open');}
+function saveCard(k){S.cards[k]=true;if(k==='b')S.brandSaved=true;closeModal();render();}
+function fillSample(k,standalone){renderModal(k,true,standalone);}
+function fetchBrand(standalone){S.fetched=true;renderModal('b',true,standalone);toast('Fetched from glowlab.in — confirm what it found');}
+function toggleClaim(i,standalone){S.claims[i]=!S.claims[i];renderModal('b',true,standalone);}
+function saveBrandOnly(){S.brandSaved=true;S.fetched=true;closeModal();render();toast('Brand profile saved — campaigns will pre-fill from it');}
+function allCards(){return S.cards.p&&S.cards.c&&S.cards.b;}
+function startPlan(){S.step='rum';render();setTimeout(()=>{S.options=[...OPTS_BASE];S.step='options';render();},2300);}
+function regen(){S.regenerated=true;S.options=[OPTS_BASE[0],OPT3];render();toast('Option 2 regenerated');}
+function approveOpt(id){S.chosen=id;S.step='templates';render();}
+function pickTpl(i){S.template=i;S.step='script';S.panel=true;S.ptab='ctx';render();}
+function skipTpl(){S.template='skip';S.step='script';S.panel=true;S.ptab='ctx';render();}
+function askGenerate(){S.confirming=true;render();}
+function chooseGen(mode,count){S.genMode=mode;S.genCount=count;S.confirming=false;S.generating=true;render();
+  setTimeout(()=>{S.generating=false;S.creativeReady=true;S.ptab='cre';S.panel=true;ensureCampaignRow('Ready');S.step='creative';render();},2600);}
+function reroll(k){S.rerolled[k]=(S.rerolled[k]||0)+1;render();toast('Variant '+k+' re-rolled ×'+S.rerolled[k]);}
+function ensureCampaignRow(status){
+  const ex=S.campaigns.find(c=>c.nm===S.name);
+  const grads=['A','B','C'].slice(0,S.genCount).map(k=>VAR_GRADS[k]);
+  while(grads.length<4)grads.push('linear-gradient(160deg,#232B3A,#171B23)');
+  if(ex){ex.status=status;ex.count=S.genCount;ex.grads=grads;ex.cost=(S.genCount*2).toFixed(1);}
+  else S.campaigns.unshift({nm:S.name,obj:'Conversions',status,count:S.genCount,cost:(S.genCount*2).toFixed(1),archived:false,grads});
+}
+function markLive(nm){const c=S.campaigns.find(x=>x.nm===nm);if(c){c.status='Live';render();}}
+function archiveC(nm){const c=S.campaigns.find(x=>x.nm===nm);if(c){c.archived=!c.archived;render();toast(c.archived?'Archived':'Restored');}}
+
+/* ---------- prompt bar ---------- */
+function pmSend(){
+  const v=$('pmIn')?$('pmIn').value.trim():'';
+  if(!v){toast('Type something — this bar is live for two refinements');return;}
+  if(S.step==='options'&&!S.refinedOpt){S.refinedOpt=true;S.options[0]={...S.options[0],st:S.options[0].st.replace('price anchor at 0:08','price anchor at 0:08 (your note applied: sharper money-hook)')};render();toast('Refinement applied to option 1');}
+  else if(S.step==='script'&&S.scriptV===1){S.scriptV=2;render();toast('Shot 2 updated → v2');}
+  else toast('Simulation: noted (canned refinements already used)');
+  if($('pmIn'))$('pmIn').value='';
+}
+
+/* ---------- renders ---------- */
+function jumps(){
+  $('jumps').innerHTML=STEPS.map(s=>`<button class="jump ${(S.view==='camps'&&s==='camps')||(S.view==='brand'&&s==='brand')||(S.view==='studio'&&S.step===s)?'on':''}" onclick="jumpTo('${s}')">${s}</button>`).join('');
+}
+function guide(t){$('guide').innerHTML='<b>NEXT</b> '+t+' <span style="margin-left:auto">jump pills skip ahead · Reset restarts</span>';}
+function promptBar(ph){
+  const show=S.view==='studio'&&['options','script','creative'].includes(S.step);
+  $('pmwrap').innerHTML=show?`
+   <div class="pm">
+    <input id="pmIn" placeholder="${ph}" onkeydown="if(event.key==='Enter')pmSend()">
+    <div class="pmrow">
+      <span class="cir" onclick="toast('Upload — wired in build')">+</span>
+      <span class="attach">Images 0/8</span>
+      <span class="cir dis">⚙</span>
+      <button class="send" onclick="pmSend()">↑</button>
+    </div>
+   </div>`:'';
+}
+function subbar(){
+  const sb=$('subbar');
+  if(S.view!=='studio'){sb.className='subbar';sb.innerHTML='';return;}
+  sb.className='subbar show';
+  sb.innerHTML=`<span>Campaign Studio</span>${S.name?`<span>·</span><b>${S.name}</b>`:''}
+    <button class="newc" onclick="newCampaign()">+ New campaign</button>`;
+}
+function render(){
+  jumps();subbar();
+  $('nav-studio').classList.toggle('on',S.view==='studio');
+  $('nav-camps').classList.toggle('on',S.view==='camps');
+  $('nav-brand').classList.toggle('on',S.view==='brand');
+  const st=$('stage');
+  $('panel').className='panel'+((S.panel&&S.view==='studio')?(S.panelWide?' wide open':' open'):'');
+  if(S.view==='camps'){renderCamps(st);promptBar('');renderPanelBody();return;}
+  if(S.view==='brand'){renderBrand(st);promptBar('');renderPanelBody();return;}
+  switch(S.step){
+    case 'name':
+      st.innerHTML=`<div class="center"><div class="hd">Campaign Studio</div>
+        <div class="sub">Give a name to your campaign — it's how you'll find it in My Campaigns.</div>
+        <input class="namein" id="nameIn" placeholder="&lt;Campaign Name&gt;" onkeydown="if(event.key==='Enter')setName()">
+        <div style="margin-top:14px"><button class="btn" onclick="setName()">Continue</button></div></div>`;
+      guide('type a name (e.g. "GlowLab Summer Push") and hit Continue');promptBar('');break;
+    case 'paths':
+      st.innerHTML=`<div class="center"><div class="hd">${S.name}</div><div class="sub">How do you want to start?</div>
+        <div class="paths">
+          <button class="pathc" onclick="pickPath('a')"><b>Provide Campaign Details</b><span>I have the product, campaign and brand details — give me structured cards.</span></button>
+          <button class="pathc" onclick="pickPath('b')"><b>Help me define campaign</b><span>Ask me questions and fill it in for me.</span></button>
+        </div></div>`;
+      guide('pick a path — (b) shows the elicitation preview');promptBar('');break;
+    case 'elicit':
+      st.innerHTML=`<div class="thread"><div class="hd">${S.name}</div><div class="sub">Guided intake — same schema as the cards · Product ✗ · Campaign ✗ · Brand ✗</div>
+        <div class="who">AGENT</div><div class="ai">What are we promoting? A product name and one line on what it does is enough to start.</div>
+        <div class="who">YOU</div><div class="me">GlowLab vitamin-C serum, ₹599 — full-strength actives without the ₹3K price tag.</div>
+        <div class="who">AGENT</div><div class="ai">Got it. What should this campaign do — awareness, traffic, or conversions?</div>
+        <div class="ai" style="margin-top:8px;border-style:dashed"><span class="mono" style="font-size:10.5px;color:var(--tx2)">…continues one question per turn, filling the identical three cards…</span><br><span class="act p" onclick="elicitDone()">Fast-forward: cards filled</span></div></div>`;
+      guide('this path fills the SAME three cards — fast-forward to see');promptBar('');break;
+    case 'details':{
+      const c=S.cards;
+      st.innerHTML=`<div style="max-width:860px;margin:0 auto;width:100%"><div class="hd">${S.name}</div>
+        <div class="sub">Fill the three cards — each opens a popup. Green tick = saved.${S.brandSaved?' Brand will pre-fill from My Brand ✓':''}</div>
+        <div class="dcards">
+          <button class="dcard ${c.p?'done':''}" onclick="openCard('p')"><span class="tick">✓</span><b>Enter Product Details</b><span>Name · description · images (3–8 → product pack)</span></button>
+          <button class="dcard ${c.c?'done':''}" onclick="openCard('c')"><span class="tick">✓</span><b>Enter Campaign Details</b><span>Objective · audience · platform · reference image/video</span></button>
+          <button class="dcard ${c.b?'done':''}" onclick="openCard('b')"><span class="tick">✓</span><b>Enter Brand Details</b><span>URL fetch · palette · font · logo · policy doc</span></button>
+        </div>
+        <div style="text-align:center;margin-top:20px"><button class="btn" ${allCards()?'':'disabled'} onclick="startPlan()">Start campaign planning →</button></div></div>`;
+      guide(allCards()?'all set — Start campaign planning':'open each card · "Fill sample" speeds through · Brand card has Fetch from URL');promptBar('');break;}
+    case 'rum':
+      st.innerHTML=`<div class="thread"><div class="who">AGENT</div><div class="ai"><div class="rum">
+        <div class="done">✓ intake — context normalized · product pack locked (4 images)${S.refMedia?' · reference video noted':''} · claims confirmed (3)</div>
+        <div class="done">✓ retrieving evidence — ad library + beauty benchmarks · 28 retrievals</div>
+        <div>▸ drafting campaign options…</div>
+        <div style="color:#5A6270">· council review — Performance Marketer / Brand Guardian / Platform Specialist</div></div></div></div>`;
+      guide('agent is ruminating — labeled steps, never a bare spinner');promptBar('');break;
+    case 'options':
+      st.innerHTML=`<div class="thread"><div class="who">AGENT</div><div class="ai">Two campaign options for <b>${S.name}</b> — council-reviewed. Approve one, regenerate, or refine below.
+        ${S.options.map(o=>`<div class="oc ${S.chosen===o.id?'sel':''}"><h5>${o.t}</h5><div>${o.d}</div><div class="st">${o.st}</div><div class="why">${o.why}</div>
+        <span class="act p" onclick="approveOpt('${o.id}')">Approve</span></div>`).join('')}
+        <span class="act" onclick="regen()">${S.regenerated?'Regenerated ✓':'Regenerate option 2'}</span></div></div>`;
+      guide('approve an option — or type a refinement below (applies to option 1)');
+      promptBar('Refine the options — "sharper money hook", "more premium tone"…');break;
+    case 'templates':
+      st.innerHTML=`<div class="thread"><div class="who">AGENT</div><div class="ai">Optional: pick a style template — it constrains look only, never copy. ${S.refMedia?'Your uploaded reference video takes priority over any template.':''} Samples from the local folder for now.
+        <div class="tpls">${TPLS.map((t,i)=>`<div class="tpl ${S.template===i?'sel':''}" style="background:${t[1]}" onclick="pickTpl(${i})">${t[0]}</div>`).join('')}</div>
+        <span class="act" onclick="skipTpl()">Skip — no style constraint</span></div></div>`;
+      guide('pick a template or Skip');promptBar('');break;
+    case 'script':
+      st.innerHTML=`<div class="thread"><div class="who">AGENT</div><div class="ai">Campaign detail is ready — open on the right (Context tab). ${S.template==='skip'?'No template constraint.':'Style ref: '+TPLS[S.template][0]+'.'}${S.refMedia?' Reference video applied.':''}<br>Generate creative?
+        <span class="act p" onclick="askGenerate()">Generate Creative</span><span class="act" onclick="S.panel=true;S.ptab='ctx';render()">Open details →</span></div>
+        ${S.scriptV===2?`<div class="who">YOU</div><div class="me">Tighten shot 2 — reveal price faster.</div><div class="who">AGENT</div><div class="ai">Done — shot 2 only, marked v2 in the panel. Nothing else touched.</div>`:''}
+        ${S.confirming?`<div class="who">AGENT</div><div class="ai"><b>Model + variants.</b> Recommended: <b>Veo 3.1 Fast</b> — product motion + native pacing · ~$2.0 per 20s take (draft = shot 1 first). Settings ⚙ will allow overrides later — using recommended now.<br><b>One creative, or variants?</b><br>
+          <span class="act p" onclick="chooseGen('single',1)">Single</span>
+          <span class="act" onclick="chooseGen('variants',2)">2 variants — B tests hook ("derm's 3 words") · +$2.0</span>
+          <span class="act" onclick="chooseGen('variants',3)">3 variants — C tests silent texture demo · +$4.0</span></div>`:''}
+        ${S.generating?`<div class="who">AGENT</div><div class="ai"><div class="rum"><div class="done">✓ keyframes (product pack locked)</div><div>▸ shots rendering · seam QA on boundaries…</div></div></div>`:''}
+      </div>`;
+      guide(S.confirming?'answer the single-vs-variants question':'type a script refinement, or hit Generate Creative');
+      promptBar('Refine the script — "reveal price faster", "warmer tone"…');break;
+    case 'creative':
+      st.innerHTML=`<div class="thread"><div class="who">AGENT</div><div class="ai">Creatives ready — see the <b>Creative</b> tab on the right. Ad Card assembled:
+        <div class="oc"><h5 class="mono" style="font-size:12px">glowlab-summer_labelmath_video_9x16_v01${S.genCount>1?' · variant group ×'+S.genCount:''}</h5>
+        <div class="st">20s · 9:16 · primary text + headline + CTA "Shop Now" per placement · claims: 3/3 approved · $${(S.genCount*2).toFixed(1)}</div>
+        <span class="act g">✓ READY</span><span class="act" onclick="toast('Export bundle — wired in build')">Export bundle</span><span class="act" onclick="go('camps')">View in My Campaigns</span></div></div></div>`;
+      guide('inspect the Creative tab (re-roll works) — then View in My Campaigns');
+      promptBar('Anything else on this campaign…');break;
+  }
+  renderPanelBody();
+}
+function renderCamps(st){
+  const list=S.campaigns.filter(c=>(S.archTab==='current'?!c.archived:c.archived))
+    .filter(c=>c.nm.toLowerCase().includes(S.search.toLowerCase()));
+  st.innerHTML=`<div style="max-width:1060px;margin:0 auto;width:100%">
+    <div class="hd">My Campaigns</div><div class="sub">Organize your campaigns — open one to continue, or start new.</div></div>
+   <div class="projbar">
+     <button class="ftab ${S.archTab==='current'?'on':''}" onclick="S.archTab='current';render()">Current</button>
+     <button class="ftab ${S.archTab==='archived'?'on':''}" onclick="S.archTab='archived';render()">Archived</button>
+     <input class="srch" placeholder="Search campaigns…" value="${S.search}" oninput="S.search=this.value;render()">
+     <span class="sortl">Sort</span>
+     <button class="ftab ${S.sort==='recent'?'on':''}" onclick="S.sort='recent';render()">Recent</button>
+     <button class="ftab ${S.sort==='newest'?'on':''}" onclick="S.sort='newest';render()">Newest</button>
+   </div>
+   <div class="pgrid">
+     ${S.archTab==='current'?`<div class="pc"><div class="pthumb" onclick="newCampaign()">+</div><div class="prow2"><span class="nm">New campaign</span></div></div>`:''}
+     ${list.map(c=>`<div class="pc">
+       <div class="pthumb" onclick="toast('Open — returns to its studio thread')">${c.grads?`<div class="collage">${c.grads.map(g=>`<i style="background:${g}"></i>`).join('')}</div>`:'✦'}</div>
+       <div class="prow2"><span class="fold">▣</span><span class="nm">${c.nm}</span><span class="stat ${c.status==='Ready'?'ready':c.status==='Live'?'live':''}">${c.status.toUpperCase()}</span>
+        <button class="keb" onclick="archiveC('${c.nm}')" title="Archive / restore">⋮</button></div>
+       <div class="prow2" style="padding-top:2px"><span class="mono" style="font-size:9.5px;color:var(--tx2)">${c.obj} · ${c.count} creative${c.count===1?'':'s'} · $${c.cost}</span>
+        ${c.status==='Ready'?`<button class="act p" style="margin:0 0 0 auto" onclick="markLive('${c.nm}')">Mark Live</button>`:''}</div>
+       ${c.status==='Live'?`<div class="pnote">Results due 72h after live — paste CTR/CPC/CPA/ROAS</div>`:''}
+     </div>`).join('')}
+   </div>
+   ${list.length===0&&S.archTab==='archived'?'<div class="sub" style="text-align:center;margin-top:40px">Nothing archived.</div>':''}`;
+  guide('kebab ⋮ archives · Mark Live arms the results nudge · + New campaign is also in the studio bar');
+}
+function renderBrand(st){
+  if(!S.brandSaved){
+    st.innerHTML=`<div class="center"><div class="hd">My Brand</div>
+      <div class="sub">No brand profile yet. Add it here once — every campaign's Brand card pre-fills from it.</div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn" onclick="openBrandStandalone(true)">Pre-fill from URL</button>
+        <button class="btn ghost" onclick="openBrandStandalone(false)">Add manually</button>
+      </div></div>`;
+    guide('add the brand once — from URL or manually');return;
+  }
+  st.innerHTML=`<div class="brandwrap"><div class="hd">My Brand</div>
+    <div class="sub">Saved from your campaign build. Edit anytime — campaigns pre-fill from here.</div>
+    <div class="bcardx"><h5>GlowLab · glowlab.in <span class="mono" style="font-size:9px;color:var(--ok)">FETCHED ✓</span></h5>
+      <div class="meta"><span>Palette</span><span class="pal"><i class="sw" style="background:#FF5E62"></i><i class="sw" style="background:#2F80ED"></i><i class="sw" style="background:#141414"></i><i class="sw" style="background:#FFFFFF"></i></span></div>
+      <div class="meta"><span>Font / Logo</span><span>Inter · logo.png</span></div>
+      <div class="meta"><span>Tone</span><span>Direct, receipts-first, no fluff</span></div>
+      <div class="meta"><span>Policy doc</span><span>glowlab-claims-policy.pdf</span></div>
+    </div>
+    <div class="bcardx"><h5>Approved claims &amp; banned words</h5>
+      <div class="claims"><span class="claim ok">✓ 20% Vitamin C</span><span class="claim ok">✓ Dermatologically tested</span><span class="claim ok">✓ ₹599 launch price</span><span class="claim ban">banned: "cure"</span><span class="claim ban">banned: "whitening"</span></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn ghost" onclick="openBrandStandalone(true)">Edit / refetch</button>
+      <button class="btn ghost" onclick="toast('Multi-brand — later phase')">+ Add another brand</button>
+    </div></div>`;
+  guide('this is the reusable brand profile — campaigns pre-fill their Brand card from it');
+}
+function openBrandStandalone(sample){renderModal('b',sample,true);$('ovl').classList.add('open');}
+function renderPanelBody(){
+  $('tab-ctx').classList.toggle('on',S.ptab==='ctx');
+  $('tab-cre').classList.toggle('on',S.ptab==='cre');
+  $('ptitle').textContent=S.name||'Campaign detail';
+  const b=$('pbody');
+  if(S.ptab==='ctx'){
+    b.innerHTML=`<div class="mono" style="font-size:9.5px;color:var(--tx2);letter-spacing:.1em;margin-bottom:10px">CAMPAIGN DETAIL · "LABEL MATH" · V${S.scriptV}</div>
+      ${SHOTS.map((s,i)=>`<div class="srow"><span class="n">${s[0]}</span><span>${i===1&&S.scriptV===2?'Label close-up + price anchor <b>moved to 0:06</b> <span class="v2">v2</span>':s[1]}</span><span class="d">${s[2]}</span></div>`).join('')}
+      <div style="height:12px"></div>
+      <div class="meta"><span>Primary text</span><span>"Your ₹3,000 serum has 2% of this. Check the label."</span></div>
+      <div class="meta"><span>Headline / CTA</span><span>Full strength. ₹599. · Shop Now</span></div>
+      <div class="meta"><span>Claims used</span><span>3 / 3 approved ✓</span></div>
+      <div class="meta"><span>Ratios</span><span>9:16 · 1:1</span></div>
+      <div class="meta"><span>Product pack</span><span>4 refs locked</span></div>
+      <div class="meta"><span>Reference media</span><span>${S.refMedia?'1 video (user) — priority':'—'}</span></div>
+      <div class="meta"><span>Style ref</span><span>${S.template==null?'—':S.template==='skip'?'None (skipped)':TPLS[S.template][0]}</span></div>`;
+  } else {
+    if(!S.creativeReady){b.innerHTML='<div class="sub">Nothing generated yet.</div>';return;}
+    const ks=['A','B','C'].slice(0,S.genCount);
+    b.innerHTML=`<div class="mono" style="font-size:9.5px;color:var(--tx2);letter-spacing:.1em;margin-bottom:10px">GENERATED · VEO 3.1 FAST · ${S.genCount>1?'VARIANT GROUP':'SINGLE'}</div>
+     <div class="cgrid">${ks.map(k=>`<div class="cre"><div class="im" style="background:${VAR_GRADS[k]}">${k} · 20s${S.rerolled[k]?' · re-rolled ×'+S.rerolled[k]:''}</div>
+       <div class="cb"><span>$2.0</span><span><button onclick="reroll('${k}')">↻</button> <button onclick="toast('Download — wired in build')">⤓</button></span></div></div>`).join('')}</div>
+     ${S.genCount>1?'<div class="sub" style="margin-top:12px">B tests hook vs A'+(S.genCount===3?' · C tests silent texture demo':'')+' — shared variant_group_id.</div>':''}`;
+  }
+}
+function ptab(t){S.ptab=t;renderPanelBody();}
+function togglePanelWide(){S.panelWide=!S.panelWide;render();}
+function closePanel(){S.panel=false;render();}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.panel)closePanel();});
+
+/* ---------- modals ---------- */
+function renderModal(k,sample,standalone){
+  const m=$('modal');
+  if(k==='p'){m.innerHTML=`<h4>Enter Product Details</h4><div class="g">Images become the product pack — the consistency lock in every creative.</div>
+    <div class="fld"><label>Product name <span class="rq">*</span></label><input value="${sample?'GlowLab Vitamin-C Serum':''}"></div>
+    <div class="fld"><label>Description <span class="rq">*</span></label><textarea rows="2">${sample?'20% vitamin-C serum, full-strength actives at ₹599.':''}</textarea></div>
+    <div class="fld"><label>Images (3–8) <span class="rq">*</span></label><div class="imrow">${[0,1,2,3].map(()=>`<div class="imtile" style="${sample?'background:linear-gradient(160deg,#FF5E62,#2F80ED);border-style:solid;border-color:transparent;color:#fff':''}">${sample?'':'+'}</div>`).join('')}</div></div>
+    <div class="mfoot"><button class="btn ghost" onclick="fillSample('p',false)">Fill sample</button><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" ${sample?'':'disabled'} onclick="saveCard('p')">Save</button></div>`;}
+  if(k==='c'){m.innerHTML=`<h4>Enter Campaign Details</h4><div class="g">One primary objective — it sets the scoring weights. Reference media steers the creative agents.</div>
+    <div class="fld"><label>Objective <span class="rq">*</span></label><select><option ${sample?'selected':''}>Conversions</option><option>Awareness</option><option>Traffic</option></select></div>
+    <div class="fld"><label>Target audience <span class="rq">*</span></label><input value="${sample?'Skincare buyers 22–35, price-conscious, IN metros':''}"></div>
+    <div class="fld"><label>Platforms <span class="rq">*</span></label><input value="${sample?'IG Reels · TikTok':''}"></div>
+    <div class="fld"><label>Creative type</label><select><option ${sample?'selected':''}>Video</option><option>Image</option></select></div>
+    <div class="fld"><label>Reference image / video (optional)</label><div class="imrow"><div class="imtile" style="${sample?'background:linear-gradient(160deg,#7A3CE8,#2F80ED);border-style:solid;border-color:transparent;color:#fff;font-size:10px':''}">${sample?'ref.mp4':'+'}</div></div>
+      <div class="g" style="margin:6px 0 0">Goes to the agents as a creative reference — takes priority over templates.</div></div>
+    <div class="fld"><label>Description (optional)</label><input value="${sample?'Summer launch push for the ₹599 offer':''}"></div>
+    <div class="mfoot"><button class="btn ghost" onclick="S.refMedia=true;fillSample('c',false)">Fill sample</button><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" ${sample?'':'disabled'} onclick="saveCard('c')">Save</button></div>`;}
+  if(k==='b'){const allOk=S.claims.every(Boolean);const pre=S.brandSaved&&!standalone;
+    m.innerHTML=`<h4>${standalone?'My Brand':'Enter Brand Details'}</h4><div class="g">${pre?'Pre-filled from My Brand ✓ — edit if needed. ':''}Fetch from URL fills palette, font, logo — you confirm. Claims come from the policy doc + product description; confirm each.</div>
+    <div class="fld"><label>Brand URL</label><div style="display:flex;gap:8px"><input value="${sample||S.fetched||pre?'https://glowlab.in':''}" style="flex:1"><button class="btn ghost" onclick="fetchBrand(${!!standalone})">${S.fetched||pre?'Fetched ✓':'Fetch from URL'}</button></div></div>
+    <div class="fld"><label>Color palette</label><div class="pal">${(S.fetched||pre?['#FF5E62','#2F80ED','#141414','#FFFFFF']:['','','','']).map(c=>`<div class="sw" style="background:${c||'var(--elev)'}"></div>`).join('')}</div></div>
+    <div class="fld"><label>Font / Logo</label><input value="${S.fetched||pre?'Inter · logo.png ✓':''}" placeholder="—"></div>
+    <div class="fld"><label>Brand policy document (optional)</label><input value="${sample||pre?'glowlab-claims-policy.pdf':''}" placeholder="upload"></div>
+    <div class="fld"><label>Approved claims — tap to confirm <span class="rq">*</span></label><div class="claims">
+      ${['20% Vitamin C','Dermatologically tested','₹599 launch price'].map((c,i)=>`<span class="claim ${S.claims[i]?'ok':''}" onclick="toggleClaim(${i},${!!standalone})">${S.claims[i]?'✓ ':''}${c}</span>`).join('')}
+      <span class="claim ban">banned: "cure", "whitening"</span></div></div>
+    <div class="mfoot"><button class="btn ghost" onclick="fillSample('b',${!!standalone})">Fill sample</button><button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" ${((sample||S.fetched||pre)&&allOk)?'':'disabled'} onclick="${standalone?'saveBrandOnly()':"saveCard('b')"}">Save</button></div>`;}
+}
+$('ovl').addEventListener('click',e=>{if(e.target.id==='ovl')closeModal();});
+render();
+
+</script>
+</body>
+</html>

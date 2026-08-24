@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marketing Studio — PRD Addendum 03 (UI changes)</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16181D;--paper:#FAFAF8;--card:#fff;--rec:#E5312B;--blue:#4353FF;--steel:#5A6270;--line:#E4E2DC;--wash:#F1F0EB;--slab:#171C26;--ok:#1E7A4D}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 "Archivo",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"Space Mono",monospace}
+main{max-width:920px;margin:0 auto;padding:40px 28px 90px}
+header.cov{border-bottom:2px solid var(--ink);padding-bottom:28px}
+h1{font-family:"Archivo Black";font-size:clamp(28px,4vw,42px);line-height:1.05;text-transform:uppercase;letter-spacing:-.02em}
+section{padding:40px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:none}
+.eyebrow{display:flex;align-items:center;gap:9px;font-family:"Space Mono";font-size:11px;letter-spacing:.14em;color:var(--steel);text-transform:uppercase;margin-bottom:14px}
+.eyebrow::before{content:"";width:8px;height:8px;background:var(--blue)}
+h2{font-family:"Archivo Black";font-size:clamp(20px,2.3vw,27px);text-transform:uppercase;letter-spacing:-.015em;margin-bottom:16px;line-height:1.1}
+h3{font-size:16px;font-weight:700;margin:22px 0 10px}
+p{max-width:76ch;margin-bottom:10px}
+.note{font-size:13px;color:var(--steel);max-width:76ch}
+ul.tight{list-style:none;max-width:78ch}
+ul.tight li{padding:7px 0 7px 20px;position:relative;border-bottom:1px dotted var(--line)}
+ul.tight li::before{content:"—";position:absolute;left:0;color:var(--blue);font-weight:700}
+ul.tight li:last-child{border-bottom:none}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0 6px}
+th{font-family:"Space Mono";font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);text-align:left;padding:8px 12px 8px 0;border-bottom:2px solid var(--ink);vertical-align:bottom}
+td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:hover td{background:var(--wash)}
+pre{background:var(--slab);color:#DCE2EC;font-family:"Space Mono",monospace;font-size:11.5px;line-height:1.55;padding:14px 16px;border-radius:10px;overflow-x:auto;margin:10px 0}
+pre b{color:#fff}
+.verdict{border-left:3px solid var(--ink);background:var(--wash);padding:12px 16px;max-width:78ch;font-size:14px;margin:14px 0}
+.verdict b{font-family:"Space Mono";font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<main>
+
+<header class="cov">
+  <div class="eyebrow">PRD Addendum 03 · Marketing Studio UI · changes only</div>
+  <h1>Nav, campaigns grid, My Brand, reference media</h1>
+  <p class="note" style="margin-top:12px">Owner: Anand · 24 Aug 2026 · Applies over system-prompt v2 (and PRD v1 + Addenda 01–02 behind it). <strong>Where this conflicts with v2, this wins.</strong> Ship to Claude Code together with <span class="mono">marketing-studio-demo.html</span> — the HTML is the design contract (§07), this document is the behavioral spec.</p>
+</header>
+
+<section>
+  <div class="eyebrow">01 · Navigation &amp; studio sub-bar</div>
+  <h2>Three global tabs, one studio-scoped action</h2>
+  <ul class="tight">
+    <li><strong>Global nav:</strong> Campaign Studio · My Campaigns · <strong>My Brand</strong> (new, §03). Nothing else at global level.</li>
+    <li><strong>"+ New campaign" moves out of the global nav</strong> into a slim studio sub-bar directly under the top bar, visible only inside Campaign Studio: left = breadcrumb ("Campaign Studio · &lt;current campaign name&gt;"), right = <span class="mono">+ New campaign</span> (dashed pill). Always available mid-flow; starting a new campaign from it confirms nothing is lost — the current campaign persists in My Campaigns at its last state.</li>
+    <li>If a Brand profile exists (§03), a new campaign's Brand card opens pre-filled; the sub-line under the three detail cards says "Brand will pre-fill from My Brand ✓".</li>
+  </ul>
+</section>
+
+<section>
+  <div class="eyebrow">02 · My Campaigns — grid per reference image</div>
+  <h2>Folder-card grid, not a row list</h2>
+  <p>Replaces v2's row layout with the reference pattern (Projects screenshot):</p>
+  <table>
+    <tr><th style="width:24%">Element</th><th>Spec</th></tr>
+    <tr><td>Header row</td><td>Title + one-line subtitle · search field (filters by name, live) right-aligned.</td></tr>
+    <tr><td>Filter bar</td><td><strong>Current | Archived</strong> pill tabs · Sort: <strong>Recent | Newest</strong> (Recent = last activity, Newest = created date).</td></tr>
+    <tr><td>New-campaign card</td><td>First card in Current: large +, opens the studio at the name step. (Duplicate entry point with the sub-bar — intentional.)</td></tr>
+    <tr><td>Campaign card — thumb</td><td>16:10 tile. With creatives: <strong>2×2 collage</strong> of the latest creative thumbnails. Without: centered ✦ sparkle placeholder. Click = open the campaign's studio thread at last state.</td></tr>
+    <tr><td>Campaign card — row</td><td>Folder icon (blue) · name (truncate + tooltip) · status chip (DRAFT / PLANNED / IN PRODUCTION / READY / LIVE) · kebab ⋮ → Archive/Restore, Rename, Delete (confirm).</td></tr>
+    <tr><td>Meta line</td><td>Objective · creative count · credits spent. READY cards get an inline <strong>Mark Live</strong>; LIVE cards show the results-due note ("paste CTR/CPC/CPA/ROAS") which opens the results form.</td></tr>
+    <tr><td>Archived tab</td><td>Same cards minus New-campaign; restore via kebab; honest empty state.</td></tr>
+  </table>
+</section>
+
+<section>
+  <div class="eyebrow">03 · My Brand tab (new)</div>
+  <h2>One brand profile, filled once, used everywhere</h2>
+<pre><b>brand_profile</b> {
+  id, name, url,
+  palette[4], font, logo_url, tone_rules,
+  policy_doc_ref?,                    // uploaded brand policy document
+  approved_claims[{id, text, confirmed:true}],   // user-confirmed — compliance source of truth
+  banned_words[],
+  fetched_from_url: bool, updated_at
+}</pre>
+  <ul class="tight">
+    <li><strong>Empty state:</strong> two actions — <em>Pre-fill from URL</em> (runs the same extractor pipeline, then opens the Brand modal for confirmation) and <em>Add manually</em>. Both reuse the exact Brand modal from the campaign flow with a standalone save.</li>
+    <li><strong>Saved state:</strong> read view — palette swatches, font/logo, tone, policy doc, claims (green) + banned words (red) — with <em>Edit / refetch</em>. Editing re-opens the modal; claims edits require re-confirmation taps.</li>
+    <li><strong>Bidirectional pre-fill:</strong> saving a Brand card inside any campaign creates/updates the profile; every new campaign's Brand card pre-fills from the profile and is labeled "Pre-filled from My Brand ✓". Campaign-level edits ask once: "update My Brand too, or this campaign only?"</li>
+    <li><strong>v1 scope: single brand.</strong> "+ Add another brand" renders disabled-with-tooltip (multi-brand = later phase; agencies need it, don't fake it now).</li>
+  </ul>
+</section>
+
+<section>
+  <div class="eyebrow">04 · Reference media in Campaign Details</div>
+  <h2>User reference beats template</h2>
+  <ul class="tight">
+    <li>Campaign Details modal gains <strong>Reference image / video (optional)</strong> — up to 3 files, stored as <span class="mono">reference_media[]</span> on CampaignContext.</li>
+    <li><strong>Semantics:</strong> passed to planner + creative orchestrator as a creative reference (style, composition, pacing). Priority order when both exist: <strong>user reference &gt; selected template</strong>; the templates step says so inline. Reference never overrides brand palette/claims — style only.</li>
+    <li>Surfaced honestly: rumination log notes "reference video noted"; Context tab gets a <em>Reference media</em> row ("1 video (user) — priority"); the model-confirm card inherits nothing new.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="eyebrow">05 · Prompt modal</div>
+  <h2>No model names in the bar</h2>
+  <p>Final anatomy: <span class="mono">+ upload</span> (attach counter "Images 0/8") · prompt field · <span class="mono">⚙ Settings</span> (disabled, tooltip "Model selection coming — using recommended") · blue send. <strong>No LLM or media-model label anywhere in the bar.</strong> The media model appears exactly once: in the in-thread model-confirm card at generate time, with its reason and cost. LLM identity is never user-facing.</p>
+</section>
+
+<section>
+  <div class="eyebrow">06 · UI finishing tokens</div>
+  <h2>Type &amp; panel adjustments</h2>
+  <table>
+    <tr><th style="width:34%">Token</th><th>Old → New</th></tr>
+    <tr><td>Base body</td><td>14px → <strong>14.5px / 1.55</strong></td></tr>
+    <tr><td>Thread bubbles (.ai/.me)</td><td>12.5px → <strong>13.5px</strong></td></tr>
+    <tr><td>Right panel width</td><td>420px → <strong>520px</strong> · expanded 640 → <strong>780px</strong></td></tr>
+    <tr><td>Panel body text / meta rows</td><td>~12px → <strong>13.5px / 13px</strong>, roomier row padding (8–9px)</td></tr>
+    <tr><td>Panel tabs &amp; title</td><td>12/12.5px → <strong>13/14px</strong></td></tr>
+    <tr><td>Modal inputs</td><td>12.5px → <strong>13px</strong>, labels unchanged (mono caps)</td></tr>
+    <tr><td>Headings (.hd)</td><td>19px → <strong>21px</strong>, Archivo Black kept; section subtitles 12.5 → 13px</td></tr>
+    <tr><td>Overlay breakpoint</td><td>panel overlays below <strong>980px</strong> (was 900) given the wider panel</td></tr>
+  </table>
+  <p class="note">Fonts stay Archivo / Archivo Black / Space Mono — the change is scale and spacing, not family. Contrast on --tx2 raised slightly (#A9B3C4).</p>
+</section>
+
+<section>
+  <div class="eyebrow">07 · Claude Code handoff</div>
+  <h2>The HTML is the design contract</h2>
+  <div class="verdict"><b>Direct answer to "will Claude Code output this?"</b>No — not unless you hand it this HTML as the UI reference. A build prompt alone produces a different-looking app. Feed <span class="mono">marketing-studio-demo.html</span> + this addendum + system-prompt v2 together: the HTML fixes layout, tokens, components and micro-interactions; the documents fix behavior, schemas and agents.</div>
+  <ul class="tight">
+    <li><strong>Match exactly:</strong> theme tokens, nav + sub-bar, three-card details step, popup field sets, option/confidence cards, templates step, right panel (520/780, Context | Creative), campaigns grid, My Brand states, prompt-modal anatomy, guide-bar tone of empty/honest states.</li>
+    <li><strong>Simulated in the HTML (replace with real):</strong> canned agent turns and the two scripted prompt-bar refinements → real envelope streaming; gradient tiles → real media; Fill-sample buttons → remove; jump pills + SIMULATION chip + guide bar → dev-only, strip in prod; toasts saying "wired in build" → real actions; seeded sample campaigns → real data.</li>
+    <li><strong>Stays as-is even in prod:</strong> Settings ⚙ disabled-with-tooltip until model selection ships; template thumbnails from the local samples folder until the template pipeline exists.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="eyebrow">08 · Supersession vs system-prompt v2</div>
+  <h2>What this changes</h2>
+  <table>
+    <tr><th style="width:34%">v2 reference</th><th>Status</th></tr>
+    <tr><td>App structure — nav</td><td>Replaced: 3 global tabs + studio sub-bar; + New campaign relocated (§01)</td></tr>
+    <tr><td>Prompt modal</td><td>Amended: model chip removed entirely (§05)</td></tr>
+    <tr><td>My Campaigns</td><td>Replaced: grid per reference image (§02); status lifecycle + results nudge unchanged</td></tr>
+    <tr><td>Brand block</td><td>Extended: brand_profile surface + bidirectional pre-fill (§03); extractor pipeline, claims confirmation, kill-flag lens unchanged</td></tr>
+    <tr><td>Campaign Details card</td><td>Extended: reference_media[] with user-over-template priority (§04)</td></tr>
+    <tr><td>Theme</td><td>Amended: type scale + panel widths (§06); palette unchanged</td></tr>
+    <tr><td>Everything else in v2</td><td>Stands: flow steps 0–8, agent chain incl. council evaluator, single-vs-variants gate, schemas, acceptance checks (add: brand pre-fill check, reference-media priority check, grid archive/restore check)</td></tr>
+  </table>
+</section>
+
+</main>
+</body>
+</html>

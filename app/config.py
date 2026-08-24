@@ -52,6 +52,13 @@ MOCK_LLM = os.environ.get("MOCK_LLM", "0") == "1"
 
 MAX_VALIDATION_RETRIES = 2  # §3.9: re-run with the error, max 2 retries
 
+# Output cap for one agent call. This is a CAP, not spend — you pay only for
+# tokens actually generated. It must be generous because extended thinking
+# tokens are billed against the SAME budget as the answer: a chair that thinks
+# hard and then emits a large Feedback object can be cut off mid-JSON, which
+# surfaces as a bogus "Expecting ',' delimiter" instead of an honest overflow.
+MAX_OUTPUT_TOKENS = int(os.environ.get("PLOTLINE_MAX_OUTPUT_TOKENS", "32000"))
+
 # --- Creative Studio media (Addendum-02; fal.ai per v1 §07) -----------------
 FAL_KEY = os.environ.get("FAL_KEY", "")
 # MOCK_MEDIA=1 → deterministic placeholder assets, zero spend; the full flow
