@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `d640a86` (plotline-api) · `f99ffdc` (plotline-web)
+last-synced: `e854b31` (plotline-api) · `f99ffdc` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
