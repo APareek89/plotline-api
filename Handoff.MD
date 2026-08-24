@@ -17,6 +17,15 @@ CLEAN-SLATE FRONTEND: nothing from the old product survives (no Avatar/Creative/
 no Plans/My Space, no old design system). Three tabs only: Campaign Studio · My Campaigns ·
 My Brand. Backend is leveraged, not rebuilt.
 
+## WHERE IT STOPPED — start here (2026-08-24)
+Backend chair + full flow are DONE and verified (see Current state). The remaining work is
+the FRONTEND REBUILD (docs/marketing-studio-demo.html is the contract) plus the backend it
+implies: app/threadkit.py helper extraction BEFORE deleting old drivers, brand_profile
+storage+routes w/ bidirectional pre-fill, reference_media[] (user reference > template),
+campaign archive/restore/rename/delete, then the dead-code deletion pass. New acceptance
+checks still to write: brand pre-fill both directions, reference-media priority, grid
+archive/restore.
+
 ## REAL-MODE BUG CLASS #3 — silent truncation (fixed 2026-08-24)
 The chair was NOT failing on prompt size as predicted. Root cause found by probe:
 `thinking` tokens share the `max_tokens` budget, the response came back
@@ -103,6 +112,18 @@ events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tab
   ephemeral disk — threads/series reset on redeploy; autoDeploy on push to master.
 - ✅ 101/101 tests (23 in test_marketing.py — 19 acceptance floor + 4 new: truncation never
   parsed as complete, multi-block joins, prompt/validator lexicon drift guard, R2 floor)
+- ✅ **FULL v2 FLOW VERIFIED END-TO-END ON REAL MODELS + REAL FAL** (campaign srs_5e7715873a,
+  thread thr_42eb12a760, ad card `ad_faa4f000b5`, campaign status LIVE). Every agent passed
+  first try except one legit self-correction: planner 93s/1 attempt (R2 fix held) → 3 seats
+  1 attempt each → **chair 378s/1 attempt, 3 citations** → refine (2 flagged; options_refine
+  needed 2 attempts, caught by "untouched options must come back byte-identical") → 2nd
+  council → options (CCS 83/70/62, 0 killed) → approve o1 → templates HONEST SKIP ("No
+  templates in the library yet") → detail v1 (claims_used ⊆ confirmed claims, style_ref null)
+  → refine → v2 (CTA only, changes[] documents it, rest byte-identical) → model-confirm
+  ($0.24 shown BEFORE generate, model named once w/ reason, single-vs-variants asked) →
+  single → 3 real 928×1152 PNGs on nano-banana-2 → accept → Ad Card → mark-live.
+  **Credits reconcile exactly: total_cost_credits 2.4 == campaign_spend() 0.24 USD / 0.1.**
+  generation_log: 3 rows (model, cost, prompt, seed, asset_id) — audit reachable.
 - ▶ Loop.MD status: offered (awaiting user's answer)
 
 ## Pending points
