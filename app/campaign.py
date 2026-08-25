@@ -2958,9 +2958,13 @@ def _canon_turn(thread_id: str, campaign_id: str) -> None:
             schema=CanonPlan, dispatcher=None, use_tools=False,
             validate=lambda p: _validate_canon_plan(p, board),
             mock_fn=campaign_mock.mock_canon_plan)
-        ws["canon"] = [s.model_dump(mode="json") for s in plan.sheets]
+        # Render the required views, then persist to the WORKSPACE library. A
+        # planned sheet with no views is a promise; the sheet only becomes the
+        # thing that makes campaign two cheaper once its images exist.
+        sheets = _render_canon_views(thread_id, plan.sheets, campaign_id)
+        ws["canon"] = [s.model_dump(mode="json") for s in sheets]
         _say(thread_id,
-             f"{len(plan.sheets)} canon sheet(s) — reusable across every future campaign.",
+             f"{len(sheets)} canon sheet(s) — reusable across every future campaign.",
              [ArtifactEnvelope(
                  type="canon_sheet", id="canon", title="Canon sheets",
                  payload={"sheets": ws["canon"]},
@@ -2968,7 +2972,7 @@ def _canon_turn(thread_id: str, campaign_id: str) -> None:
                                   ("skip_canon", "Skip sheets", "secondary")))],
              question="Approve these sheets, or skip them and accept the drift?")
         store.log_artifact_activity(thread_id, "canon", "proposed",
-                                    ", ".join(s.id for s in plan.sheets) or "none needed")
+                                    ", ".join(s.id for s in sheets) or "none needed")
         _stage_done(thread_id, campaign_id, "canon",
                     creative_type=board.get("creative_type", "image"))
         if not _pauses_at(campaign_id, "canon"):
@@ -3203,3 +3207,45 @@ def _detail_from_board(board: ShotBoard, rack: Optional[dict[str, Any]]) -> dict
         "claims_used": list(board.claims_used), "style_ref": None,
         "version": board.version, "changes": list(board.changes),
     }
+
+
+def _render_canon_views(thread_id: str, sheets: list, campaign_id: str) -> list:
+    """Generate each sheet's required views, then save it to the workspace library.
+
+    A sheet ALREADY IN THE LIBRARY is reused, not re-rendered. That is the whole
+    retention mechanic — campaign two is cheaper because the canon exists — and
+    re-rendering here would quietly charge the user for it twice.
+
+    A voice sheet has no views: it is auditioned on the real line, not viewed.
+    """
+    out = []
+    for sheet in sheets:
+        existing = store.get_canon_sheet(sheet.id)
+        if existing and existing.get("asset_ids"):
+            reused = CanonSheet.model_validate(
+                {k: v for k, v in existing.items() if not k.startswith("_")})
+            store.log_artifact_activity(
+                thread_id, "canon", "reused",
+                f"{reused.id} reused from the library — {len(reused.asset_ids)} view(s), no new spend")
+            out.append(reused)
+            continue
+
+        for view in sheet.required_views():
+            prompt = f"{sheet.brief}, {view.replace('_', ' ')} view, neutral background"
+            frame = generate("image", prompt, ratio="1:1", tier="draft")
+            asset_id = store.add_asset(thread_id, f"canon_{sheet.id}_{view}",
+                                       frame.get("kind", "image"), frame["path"],
+                                       {"model": frame["model"], "prompt": prompt,
+                                        "canon_id": sheet.id, "view": view},
+                                       frame["cost"])
+            store.log_generation(thread_id, asset_id, "generate", prompt=prompt,
+                                 model=frame["model"], seed=str(frame.get("seed")),
+                                 cost=frame["cost"])
+            sheet.asset_ids.append(asset_id)
+            sheet.coverage[view] = True
+
+        # Coverage is real now, so the full check applies.
+        validate_canon_sheet(sheet)
+        store.save_canon_sheet(sheet.model_dump(mode="json"), campaign_id)
+        out.append(sheet)
+    return out

@@ -67,6 +67,20 @@ def _init(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (thread_id, stage)
         );
 
+        -- Canon sheets are WORKSPACE-GLOBAL (owner decision 2026-08-25), not
+        -- campaign-scoped: that is the retention mechanic, since campaign two is
+        -- cheaper precisely because these already exist. `first_campaign_id` is
+        -- provenance, never ownership.
+        CREATE TABLE IF NOT EXISTS canon_sheets (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            label TEXT NOT NULL,
+            data TEXT NOT NULL,
+            first_campaign_id TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS series_plan (
             series_id TEXT PRIMARY KEY,
             version INTEGER NOT NULL DEFAULT 1,
@@ -301,6 +315,56 @@ def list_series() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+# ------------------------------------------------ canon library (v3 §6) --
+
+
+def save_canon_sheet(sheet: dict[str, Any], campaign_id: Optional[str] = None) -> None:
+    """Upsert. A sheet keeps its original provenance on re-save — the second
+    campaign to use it did not create it."""
+    now = _now()
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO canon_sheets (id, kind, label, data, first_campaign_id, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "kind=excluded.kind, label=excluded.label, data=excluded.data, updated_at=excluded.updated_at",
+            (sheet["id"], sheet["kind"], sheet.get("label", sheet["id"]),
+             json.dumps(sheet), campaign_id, now, now),
+        )
+        get_conn().commit()
+
+
+def get_canon_sheet(sheet_id: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute(
+            "SELECT data FROM canon_sheets WHERE id = ?", (sheet_id,)).fetchone()
+    return json.loads(row["data"]) if row else None
+
+
+def list_canon_sheets(kind: Optional[str] = None) -> list[dict[str, Any]]:
+    sql = "SELECT data, first_campaign_id, updated_at FROM canon_sheets"
+    args: tuple = ()
+    if kind:
+        sql += " WHERE kind = ?"
+        args = (kind,)
+    sql += " ORDER BY updated_at DESC"
+    with _lock:
+        rows = get_conn().execute(sql, args).fetchall()
+    out = []
+    for r in rows:
+        sheet = json.loads(r["data"])
+        sheet["_first_campaign_id"] = r["first_campaign_id"]
+        sheet["_updated_at"] = r["updated_at"]
+        out.append(sheet)
+    return out
+
+
+def delete_canon_sheet(sheet_id: str) -> bool:
+    with _lock:
+        cur = get_conn().execute("DELETE FROM canon_sheets WHERE id = ?", (sheet_id,))
+        get_conn().commit()
+    return cur.rowcount > 0
 
 
 # ------------------------------------------------- run checkpoints (v3) --

@@ -467,6 +467,31 @@ def _first_error(exc: ValidationError) -> str:
     return str(exc)
 
 
+@app.get("/api/canon")
+def list_canon(kind: Optional[str] = None) -> dict[str, Any]:
+    """The workspace canon library. Global by design — a sheet belongs to the
+    workspace, not to the campaign that happened to create it first."""
+    return {"sheets": store.list_canon_sheets(kind)}
+
+
+@app.get("/api/canon/{sheet_id}")
+def get_canon(sheet_id: str) -> dict[str, Any]:
+    sheet = store.get_canon_sheet(sheet_id)
+    if not sheet:
+        raise HTTPException(404, f"no canon sheet {sheet_id}")
+    return sheet
+
+
+@app.delete("/api/canon/{sheet_id}")
+def delete_canon(sheet_id: str) -> dict[str, Any]:
+    """Deleting a sheet a campaign still references does NOT retroactively break
+    that campaign — its shots hold the asset ids, not the sheet. What it costs is
+    the reuse: the next campaign re-renders."""
+    if not store.delete_canon_sheet(sheet_id):
+        raise HTTPException(404, f"no canon sheet {sheet_id}")
+    return {"ok": True, "deleted": sheet_id}
+
+
 @app.get("/api/templates")
 def templates() -> list[dict[str, Any]]:
     """Step 4: static samples from samples/templates/manifest.json. Empty
