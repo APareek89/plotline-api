@@ -2215,3 +2215,190 @@ def test_a_non_english_voice_needs_a_native_speaker_sign_off():
 
     voice.native_review = {"hi-IN": "Rhea K"}
     assert validators_mod.validate_canon_sheet(voice, languages=["en-IN", "hi-IN"]) is voice
+
+
+# ================================================================================
+# v3 §7 §9 §11 — the keyframe gate, QC, and the variant reuse map
+# ================================================================================
+
+
+def _kf(slot="shot_01", approved=True, **over) -> dict:
+    base = {"shot_slot": slot, "asset_id": f"as_{slot}", "approved": approved,
+            "checks": {c: "pass" for c in ("face", "hands", "product_geometry",
+                                           "label_legibility", "composition", "safe_area")},
+            "cost_usd": 0.08}
+    base.update(over)
+    return base
+
+
+def test_no_video_is_generated_until_every_keyframe_is_approved():
+    """THE HARD GATE, and the highest-value addition in the spec. The pipeline
+    went detail -> generate, so a composition or label defect surfaced only after
+    video was paid for — where it is far harder to see in motion than in a
+    still."""
+    from app.schemas import KeyframeBoard
+    from app.validators import gate_video_generation
+
+    with pytest.raises(AgentValidationError) as exc:
+        gate_video_generation(None, "video")
+    assert "gated on approved stills" in str(exc.value)
+
+    part = KeyframeBoard.model_validate({"frames": [_kf("shot_01"), _kf("shot_02", approved=False)]})
+    assert part.all_approved is False
+    with pytest.raises(AgentValidationError) as exc:
+        gate_video_generation(part, "video")
+    assert "shot_02" in str(exc.value)
+
+    done = KeyframeBoard.model_validate({"frames": [_kf("shot_01"), _kf("shot_02")]})
+    assert done.all_approved is True
+    assert gate_video_generation(done, "video") is None
+
+    # for an image campaign the keyframes ARE the deliverable — nothing to gate
+    assert gate_video_generation(None, "image") is None
+
+
+def test_all_approved_is_derived_not_asserted():
+    """It is the flag that unlocks paid video generation, so it may not be
+    something a model can simply set to true."""
+    from app.schemas import KeyframeBoard
+
+    lying = KeyframeBoard.model_validate(
+        {"frames": [_kf("shot_01", approved=False)], "all_approved": True})
+    assert lying.all_approved is False
+
+
+def test_a_failing_check_needs_a_repair_or_an_explicit_acceptance():
+    from app.schemas import KeyframeBoard
+    from app.validators import validate_keyframe_board
+
+    board = KeyframeBoard.model_validate({"frames": [
+        _kf("shot_01", checks={"face": "pass", "label_legibility": "fail"})]})
+    with pytest.raises(AgentValidationError) as exc:
+        validate_keyframe_board(board)
+    assert "Repair the region" in str(exc.value)
+
+    repaired = KeyframeBoard.model_validate({"frames": [
+        _kf("shot_01", checks={"face": "pass", "label_legibility": "fail"},
+            repairs=["relit the label, rest of frame unchanged"])]})
+    assert validate_keyframe_board(repaired) is repaired
+
+    # and every shot on the board needs a frame at all
+    with pytest.raises(AgentValidationError) as exc:
+        validate_keyframe_board(KeyframeBoard.model_validate({"frames": [_kf("shot_01")]}),
+                                board_slots=["shot_01", "shot_02"])
+    assert "shot_02" in str(exc.value)
+
+
+def test_an_enhancer_may_not_rewrite_identity_or_product_constraints():
+    """Enhancers silently rewriting canon references and claims is a real and
+    common failure — it undoes every gate before it."""
+    from app.validators import validate_enhancement
+
+    before = {"keyframe_prompt": "a", "cast_refs": ["@priya"], "claims_used": ["c"],
+              "style_block_id": "sb1"}
+    assert validate_enhancement(before, {**before, "keyframe_prompt": "a, richer"}) == [
+        "keyframe_prompt"]
+
+    with pytest.raises(AgentValidationError) as exc:
+        validate_enhancement(before, {**before, "cast_refs": ["@someone_else"]})
+    assert "silently undoes every gate" in str(exc.value)
+
+
+def test_qc_holds_delivery_on_anything_blocking_and_derives_its_verdict():
+    from app.schemas import QCReport
+    from app.validators import build_qc_report
+
+    from app.schemas import RightsEntry
+
+    cid, _ = _filled("QC")
+    context = campaign._context_of(cid)
+    context.brand.rights_ledger = [
+        RightsEntry(asset_kind="music", ref="bed.mp3", status="not_cleared")]
+
+    report = build_qc_report(findings=[], automated={"identity_drift": "pass"},
+                             rights_ledger=context.brand.rights_ledger,
+                             final_copy="files GST in 60 seconds", context=context)
+    assert report.verdict == "held"
+    assert any(f.check == "rights" and f.tier == "blocking" for f in report.findings)
+
+    # a model cannot talk its way to `cleared`
+    lying = QCReport.model_validate({"findings": [
+        {"tier": "blocking", "check": "rights", "detail": "uncleared"}], "verdict": "cleared"})
+    assert lying.verdict == "held"
+
+
+def test_a_banned_word_in_the_final_copy_blocks_even_though_it_passed_earlier():
+    """Re-checked at the END on purpose: copy drifts during production, so the
+    compliance answer from the brief stage is not the answer at delivery."""
+    from app.validators import build_qc_report
+
+    cid, _ = _filled("QC drift")
+    context = campaign._context_of(cid)
+    report = build_qc_report(findings=[], automated={}, rights_ledger=[],
+                             final_copy="guaranteed to file on time", context=context)
+    assert report.verdict == "held"
+    assert any(f.check == "banned_word" for f in report.findings)
+
+    # …and clean final copy clears
+    clean = build_qc_report(findings=[], automated={}, rights_ledger=[],
+                            final_copy="files GST in 60 seconds", context=context)
+    assert clean.verdict == "cleared"
+
+
+def test_an_accepted_defect_without_a_rationale_is_invalid():
+    """'Ship it anyway' has to be an auditable decision rather than a shrug."""
+    from app.schemas import QCFinding
+
+    with pytest.raises(ValidationError) as exc:
+        QCFinding(tier="accepted", check="continuity", detail="background shifts")
+    assert "auditable decision" in str(exc.value)
+
+    ok = QCFinding(tier="accepted", check="continuity", detail="background shifts",
+                   rationale="off-brand-critical, dated campaign, client informed")
+    assert ok.rationale
+
+
+def test_an_unwired_detector_reports_skip_and_never_pass():
+    """`skip` is honest when a detector is not wired yet; rendering it as pass
+    would be a lie the whole report inherits."""
+    from app.schemas import QCReport
+
+    report = QCReport(automated={"lip_sync": "skip", "loudness": "pass"})
+    assert report.automated["lip_sync"] == "skip"
+    with pytest.raises(ValidationError):
+        QCReport(automated={"lip_sync": "not_run"})
+
+
+def test_a_retry_changes_exactly_one_variable_and_the_cause_picks_the_fix():
+    """'Make it better' is not a repair instruction — each cause has a distinct
+    fix, and two simultaneous edits make the next result uninterpretable."""
+    from app.schemas import TAKE_FIXES, TakeReject
+
+    reject = TakeReject(cause="too_many_actions", detail="two actions in one clip",
+                        variable_changed="beat")
+    assert reject.proposed_fix == TAKE_FIXES["too_many_actions"]
+    assert "B1" in reject.proposed_fix
+
+    with pytest.raises(ValidationError) as exc:
+        TakeReject(cause="wrong_reference", detail="d", variable_changed="  ")
+    assert "uninterpretable" in str(exc.value)
+
+
+def test_the_variant_matrix_shows_the_reuse_that_makes_testing_affordable():
+    """A hook-axis variant re-renders exactly the hook shot. That ratio IS the
+    business case for the shot board, so it has to be visible."""
+    from app.schemas import LOCALISATION_LIMITS, VariantMatrix
+
+    matrix = VariantMatrix.model_validate({
+        "cells": [{"variant_id": "B", "axis": "hook", "delta": "curiosity opener",
+                   "hypothesis": "B tests the hook against A",
+                   "shots_rerendered": ["shot_01"], "shots_reused": 4, "cost_usd": 0.08}],
+        "baseline_cost_usd": 0.40, "matrix_cost_usd": 0.08})
+    cell = matrix.cells[0]
+    assert cell.shots_rerendered == ["shot_01"] and cell.shots_reused == 4
+    assert matrix.matrix_cost_usd < matrix.baseline_cost_usd
+
+    # the three tiers are different products, each with its honest limitation
+    assert set(LOCALISATION_LIMITS) == {"dub", "revoice", "recast"}
+    assert "lip-sync drift" in LOCALISATION_LIMITS["dub"]
+    assert "full board re-render" in LOCALISATION_LIMITS["recast"]

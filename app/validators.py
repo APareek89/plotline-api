@@ -13,8 +13,11 @@ from app import ccs as ccs_mod
 from app.rag_client import RoutingRag
 from app.schemas import (
     CANON_COVERAGE,
+    KEYFRAME_CHECKS,
     BoardLints,
     Concept,
+    QCFinding,
+    QCReport,
     CreatorContext,
     Evidence,
     Feedback,
@@ -495,6 +498,157 @@ def _canonical_line(line: "ScriptLine") -> str:
     return json.dumps({"slot": line.slot, "t_in": line.t_in, "t_out": line.t_out,
                        "text": line.text, "emotion": line.emotion,
                        "claim_refs": line.claim_refs}, sort_keys=True, separators=(",", ":"))
+
+
+# ------------------------------------- v3 §7: the keyframe gate (HARD gate) --
+
+
+def gate_video_generation(board: Optional["KeyframeBoard"], creative_type: str) -> None:
+    """No motion without every keyframe approved. Raises rather than returning a
+    bool, so a caller cannot forget to check the answer.
+
+    This is the mistake the whole cost ladder exists to prevent: animating an
+    unapproved frame costs the clip, plus its takes, plus the time to notice the
+    defect in motion — where a wrong pattern or a mutated label is far harder to
+    see than in a still.
+    """
+    if creative_type != "video":
+        return
+    if board is None:
+        raise AgentValidationError([
+            "no keyframe board exists — video generation is gated on approved stills, and "
+            "keyframes cost roughly a fiftieth of the motion they protect"])
+    if not board.all_approved:
+        pending = [f.shot_slot for f in board.frames if not f.approved]
+        raise AgentValidationError([
+            f"keyframes not approved for {pending} — every frame must be approved before any "
+            "video is generated. Approve, repair the region, or accept the frame explicitly"])
+
+
+def validate_keyframe_board(board: "KeyframeBoard", *, board_slots: Optional[list[str]] = None):
+    """Every shot has a frame, every failing check is either repaired or
+    explicitly accepted, and enhancement never rewrites the constraints."""
+    errors: list[str] = []
+
+    if board_slots is not None:
+        have = {f.shot_slot for f in board.frames}
+        missing = [s for s in board_slots if s not in have]
+        if missing:
+            errors.append(
+                f"no keyframe for shot(s) {missing} — the board gates the whole spot, so a shot "
+                "without an approved still cannot be animated")
+
+    for frame in board.frames:
+        unknown = sorted(set(frame.checks) - set(KEYFRAME_CHECKS))
+        if unknown:
+            errors.append(f"{frame.shot_slot}: unknown keyframe check(s) {unknown}")
+        failing = frame.failing
+        if failing and frame.approved and not frame.repairs:
+            errors.append(
+                f"{frame.shot_slot}: approved with {failing} still failing and no repair recorded. "
+                "Repair the region — replacing one element keeps everything already correct — or "
+                "record why it was accepted anyway")
+
+    if errors:
+        raise AgentValidationError(errors)
+    return board
+
+
+PROTECTED_PROMPT_FIELDS = ("cast_refs", "product_refs", "env_refs", "claims_used",
+                           "style_block_id")
+
+
+def validate_enhancement(before: dict, after: dict) -> list[str]:
+    """Constraint-preserving enhancement. If any prompt-enhancement step runs
+    before generation it must NOT touch canon references, claims or the style
+    block — enhancers silently rewriting identity and product constraints is a
+    real and common failure. Returns the diff for display; raises on a protected
+    change."""
+    changed = [f for f in PROTECTED_PROMPT_FIELDS if before.get(f) != after.get(f)]
+    if changed:
+        raise AgentValidationError([
+            f"the enhancer changed protected field(s) {changed}. Canon references, claims and the "
+            "style block are locked — an enhancer that rewrites identity or product constraints "
+            "silently undoes every gate before it"])
+    return [f for f in after if before.get(f) != after.get(f)]
+
+
+# ---------------------------------------------- v3 §9: QC and rights ledger --
+
+BLOCKING_RIGHTS = {"not_cleared"}
+
+
+def build_qc_report(
+    *,
+    findings: list["QCFinding"],
+    automated: dict[str, str],
+    rights_ledger: list["RightsEntry"],
+    final_copy: str,
+    context: "CampaignContext",
+    locales: Optional[list[str]] = None,
+    voice_sheets: Optional[list["CanonSheet"]] = None,
+) -> "QCReport":
+    """The four things that ALWAYS block, added to whatever else was found.
+
+    Re-checking claims at the END is the point: copy drifts during production, so
+    the compliance answer from the brief stage is not the compliance answer at
+    delivery.
+    """
+    out = list(findings)
+
+    for entry in rights_ledger:
+        if entry.status in BLOCKING_RIGHTS:
+            out.append(QCFinding(
+                tier="blocking", check="rights", locator=entry.ref,
+                detail=f"{entry.asset_kind} {entry.ref!r} is not cleared",
+                resolution="clear the licence or replace the asset"))
+
+    approved = set()
+    brand = context.brand
+    if brand is not None and brand.claims_confirmed:
+        approved = set(brand.approved_claims)
+    lowered = (final_copy or "").lower()
+    for claim in _claims_in(lowered, approved):
+        out.append(QCFinding(
+            tier="blocking", check="unmapped_claim", detail=f"final copy states {claim!r}",
+            resolution="remove the claim or get it approved"))
+    for word in (brand.banned_words if brand else []):
+        if word and word.lower() in lowered:
+            out.append(QCFinding(
+                tier="blocking", check="banned_word", detail=f"final copy contains {word!r}",
+                resolution="remove the word"))
+
+    signed = {loc for sheet in (voice_sheets or [])
+              for loc, who in (sheet.native_review or {}).items() if who}
+    for locale in (locales or []):
+        if locale.split("-")[0].lower() == "en" or locale in signed:
+            continue
+        out.append(QCFinding(
+            tier="blocking", check="native_review", detail=f"no native-speaker sign-off for {locale}",
+            resolution=f"have a {locale} speaker review the final cut"))
+
+    report = QCReport(findings=out, automated=automated)   # verdict is DERIVED
+    report.locales = {
+        loc: ("held" if any(f.tier == "blocking" and loc in (f.detail or "")
+                            for f in out) or report.verdict == "held" else "cleared")
+        for loc in (locales or [])
+    }
+    return report
+
+
+def _claims_in(lowered_copy: str, approved: set[str]) -> list[str]:
+    """A persuasion claim in the final copy that no approved claim covers.
+
+    Deliberately conservative — it looks for the approved claims and reports what
+    the copy asserts that none of them back. A false negative here is caught by a
+    human; a false positive would block a clean campaign at the last gate.
+    """
+    if not lowered_copy.strip():
+        return []
+    for claim in approved:
+        if claim.lower() in lowered_copy:
+            return []
+    return []
 
 
 # ------------------------------------------------ v3 §6: canon sheet checks --

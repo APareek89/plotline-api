@@ -640,6 +640,12 @@ class BrandBlock(Strict):
     approved_claims: list[str] = Field(default_factory=list)
     banned_words: list[str] = Field(default_factory=list)
     claims_confirmed: bool = False
+    # v3 §10 — the rights ledger lives at INTAKE, not at QC. Platform terms may
+    # grant broad rights over uploaded media and no generator indemnifies
+    # unauthorised likeness use, so discovering at QC that the music is uncleared
+    # means the ad is finished and unshippable. `not_cleared` never blocks
+    # PLANNING; it blocks DELIVERY, and it is visible from the moment it is recorded.
+    rights_ledger: list["RightsEntry"] = Field(default_factory=list)
 
 
 class CampaignContext(Strict):
@@ -1005,6 +1011,168 @@ class CampaignDetail(Strict):
     style_ref: Optional[TemplateRef] = None
     version: int = 1
     changes: list[str] = Field(default_factory=list)  # refine-loop diff log
+
+
+KeyframeCheck = Literal["face", "hands", "product_geometry", "label_legibility",
+                        "composition", "safe_area"]
+KEYFRAME_CHECKS: tuple[str, ...] = ("face", "hands", "product_geometry",
+                                    "label_legibility", "composition", "safe_area")
+
+
+class Keyframe(Strict):
+    shot_slot: str
+    asset_id: str
+    picked_from: int = Field(default=1, ge=1)     # generated N, chose 1
+    refs_used: list[str] = Field(default_factory=list)
+    checks: dict[str, Literal["pass", "fail", "na"]] = Field(default_factory=dict)
+    repairs: list[str] = Field(default_factory=list)
+    approved: bool = False
+    cost_usd: float = 0.0
+
+    @property
+    def failing(self) -> list[str]:
+        return [k for k, v in self.checks.items() if v == "fail"]
+
+
+class KeyframeBoard(Strict):
+    """v3 §7 — "lock the film as stills". THE HARD GATE.
+
+    The highest-value single addition in the spec. The pipeline went detail →
+    generate, so a composition, identity or label defect surfaced only AFTER
+    video was paid for — where a wrong pattern or a mutated label is far harder
+    to see in motion than in a still. Costs roughly a fiftieth of the motion it
+    protects.
+    """
+
+    frames: list[Keyframe] = Field(min_length=1)
+    all_approved: bool = False
+    total_cost_usd: float = 0.0
+    version: int = 1
+
+    @model_validator(mode="after")
+    def _approval_is_derived(self) -> "KeyframeBoard":
+        # Derived, never asserted. all_approved is the thing that unlocks paid
+        # video generation, so it may not be a field a model can simply set.
+        self.all_approved = bool(self.frames) and all(f.approved for f in self.frames)
+        self.total_cost_usd = round(sum(f.cost_usd for f in self.frames), 4)
+        return self
+
+
+TakeCause = Literal["wrong_reference", "ambiguous_action", "too_many_actions",
+                    "inconsistent_geometry", "unsuitable_model"]
+
+# Each cause has a DISTINCT fix. "Make it better" is not a repair instruction,
+# so the reject UI picks a cause and the system proposes the matching patch.
+TAKE_FIXES: dict[str, str] = {
+    "wrong_reference": "re-select the canon reference for this shot",
+    "ambiguous_action": "state the action as one concrete verb with a subject",
+    "too_many_actions": "split the beat back to one action (board lint B1)",
+    "inconsistent_geometry": "add the product's at-risk views and re-lock geometry",
+    "unsuitable_model": "re-route the shot per its route_reason",
+}
+
+
+class TakeReject(Strict):
+    cause: TakeCause
+    detail: str
+    proposed_fix: str = ""
+    variable_changed: str      # exactly ONE per retry
+
+    @model_validator(mode="after")
+    def _fix_follows_cause(self) -> "TakeReject":
+        if not self.proposed_fix:
+            self.proposed_fix = TAKE_FIXES[self.cause]
+        if not self.variable_changed.strip():
+            raise ValueError(
+                "variable_changed is required — two simultaneous edits make the next result "
+                "uninterpretable, so a retry changes exactly one thing and says which")
+        return self
+
+
+VariantAxis = Literal["hook", "language", "ratio", "cta", "duration"]
+LocalisationTier = Literal["dub", "revoice", "recast"]
+
+# Named and priced separately because they are genuinely different products.
+# Offering only `dub` and calling it localisation is the thing agencies notice
+# first — localisation is creative adaptation, not translation.
+LOCALISATION_LIMITS: dict[str, str] = {
+    "dub": "audio only; lip-sync drift is visible — acceptable for VO-led creative",
+    "revoice": "new VO, captions and lip re-sync",
+    "recast": ("new talent, wardrobe and environment; a full board re-render — the honest "
+               "option when a market needs a different face, not just a different language"),
+}
+
+
+class VariantCell(Strict):
+    variant_id: str
+    axis: VariantAxis
+    delta: str
+    hypothesis: str
+    shots_rerendered: list[str] = Field(default_factory=list)   # board slots
+    shots_reused: int = 0
+    cost_usd: float = 0.0
+    localisation_tier: Optional[LocalisationTier] = None
+
+
+class VariantMatrix(Strict):
+    """v3 §11 — the REUSE MAP. ModelConfirm.variants_proposed already existed;
+    what was missing is the number that decides whether variant testing is
+    affordable at all."""
+
+    cells: list[VariantCell] = Field(min_length=1)
+    baseline_cost_usd: float = 0.0   # the same set re-rendered from scratch
+    matrix_cost_usd: float = 0.0     # derived from the board
+
+
+class RightsEntry(Strict):
+    asset_kind: Literal["logo", "product_photo", "likeness", "voice", "music", "font", "stock"]
+    ref: str
+    status: Literal["owned", "consented", "licensed", "fictional", "not_cleared"]
+    scope: Optional[str] = None       # "paid social, 24mo"
+    evidence_ref: Optional[str] = None
+
+
+QCTier = Literal["blocking", "fix_before_ship", "accepted"]
+
+
+class QCFinding(Strict):
+    tier: QCTier
+    check: str
+    detail: str
+    locator: Optional[str] = None     # asset_id, or "asset_id@2.4s" for jump-to-frame
+    resolution: Optional[str] = None
+    rationale: Optional[str] = None   # REQUIRED when tier == "accepted"
+
+    @model_validator(mode="after")
+    def _accepted_needs_a_reason(self) -> "QCFinding":
+        if self.tier == "accepted" and not (self.rationale or "").strip():
+            raise ValueError(
+                f"accepted finding {self.check!r} has no rationale — 'ship it anyway' has to be an "
+                "auditable decision rather than a shrug, and an accepted defect with no visible "
+                "reason looks like negligence when a client asks later")
+        return self
+
+
+class QCReport(Strict):
+    """v3 §9 — "is it safe to publish, and under a deadline which defects may
+    ship?"
+
+    Seam QA and AdCard._spec_table covered fragments. What was missing is a
+    SEVERITY MODEL: a flat pass/fail list either blocks a dated campaign over a
+    background continuity slip, or gets ignored wholesale because it cries wolf.
+    """
+
+    findings: list[QCFinding] = Field(default_factory=list)
+    automated: dict[str, Literal["pass", "fail", "skip"]] = Field(default_factory=dict)
+    verdict: Literal["cleared", "held"] = "cleared"
+    locales: dict[str, Literal["cleared", "held"]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _verdict_is_derived(self) -> "QCReport":
+        # Derived, never asserted: a blocking finding halts delivery regardless
+        # of what the model would like the verdict to say.
+        self.verdict = "held" if any(f.tier == "blocking" for f in self.findings) else "cleared"
+        return self
 
 
 class VariantSpec(Strict):
