@@ -216,6 +216,11 @@ class Lenses(Strict):
     claims_safety: str
     feasibility: str
     platform_policy: str
+    # v3: carries the Platform seat's refusal through the chair. `platform_policy`
+    # is prose and prose cannot be acted on mechanically; this flag is what the
+    # QC report reads to raise "needs a policy check against <platform>'s current
+    # ad rules" as an instruction to a human rather than a verdict.
+    policy_check_required: bool = False
 
 
 class Fix(Strict):
@@ -237,6 +242,10 @@ class ConceptVerdict(Strict):
 
 class Feedback(Strict):
     concept_verdicts: list[ConceptVerdict]
+    # Server-stamped, as on SeatReview. A doctrine change invalidates cached
+    # council output, so a Feedback that cannot name its doctrine cannot be
+    # safely reused.
+    doctrine_version: Optional[str] = None
 
 
 # ----------------------------------------------------------------- Options ---
@@ -630,12 +639,28 @@ class SeatScore(Strict):
 
 
 class SeatReview(Strict):
-    """One blind council seat's output (Addendum-03 evaluator)."""
+    """One blind council seat's output (Addendum-03 evaluator).
 
-    seat: Literal["performance", "brand", "platform"]
+    `seat` is a free string rather than the original three-value Literal so a
+    user-added stakeholder seat ("my_cmo") can validate. The slug is checked
+    against the live seat registry in validators.validate_council — shape here,
+    policy there, matching how every other semantic rule in this codebase is
+    split. A Literal cannot express "whatever this campaign configured".
+    """
+
+    seat: str = Field(min_length=1)
     element_scores: list[SeatScore] = Field(min_length=1)
     kill_recommendation: Optional[str] = None
     fixes: list[Fix] = Field(default_factory=list)
+    # v3 doctrine: the Platform seat may judge format fit but may NEVER state
+    # what a platform's ad policy says. It raises this instead and names what a
+    # human has to go and check.
+    policy_check_required: bool = False
+    policy_notes: list[str] = Field(default_factory=list)
+    # Stamped by the SERVER after validation (never emitted by the model — a
+    # model-reported version answers "what did it think it was" and the audit
+    # question is "which doctrine actually ran").
+    doctrine_version: Optional[str] = None
 
 
 # --------------------------------------------- Phase-2 contracts (defined) ---

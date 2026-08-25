@@ -12,9 +12,27 @@ behind local. Both Render services are still RUNNING with real ANTHROPIC_API_KEY
 FAL_KEY, publicly, **no auth** — see P0-2.
 
 ## SPEC PRECEDENCE
+**v3** (`docs/v3-ENHANCEMENT-BRIEF.md` + `v3-ARTIFACT-SPEC.md` + `v3-COUNCIL-DOCTRINE.md`) >
 `docs/PRD-addendum-03-ui.html` (owner, behavioral) + `docs/marketing-studio-demo.html`
 (owner, THE DESIGN CONTRACT) > `docs/SYSTEM-PROMPT-v2-marketing-studio.md` > Addendum-02 >
 Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT authoritative.
+
+## v3 — IN PROGRESS (build order in the brief §6; 10 steps)
+Owner decisions taken 2026-08-25: RAG removed from the **council only** (planner keeps it) ·
+canon sheets **workspace-global** · stakeholder seats **ship fully in v3** · final stitch
+**deferred, checkpoints instead**.
+- ▶ **Step 1 council doctrine — core landed, stakeholder seats next.** Done: `prompts/council/
+  doctrine.md` v3.0.0 + `build_system(preludes=)` composite versions; seats/chair → v2.0.0;
+  `dispatcher=None` AND `use_tools=False`; `validate_seat_review` + `validate_council`;
+  `app/seats.py` registry. Remaining: campaign settings storage, seat-aware graph, §7 checks,
+  real-mode pass.
+- ⚠️ Brief says "101 tests" — the real floor is **83** (71 `tests/` + 12 `rag/tests/`).
+- ⚠️ Council output has **no UI surface at all** (Feedback/SeatReview are never emitted as
+  artifacts; CoverageChip renders only on legacy concept/plan/confidence_card). So doctrine §1's
+  "replace the coverage chip with an honest label" has no target, and a user-added stakeholder
+  seat produces a review nobody can see. Owner declined a council surface for now.
+- ⚠️ v3 silently drops the Handoff's stage-level **checkpoints** — and adds five stages, so the
+  "transient error discards a full paid rumination" exposure got worse, not better.
 
 ## CURRENT STATE
 - ✅ Shipped: v2 campaign flow verified END-TO-END on real models + real fal (Ad Card

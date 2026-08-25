@@ -381,6 +381,195 @@ def validate_feedback(
 # ------------------------------------------------------------------ options --
 
 
+# ------------------------------------------- v3: the frozen council doctrine --
+# The council judges from doctrine and retrieves nothing. Everything below makes
+# that structural rather than a prompt instruction — a prompt-only rule holds
+# until the first model that ignores it, and this one governs what an agency
+# tells its client.
+
+# A doctrine seat states DIRECTIONS, never magnitudes. These patterns catch the
+# magnitudes that would be fabrications: a reviewer with no corpus cannot know a
+# percentage, a rate, or a threshold.
+#
+# Deliberately narrow. A seat must stay free to reference the DRAFT's own
+# numbers — "shot 2 runs 4 seconds and carries two actions" is the feasibility
+# judgment D10 asks for, and "9:16", "beat_01" and "D4" are vocabulary. A guard
+# that fired on any digit would fail those, and a false positive here burns a
+# paid run through the retry loop.
+_BENCHMARK_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\d+(?:\.\d+)?\s*%", "a percentage"),
+    (r"\b\d+(?:\.\d+)?\s+percent\b", "a percentage"),
+    (r"\b(?:ctr|cpm|cpa|cpc|cpv|roas|cvr|aov)\b", "an ad-metric benchmark"),
+    (r"\b\d+(?:\.\d+)?\s*x\s+(?:more|better|higher|faster|lift|likelier)", "a multiplier claim"),
+    (r"\b(?:first|under|over|below|above)\s+\d+(?:\.\d+)?\s*(?:s\b|secs?\b|seconds?\b|mins?\b|minutes?\b)",
+     "a duration threshold"),
+    (r"\b\d+\s+(?:out of|in)\s+\d+\s+(?:viewer|user|people|person|customer|shopper|buyer)",
+     "a frequency benchmark"),
+    (r"\btop\s+\d+(?:\.\d+)?\s*%", "a percentile claim"),
+)
+
+_BENCHMARK_RES = tuple((_re.compile(p, _re.IGNORECASE), label) for p, label in _BENCHMARK_PATTERNS)
+
+# Paired quotes only — an unpaired apostrophe is a contraction, not a quotation.
+_QUOTED_RE = _re.compile(r"\"[^\"]{1,400}\"|'[^']{1,400}'|“[^”]{1,400}”|‘[^’]{1,400}’")
+
+
+def _check_no_benchmarks(text: Optional[str], where: str, errors: list[str]) -> None:
+    """Reject magnitudes the council ASSERTS. Ignore magnitudes it QUOTES.
+
+    Those are opposites and the difference is the whole point. Doctrine D8 orders
+    the Brand seat to quote the offending phrase when it flags an unmapped claim
+    — so the single most important thing this council can catch, a claim like
+    "3x faster than QuickBooks", arrives with a number inside it BY DESIGN. A
+    guard that scanned the quote would reject the seat for doing its job, and the
+    campaign would hard-fail on the compliance path specifically.
+
+    So quoted spans are stripped before scanning. A number the council is holding
+    at arm's length is attributed to the draft; only what is left over is the
+    council speaking in its own voice.
+    """
+    if not text:
+        return
+    unquoted = _QUOTED_RE.sub(" ", text)
+    for pattern, label in _BENCHMARK_RES:
+        found = pattern.search(unquoted)
+        if found:
+            errors.append(
+                f"{where}: {label} ({found.group(0)!r}) — this council judges from doctrine and "
+                "has no corpus, so it cannot know a benchmark. State the DIRECTION of the "
+                "judgment instead, or name the measurement you are missing (D12). Rephrase "
+                "without the number; do not substitute a different one"
+            )
+            return
+
+
+def _check_principle_only(evidence: list[Evidence], where: str, errors: list[str]) -> None:
+    """Doctrine §1: every council citation is an opinion, labelled as one."""
+    for item in evidence:
+        if item.tag != "PRINCIPLE" or item.source_id != "model":
+            errors.append(
+                f'{where}: evidence {{tag={item.tag}, source_id={item.source_id!r}}} — the council '
+                'retrieves nothing, so its every citation must be {"tag":"PRINCIPLE",'
+                '"source_id":"model"}. You did not retrieve this id and may not cite it'
+            )
+
+
+def validate_seat_review(review: "SeatReview", spec: "SeatSpec", errors: Optional[list[str]] = None):
+    """One seat's output, checked before the chair ever sees it.
+
+    Catching a bad seat here rather than at the chair means the retry loop
+    re-runs ONE seat instead of surfacing a confusing chair failure caused by an
+    input the chair had no part in.
+    """
+    own = errors if errors is not None else []
+    where = f"council seat {review.seat}"
+
+    if review.seat != spec.slug:
+        own.append(f"{where}: seat identifies as {review.seat!r} but this is the {spec.slug!r} seat")
+
+    for score in review.element_scores:
+        # SeatScore.evidence has no min_length, so "every citation is a PRINCIPLE"
+        # would otherwise pass by emitting none at all. A judgment with nothing
+        # behind it is the thing this council exists to prevent.
+        if not score.evidence:
+            own.append(
+                f"{where}/{score.element}: rated {score.rating} with no evidence — state the "
+                'principle you are judging from as {"tag":"PRINCIPLE","source_id":"model"}'
+            )
+        _check_principle_only(list(score.evidence), f"{where}/{score.element}", own)
+        _check_no_benchmarks(score.reason, f"{where}/{score.element} reason", own)
+        for item in score.evidence:
+            _check_no_benchmarks(item.claim, f"{where}/{score.element} evidence", own)
+    for fix in review.fixes:
+        _check_no_benchmarks(fix.change, f"{where} fix", own)
+
+    # Doctrine §7: compliance authority stays with the Brand seat unless a
+    # stakeholder seat's own file grants it. Default-deny — the failure mode is a
+    # client's guest reviewer silently killing a campaign.
+    if review.kill_recommendation and not spec.can_kill:
+        own.append(
+            f"{where}: raised a kill flag but this seat does not hold one. Add "
+            "`can_kill: true` to its prompt file to grant the authority, or express "
+            "this as a rating and a fix"
+        )
+
+    # The Platform seat's refusal path: a concern is named for a human to check,
+    # never answered. Anything that reads as an assertion about what a rule SAYS
+    # is the failure the doctrine calls the worst this product has.
+    for note in review.policy_notes:
+        _check_no_benchmarks(note, f"{where} policy note", own)
+
+    if errors is None and own:
+        raise AgentValidationError(own)
+    return review
+
+
+def validate_council(feedback: Feedback, seat_reviews: Optional[list] = None) -> Feedback:
+    """The chair's output under the doctrine.
+
+    Runs IN ADDITION to validate_feedback, which keeps every v1 mechanic. This
+    layer only adds what the frozen doctrine makes true.
+    """
+    errors: list[str] = []
+
+    for verdict in feedback.concept_verdicts:
+        where = f"council chair, option {verdict.concept_id}"
+
+        for ev in verdict.element_verdicts:
+            _check_principle_only(list(ev.evidence), f"{where}/{ev.element}", errors)
+            _check_no_benchmarks(ev.reason, f"{where}/{ev.element} reason", errors)
+            for item in ev.evidence:
+                _check_no_benchmarks(item.claim, f"{where}/{ev.element} evidence", errors)
+
+        # Saturation is a measurement over a corpus of existing work. A frozen
+        # doctrine cannot measure it — not sometimes, not when the corpus looks
+        # big enough. validate_feedback only forces this below SATURATION_MIN_ASSETS;
+        # under the doctrine there is no count that earns a real answer.
+        sat = verdict.lenses.saturation
+        if not sat.insufficient_data:
+            errors.append(
+                f"{where}: saturation lens must set insufficient_data=true — this council judges "
+                "from doctrine, not from a corpus scan, so it cannot measure angle fatigue"
+            )
+        if sat.similar_count != 0 or sat.source_id:
+            errors.append(
+                f"{where}: saturation lens reported similar_count={sat.similar_count} / "
+                f"source_id={sat.source_id!r} — nothing was scanned, so both must be empty"
+            )
+
+        for text, label in ((verdict.lenses.claims_safety, "claims_safety"),
+                            (verdict.lenses.feasibility, "feasibility"),
+                            (verdict.lenses.platform_policy, "platform_policy"),
+                            (sat.note, "saturation note")):
+            _check_no_benchmarks(text, f"{where} lens {label}", errors)
+        for fix in verdict.fixes:
+            _check_no_benchmarks(fix.change, f"{where} fix", errors)
+
+    # A kill flag raised by a seat is never dropped in silence. The chair may
+    # re-classify one; it may not lose one.
+    if seat_reviews:
+        raised = {r.seat for r in seat_reviews if getattr(r, "kill_recommendation", None)}
+        if raised and not any(v.kill_flags for v in feedback.concept_verdicts):
+            errors.append(
+                f"council chair: seat(s) {sorted(raised)} raised a kill recommendation and the "
+                "consolidated feedback carries no kill_flags — re-classify it and say so in the "
+                "reason, or carry it, but never drop it"
+            )
+        # The platform seat's refusal has to survive consolidation, or the QC
+        # report downstream never learns a human check is owed.
+        if any(getattr(r, "policy_check_required", False) for r in seat_reviews) and not any(
+            v.lenses.policy_check_required for v in feedback.concept_verdicts
+        ):
+            errors.append(
+                "council chair: a seat set policy_check_required and no verdict carries it "
+                "forward — lenses.policy_check_required must be true when any seat raised it"
+            )
+
+    if errors:
+        raise AgentValidationError(errors)
+    return feedback
+
+
 def validate_options(
     options: OptionsOutput,
     qualified_concept_ids: set[str],

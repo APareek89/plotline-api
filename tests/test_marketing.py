@@ -742,7 +742,13 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     # them (see test_the_chair_always_sees_seats_in_canonical_order), so the same
     # input yields the same chair input regardless of who answered first.
     assert sorted(s["seat"] for s in seen[:3]) == ["brand", "performance", "platform"]
-    assert len(dispatchers) == len(set(id(d) for d in dispatchers))   # a fresh slice each
+    # v3: blindness used to be expressed as "a fresh dispatcher each, so each seat
+    # sees its own retrieval slice". The council no longer retrieves at all, so
+    # the same invariant is now the stronger statement — NO seat gets a
+    # dispatcher, and there is no slice to leak between them. The other half of
+    # blindness (no seat sees another's output) is asserted in the loop below and
+    # is unchanged.
+    assert dispatchers and all(d is None for d in dispatchers)
     for record in seen:
         payload = record["payload"]
         assert "seats" not in payload and "feedback" not in payload   # no sight of each other
@@ -761,7 +767,13 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     niche = campaign._niche_asset_count(shadow)
     feedback, reviews = campaign._run_council(context, shadow, options, plan, retrieved, niche)
 
-    assert isinstance(feedback, Feedback) and set(Feedback.model_fields) == {"concept_verdicts"}
+    # The v1 CONSOLIDATION contract is untouched: concept_verdicts is still the
+    # whole of what the chair decides. doctrine_version is an audit stamp the
+    # server writes after validation (doctrine §8 — a Feedback that cannot name
+    # its doctrine cannot be safely reused), never something the chair produces.
+    assert isinstance(feedback, Feedback)
+    assert set(Feedback.model_fields) == {"concept_verdicts", "doctrine_version"}
+    assert feedback.doctrine_version == "3.0.0"
     assert len(reviews) == 3 and all(isinstance(r, SeatReview) for r in reviews)
     assert {r.seat for r in reviews} == {"performance", "brand", "platform"}
 

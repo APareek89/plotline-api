@@ -169,15 +169,27 @@ def _unmapped_claim(payload: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def _principle(claim: str) -> list[dict[str, Any]]:
+    return [{"tag": "PRINCIPLE", "source_id": "model", "claim": claim, "as_of": None}]
+
+
 def mock_seat(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher], seat: str) -> dict:
-    assert dispatcher is not None
-    assets = _fetch(dispatcher, "search_inspiration", {"query": "saturation similar", "k": 3})
-    sid = assets[0]["source_id"] if assets else None
-    ev = [{"tag": "REF", "source_id": sid, "claim": "seat retrieval slice", "as_of": None}] if sid else []
+    """v3: a doctrine seat, so no dispatcher and no retrieved citation.
+
+    `dispatcher` stays in the signature because run_agent calls every mock the
+    same way; it is now always None. The mock cites PRINCIPLE/model like the real
+    seats do — a mock that could not pass validate_seat_review would stop proving
+    anything about the path it stands in for.
+    """
     base = [
-        {"element": "hook_strength", "rating": "H", "reason": f"{seat}: hook carries a concrete stake", "evidence": ev},
-        {"element": "audience_alignment", "rating": "H", "reason": f"{seat}: maps to stated audience", "evidence": []},
+        {"element": "hook_strength", "rating": "H",
+         "reason": f"{seat}: hook carries a concrete stake",
+         "evidence": _principle("an opening earns attention through tension or specificity")},
+        {"element": "audience_alignment", "rating": "H",
+         "reason": f"{seat}: maps to the stated audience",
+         "evidence": _principle("creative moves someone from the belief they already hold")},
     ]
     unmapped = _unmapped_claim(payload) if seat == "brand" else None
     kill = f"unsubstantiated_claim: {unmapped}" if unmapped else None
-    return {"seat": seat, "element_scores": base, "kill_recommendation": kill, "fixes": []}
+    return {"seat": seat, "element_scores": base, "kill_recommendation": kill,
+            "policy_check_required": False, "policy_notes": [], "fixes": []}

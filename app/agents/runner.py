@@ -119,12 +119,41 @@ def load_prompt(name: str) -> tuple[str, str]:
     return text, version
 
 
-def build_system(prompt_name: str, replacements: Optional[dict[str, str]] = None) -> tuple[str, str]:
+def build_system(
+    prompt_name: str,
+    replacements: Optional[dict[str, str]] = None,
+    preludes: Optional[list[str]] = None,
+) -> tuple[str, str]:
+    """shared_policy + any preludes + the agent's own prompt.
+
+    A prelude is a prompt several agents share (the council doctrine is the
+    first). It sits AFTER shared_policy so it can narrow it, and BEFORE the
+    agent body so the body can narrow the prelude in turn — specific beats
+    general as you read down.
+
+    The returned version is composite when preludes are present
+    (`seat_brand@2.0.0+doctrine@3.0.0`), because "which reviewer said this" is
+    an audit question and the seat file's own version cannot answer it. With no
+    preludes the version is unchanged, so every existing caller logs what it
+    always logged.
+    """
     policy, _ = load_prompt("shared_policy")
+    parts = [policy]
+    prelude_versions: list[str] = []
+    for name in preludes or []:
+        text, prelude_version = load_prompt(name)
+        parts.append(text)
+        prelude_versions.append(f"{name.rsplit('/', 1)[-1]}@{prelude_version}")
+
     body, version = load_prompt(prompt_name)
     for key, value in (replacements or {}).items():
         body = body.replace("{" + key + "}", value)
-    return policy + "\n\n" + body, version
+    parts.append(body)
+
+    if not prelude_versions:
+        return "\n\n".join(parts), version
+    stem = prompt_name.rsplit("/", 1)[-1]
+    return "\n\n".join(parts), "+".join([f"{stem}@{version}"] + prelude_versions)
 
 
 def extract_json(text: str) -> Any:
@@ -237,6 +266,7 @@ def run_agent(
     dispatcher: Optional[ToolDispatcher] = None,
     validate: Optional[Callable[[T], T]] = None,
     prompt_replacements: Optional[dict[str, str]] = None,
+    preludes: Optional[list[str]] = None,
     mock_fn: Optional[Callable[[dict[str, Any], Optional[ToolDispatcher]], dict[str, Any]]] = None,
     use_tools: bool = True,
     extra_content_blocks: Optional[list[dict[str, Any]]] = None,
@@ -244,7 +274,7 @@ def run_agent(
     """Validation retry loop (§3.9): invalid output → re-run with the error
     (max 2 retries) → AgentHardFail. Applies to mock output too — the mock
     goes through the same schema + server-side validation path."""
-    system, version = build_system(prompt_name, prompt_replacements)
+    system, version = build_system(prompt_name, prompt_replacements, preludes)
     log = RunLog(agent=agent, model=model, prompt_version=version, mock=config.MOCK_LLM,
                  thread_id=current_thread.get(), started_at=time.time())
     log.node_input = _clip(user_payload)

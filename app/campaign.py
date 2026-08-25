@@ -74,10 +74,10 @@ from app.threadkit import (
 )
 from app.validators import (
     BANNED_ABSTRACTIONS,
-    SATURATION_MIN_ASSETS,
     AgentValidationError,
     _RECEIPT_CUES,
     resolve_or_fail,
+    validate_council,
     validate_feedback,
 )
 
@@ -1139,14 +1139,21 @@ def _shadow_plan(context: CampaignContext, options: CampaignOptions, shadow: Cre
     )
 
 
-def _council_payload(context: CampaignContext, options: CampaignOptions, niche_assets: int,
+def _council_payload(context: CampaignContext, options: CampaignOptions,
                      only_ids: Optional[set[str]] = None) -> dict[str, Any]:
+    """What every seat and the chair see.
+
+    `niche_asset_count` used to ride along here. It was dropped with the doctrine
+    change: it is a statistic ABOUT a corpus, and handing it to a reviewer who
+    cannot open that corpus invites exactly the guess the doctrine forbids
+    ("only a few assets in this niche, so the angle is probably fresh"). The
+    planner still receives it — the planner still retrieves.
+    """
     judged = [o.model_dump(mode="json") for o in options.options
               if only_ids is None or o.option_id in only_ids]
     return {
         "context": context.model_dump(mode="json"),
         "options": judged,  # verbatim options — seats never judge the truncated shadow copy
-        "niche_asset_count": niche_assets,
         "stage": "campaign_options",
     }
 
@@ -1155,19 +1162,22 @@ def _run_seat(*, seat: str, context: CampaignContext, shadow: CreatorContext,
               options: CampaignOptions, plan: Plan, retrieved: set[str],
               niche_assets: int, only_ids: Optional[set[str]] = None
               ) -> tuple[Any, set[str]]:
-    """One blind seat with its OWN dispatcher — the graph calls this three times
-    concurrently. Returns the review AND the ids this seat surfaced, because the
-    chair's citation check is validated against the union of everything
-    retrieved this run."""
-    surfaced = set(retrieved)
+    """One blind seat, judging from doctrine — the graph calls these
+    concurrently.
+
+    Returns the review AND the ids this seat surfaced. That second value is now
+    always empty: a doctrine seat retrieves nothing, so it contributes nothing to
+    the union the chair's citation check reads. The tuple shape is kept because
+    the graph node contract is shared with a future seat that might retrieve, and
+    because an empty set is the honest answer rather than a missing one.
+    """
     review = run_seat(
         seat,
-        _council_payload(context, options, niche_assets, only_ids),
+        _council_payload(context, options, only_ids),
         plan,
-        _dispatcher(surfaced, context=shadow),
         campaign_mock.mock_seat,
     )
-    return review, surfaced
+    return review, set()
 
 
 _RUMINATION_GRAPH = None
@@ -1206,12 +1216,21 @@ def _run_council(context: CampaignContext, shadow: CreatorContext, options: Camp
                  plan: Plan, retrieved: set[str], niche_assets: int,
                  only_ids: Optional[set[str]] = None,
                  seat_reviews: Optional[list] = None) -> tuple[Feedback, list]:
+    def _validate_chair(feedback: Feedback) -> Feedback:
+        # retrieved_ids is deliberately EMPTY, not `retrieved`. The planner's ids
+        # are still in `retrieved`, so passing them would leave a chair citing
+        # chunk:C0421 perfectly legal — the doctrine would be prompt-deep only.
+        # An empty set makes resolve_or_fail the fail-closed backstop; the
+        # doctrine-specific rules and the readable error live in validate_council.
+        feedback = validate_feedback(
+            feedback, plan, shadow, rag, retrieved_ids=set(),
+            niche_asset_count=niche_assets)
+        return validate_council(feedback, seat_reviews=seat_reviews)
+
     return run_council(
-        _council_payload(context, options, niche_assets, only_ids),
+        _council_payload(context, options, only_ids),
         plan,
-        dispatcher_factory=lambda: _dispatcher(retrieved, context=shadow),
-        validate_chair=lambda f: validate_feedback(
-            f, plan, shadow, rag, retrieved_ids=retrieved, niche_asset_count=niche_assets),
+        validate_chair=_validate_chair,
         mock_seat=campaign_mock.mock_seat,
         mock_chair=getattr(campaign_mock, "mock_chair", None) or _chair_merge,
         seat_reviews=seat_reviews,
@@ -1227,7 +1246,9 @@ def _chair_merge(payload: dict[str, Any], dispatcher: Any) -> dict[str, Any]:
     family = objective_family(_OBJECTIVE_MAP[payload["context"]["campaign"]["objective"]])
     elements = ccs_mod.applicable_elements(family)
     seats = payload.get("seats", [])
-    niche = payload.get("niche_asset_count")
+    # The platform seat's refusal has to survive consolidation — if it stops here
+    # the QC report downstream never learns a human policy check is owed.
+    policy_check = any(s.get("policy_check_required") for s in seats)
 
     by_element: dict[str, list[tuple[str, dict]]] = {}
     for seat in seats:
@@ -1273,14 +1294,18 @@ def _chair_merge(payload: dict[str, Any], dispatcher: Any) -> dict[str, Any]:
             "concept_id": concept["id"],
             "element_verdicts": element_verdicts,
             "lenses": {
-                # similar_count 0: this merge ran no similarity query, and a
-                # made-up count would be exactly the fake confidence §7.3 bans.
+                # v3: insufficient_data is now unconditional, not a function of
+                # corpus size. The council judges from doctrine and scans nothing,
+                # so there is no asset count that would earn a real saturation
+                # answer — the old `niche < SATURATION_MIN_ASSETS` test implied
+                # that a big enough corpus would.
                 "saturation": {"similar_count": 0, "source_id": None,
-                               "note": f"{niche} inspiration assets retrievable for this niche",
-                               "insufficient_data": niche is not None and niche < SATURATION_MIN_ASSETS},
+                               "note": "the council judges from doctrine, not from a corpus scan",
+                               "insufficient_data": True},
                 "claims_safety": claims_note,
                 "feasibility": "seats raised no feasibility blocker",
                 "platform_policy": policy_note,
+                "policy_check_required": policy_check,
             },
             "kill_flags": sorted(set(kill_flags)),
             "fixes": [f for seat in seats for f in seat.get("fixes", [])],
