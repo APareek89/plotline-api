@@ -32,7 +32,7 @@ from app import ccs as ccs_mod
 from app import config, store
 from app.agents import campaign_mock
 from app.agents.council import run_council, run_seat
-from app.agents.runner import AgentHardFail, _cited_ids, run_agent
+from app.agents.runner import AgentHardFail, _cited_ids, current_thread, run_agent
 from app.fal_client import MediaError, estimate_cost, generate
 from app.graph import RuminationDeps, RuminationState, build_rumination_graph
 from app.rag_client import RagUnavailable, rag
@@ -205,7 +205,14 @@ def _spawn(thread_id: str, fn: Callable[..., None], *args: Any) -> None:
             return
         _working[thread_id] = "starting the next step"
         _ws(thread_id)["retry"] = (fn, args)
-        threading.Thread(target=fn, args=args, daemon=True).start()
+
+        def _run() -> None:
+            # tag every agent run started by this turn with its thread, so the
+            # observability view can group nodes by conversation
+            current_thread.set(thread_id)
+            fn(*args)
+
+        threading.Thread(target=_run, daemon=True).start()
 
 
 # ------------------------------------------------------------ step 0 + 1-2 --
@@ -694,7 +701,7 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
         )
         store.update_series_context(campaign_id, context.model_dump(mode="json"))
         store.log_artifact_activity(thread_id, "intake", "refined", "conversational turn")
-        _progress_turn(thread_id, context)
+        _progress_turn(thread_id, context, before=current)
     except AgentHardFail as exc:
         _fail(thread_id, "Intake couldn't produce a valid context after retries — nothing was guessed.", str(exc))
     except Exception as exc:
@@ -734,15 +741,29 @@ def _validate_intake(new: CampaignContext, current: CampaignContext) -> Campaign
     return new
 
 
-def _progress_turn(thread_id: str, context: CampaignContext) -> None:
-    """One progress card + at most ONE question for the next missing field."""
+_BLOCK_LABEL = {"product": "Product", "campaign": "Campaign", "brand": "Brand"}
+
+
+def _progress_turn(thread_id: str, context: CampaignContext,
+                   before: Optional[CampaignContext] = None) -> None:
+    """One progress card + at most ONE question for the next missing field.
+
+    The text names WHAT was just filed rather than repeating "Filed." every
+    turn — the transcript is the user's record of the conversation, and four
+    identical lines tell them nothing about which card moved."""
     complete = not missing_blocks(context)
     if complete:
         _say(thread_id, "All three cards are in.",
              [_progress_artifact(context, actions=_actions(("begin", "Start", "primary")))],
              question="Start the rumination — evidence, options, council review?")
     else:
-        _say(thread_id, "Filed.", [_progress_artifact(context)], question=_next_question(context))
+        filled = [
+            _BLOCK_LABEL[b] for b in _BLOCKS
+            if getattr(context, b) is not None
+            and (before is None or getattr(before, b) is None)
+        ]
+        text = f"{', '.join(filled)} filed." if filled else "Noted."
+        _say(thread_id, text, [_progress_artifact(context)], question=_next_question(context))
     store.log_artifact_activity(thread_id, "intake", "proposed",
                                 "complete" if complete else f"next: {_next_field(context)}")
 

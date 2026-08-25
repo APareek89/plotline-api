@@ -492,3 +492,42 @@ def add_performance(body: PerformanceBody) -> dict[str, Any]:
 @app.get("/api/performance")
 def list_performance() -> list[dict[str, Any]]:
     return store.list_performance()
+
+
+# --------------------------------------------------------- observability ----
+# TEMPORARY debug surface. Returns the structured input and output of every
+# agent node that ran for a thread, newest last, so a run can be inspected
+# without tailing a JSONL file. Gated: it exposes full prompts and payloads, so
+# it must never answer in a real deployment.
+
+
+def _debug_enabled() -> bool:
+    return config.MOCK_LLM or _truthy_env("PLOTLINE_DEBUG_OBSERVABILITY")
+
+
+def _truthy_env(name: str) -> bool:
+    import os
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+@app.get("/api/threads/{thread_id}/agent-runs")
+def agent_runs(thread_id: str) -> dict[str, Any]:
+    """Structured node I/O for one thread. Dev-only."""
+    if not _debug_enabled():
+        raise HTTPException(404, "observability is disabled on this deployment")
+    path = config.LOG_DIR / "agent_runs.jsonl"
+    if not path.exists():
+        return {"thread_id": thread_id, "runs": []}
+
+    runs: list[dict[str, Any]] = []
+    buf = ""
+    for line in path.read_text(errors="replace").splitlines(True):
+        buf += line
+        try:
+            row = json.loads(buf)
+        except Exception:
+            continue                       # a pretty-printed record spans lines
+        buf = ""
+        if row.get("thread_id") == thread_id:
+            runs.append(row)
+    return {"thread_id": thread_id, "runs": runs[-60:]}

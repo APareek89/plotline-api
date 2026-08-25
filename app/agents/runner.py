@@ -5,6 +5,7 @@ retries) — this log is the eval + recalibration dataset (§11 guardrails).
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import time
@@ -20,6 +21,23 @@ from app.tools import TOOL_DEFS, ToolDispatcher
 from app.validators import AgentValidationError
 
 T = TypeVar("T", bound=BaseModel)
+
+# Which thread the current node belongs to. A contextvar rather than a parameter
+# so observability does not have to be threaded through every call site (and so
+# a missed call site degrades to "unattributed", never to a crash).
+current_thread: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "plotline_current_thread", default=None)
+
+
+def _clip(value: Any, limit: int = 6000) -> Any:
+    """Cap a logged body. Debug surface, not an archive."""
+    try:
+        text = json.dumps(value, default=str)
+    except Exception:
+        return {"_unserialisable": str(type(value))}
+    if len(text) <= limit:
+        return json.loads(text)
+    return {"_truncated": True, "_bytes": len(text), "preview": text[:limit]}
 
 
 class AgentTruncated(ValueError):
@@ -56,6 +74,15 @@ class RunLog:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     cited_source_ids: list[str] = field(default_factory=list)
     duration_s: float = 0.0
+    # --- observability: which thread this node ran for, and the structured
+    # payload in / object out. Metadata alone (versions, tool calls, timings)
+    # tells you a node ran but not what it was asked or what it decided, which
+    # is the first question every time. Bodies are capped — this is a debug
+    # surface, not an archive.
+    thread_id: Optional[str] = None
+    node_input: Optional[dict[str, Any]] = None
+    node_output: Optional[dict[str, Any]] = None
+    started_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +96,10 @@ class RunLog:
             "tool_calls": self.tool_calls,
             "cited_source_ids": self.cited_source_ids,
             "duration_s": round(self.duration_s, 2),
+            "thread_id": self.thread_id,
+            "node_input": self.node_input,
+            "node_output": self.node_output,
+            "started_at": self.started_at,
         }
 
 
@@ -214,7 +245,9 @@ def run_agent(
     (max 2 retries) → AgentHardFail. Applies to mock output too — the mock
     goes through the same schema + server-side validation path."""
     system, version = build_system(prompt_name, prompt_replacements)
-    log = RunLog(agent=agent, model=model, prompt_version=version, mock=config.MOCK_LLM)
+    log = RunLog(agent=agent, model=model, prompt_version=version, mock=config.MOCK_LLM,
+                 thread_id=current_thread.get(), started_at=time.time())
+    log.node_input = _clip(user_payload)
     started = time.time()
 
     last_error: Optional[str] = None
@@ -264,6 +297,7 @@ def run_agent(
             if dispatcher:
                 log.tool_calls = dispatcher.calls
             log.cited_source_ids = sorted(_cited_ids(obj))
+            log.node_output = _clip(obj.model_dump(mode="json"))
             _persist_log(log)
             return obj, log
         except (ValidationError, AgentValidationError, ValueError, json.JSONDecodeError) as exc:
