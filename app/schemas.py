@@ -383,7 +383,12 @@ class UserEvent(Strict):
     type: Literal["text", "action"]
     text: Optional[str] = None
     action: Optional[UserAction] = None
-    panel_focus: Optional[str] = None  # artifact id while a detail panel is open
+    panel_focus: Optional[str] = None   # artifact id while a detail panel is open
+    # Attachments are DATA. They used to be stringified into `text` as
+    # "[attached images: upl_x]", which meant the intake agent received an
+    # upload id as prose and had to guess what to do with it — so an attached
+    # product shot silently never reached product.image_upload_ids.
+    upload_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _shape(self) -> "UserEvent":

@@ -362,6 +362,11 @@ def handle_event(event: UserEvent) -> None:
         return
 
     text = (event.text or "").strip()
+    if event.upload_ids:
+        # stash on the workspace so the intake turn can hand them to the agent
+        # as structured ids rather than as words inside the message
+        ws["pending_uploads"] = list(dict.fromkeys(
+            list(ws.get("pending_uploads") or []) + list(event.upload_ids)))
     parsed = _parse(stage, text, ws, panel_focus=event.panel_focus)
     if parsed is None:
         _hint(event.thread_id, _HINTS.get(stage, "Tell me what to change, or use the buttons on the cards."))
@@ -383,6 +388,13 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
         return
 
     # ---- step 1: path choice
+    if stage == "paths" and event == "brief":
+        ws["sub_mode"] = "conversational"
+        store.set_thread_stage(thread_id, "cards")
+        store.log_artifact_activity(thread_id, "paths", "approved", "brief-first")
+        _spawn(thread_id, _intake_turn, thread_id, campaign_id, extra if isinstance(extra, str) else "")
+        return
+
     if stage == "paths" and event in ("path_structured", "path_conversational"):
         ws["sub_mode"] = "structured" if event == "path_structured" else "conversational"
         store.set_thread_stage(thread_id, "cards")
@@ -560,7 +572,10 @@ def _parse(stage: str, text: str, ws: dict[str, Any], panel_focus: Optional[str]
             return {"event": "path_structured", "artifact_id": "paths"}
         if any(w in low for w in ("help", "define", "ask me", "conversation", "path b")) or low.strip() == "b":
             return {"event": "path_conversational", "artifact_id": "paths"}
-        return None
+        # Anything else is the user ALREADY briefing us. Demanding they first
+        # pick a path is asking a question they have just answered by typing —
+        # take the message as the opening conversational turn instead.
+        return {"event": "brief", "artifact_id": "paths", "extra": text}
 
     if stage == "cards":
         if re.match(r"^\s*(start|begin|go|ruminate|ready)\b", low):
@@ -701,6 +716,9 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
                 "message": text,
                 "transcript": _transcript(thread_id),
                 "filled": cards_done(current),
+                # ids of images the user attached to this message or an earlier
+                # one; the agent puts them in product.image_upload_ids
+                "attached_upload_ids": list(_ws(thread_id).get("pending_uploads") or []),
             },
             schema=CampaignContext,
             dispatcher=None,
@@ -711,6 +729,7 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
             # app/agents/campaign_mock.py the day it exists).
             mock_fn=getattr(campaign_mock, "mock_campaign_intake", None),
         )
+        context = _apply_pending_uploads(thread_id, context)
         store.update_series_context(campaign_id, context.model_dump(mode="json"))
         store.log_artifact_activity(thread_id, "intake", "refined", "conversational turn")
         _progress_turn(thread_id, context, before=current, conversational=True)
@@ -754,6 +773,24 @@ def _validate_intake(new: CampaignContext, current: CampaignContext) -> Campaign
 
 
 _BLOCK_LABEL = {"product": "Product", "campaign": "Campaign", "brand": "Brand"}
+
+
+def _apply_pending_uploads(thread_id: str, context: CampaignContext) -> CampaignContext:
+    """Attach images the user sent to whatever product block now exists.
+
+    The agent is TOLD to copy attached_upload_ids into product.image_upload_ids,
+    but an attachment is the user's file — losing it because a model forgot is
+    not an acceptable failure mode. This makes it server-side truth: the ids are
+    held on the workspace until there is a product to put them on, then applied
+    once and cleared."""
+    ws = _ws(thread_id)
+    pending = list(ws.get("pending_uploads") or [])
+    if not pending or context.product is None:
+        return context
+    merged = list(dict.fromkeys(list(context.product.image_upload_ids) + pending))[:8]
+    ws["pending_uploads"] = []
+    return context.model_copy(
+        update={"product": context.product.model_copy(update={"image_upload_ids": merged})})
 
 
 def _autofill_brand(campaign_id: str, context: CampaignContext) -> CampaignContext:

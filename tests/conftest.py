@@ -14,6 +14,15 @@ REAL_HEALTH = RagClient.health
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.db")
+    # LOG_DIR too, not just the database. Tests deliberately drive agents into
+    # failure (bad_mock returns an invalid CampaignOptions to prove retries are
+    # bounded), and without this those runs append to the REAL
+    # data/runs/agent_runs.jsonl — where the observability view then shows them
+    # as production failures. A test that pollutes the log it is not supposed to
+    # touch is a leak, not a side effect.
+    logs = tmp_path / "runs"
+    logs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(config, "LOG_DIR", logs)
     store._conn = None
     yield
     store._conn = None

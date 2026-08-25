@@ -10,6 +10,7 @@ council, real store.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -1134,3 +1135,61 @@ def test_an_unconfirmed_claims_list_is_candidates_not_permissions():
     with pytest.raises(AgentValidationError) as exc:
         campaign._validate_detail(detail, context, None)
     assert "NOT in the confirmed approved_claims" in str(exc.value)
+
+
+def test_the_test_suite_never_writes_to_the_real_agent_run_log():
+    """Tests drive agents into deliberate failure. Those runs must not land in
+    data/runs/agent_runs.jsonl — the observability view reads that file, and a
+    fixture's invalid output showing up there reads as a production incident.
+    (It did: 23 'campaign_planner.test' failures accumulated before this.)"""
+    from app import config as cfg
+
+    real = Path(__file__).resolve().parent.parent / "data" / "runs"
+    assert Path(cfg.LOG_DIR).resolve() != real.resolve(), (
+        "LOG_DIR is not isolated — this run is appending to the real agent log"
+    )
+
+
+def test_a_brief_typed_at_the_path_step_is_taken_not_refused():
+    """The user typed their whole brief at the two-path card and got 'Didn't
+    catch a campaign command.' Asking them to pick a path AFTER they have
+    described the campaign is asking a question they just answered."""
+    campaign_id = campaign.start_campaign("Brief first")["campaign_id"]
+    thread_id = campaign._campaign_thread_id(campaign_id)
+    ws = campaign._ws(thread_id)
+
+    parsed = campaign._parse("paths", "generate campaign for this product which is for parties", ws)
+    assert parsed is not None, "a real brief was refused at the paths step"
+    assert parsed["event"] == "brief"
+
+    # the explicit path words still work
+    assert campaign._parse("paths", "details", ws)["event"] == "path_structured"
+    assert campaign._parse("paths", "help me", ws)["event"] == "path_conversational"
+
+
+def test_an_attached_image_survives_until_there_is_a_product_to_put_it_on():
+    """Attachments used to be stringified into the message ('[attached images:
+    upl_x]'), so the agent saw an upload id as prose and nothing told it what to
+    do — the file was silently dropped. They are data now, and the server
+    applies them itself rather than trusting the model to copy them."""
+    campaign_id = campaign.start_campaign("Attachment survives")["campaign_id"]
+    thread_id = campaign._campaign_thread_id(campaign_id)
+
+    # message 1: an image, but nothing that can build a product block yet
+    campaign.handle_event(UserEvent(thread_id=thread_id, type="text",
+                                    text="a campaign for this, it is for parties",
+                                    upload_ids=["upl_held"]))
+    assert campaign._ws(thread_id)["pending_uploads"] == ["upl_held"]
+
+    # later, a product exists — the held id is applied exactly once and cleared
+    ctx = CampaignContext.model_validate({
+        "name": "Attachment survives",
+        "product": {"name": "Aera", "description": "d", "image_upload_ids": []},
+        "campaign": None, "brand": None})
+    applied = campaign._apply_pending_uploads(thread_id, ctx)
+    assert applied.product.image_upload_ids == ["upl_held"]
+    assert campaign._ws(thread_id)["pending_uploads"] == []
+
+    # and it is not applied twice
+    again = campaign._apply_pending_uploads(thread_id, applied)
+    assert again.product.image_upload_ids == ["upl_held"]
