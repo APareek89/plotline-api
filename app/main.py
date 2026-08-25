@@ -64,6 +64,9 @@ def health() -> dict[str, Any]:
         "service": "plotline-api",
         "mock_llm": config.MOCK_LLM,
         "media_mock": config.MOCK_MEDIA,
+        # real mode with no key is a broken deployment — say so here rather
+        # than letting the first campaign discover it
+        "llm_unavailable": config.llm_unavailable_reason(),
         "models": {
             "planner": config.PLANNER_MODEL,
             "feedback": config.FEEDBACK_MODEL,
@@ -373,6 +376,9 @@ def claims_extract(campaign_id: str) -> dict[str, Any]:
 def start_campaign(campaign_id: str) -> dict[str, Any]:
     """Step 3 kick-off: all cards ✓ → rumination runs in the thread."""
     series = _campaign_or_404(campaign_id)
+    blocked = config.llm_unavailable_reason()
+    if blocked:
+        raise HTTPException(503, blocked)
     missing = campaign.missing_blocks(series["context"])
     if missing:
         raise HTTPException(422, f"Campaign context incomplete — still needed: {', '.join(missing)}")

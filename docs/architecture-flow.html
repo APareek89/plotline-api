@@ -55,6 +55,112 @@ flowchart LR
     ORCH --&gt;|"tool-use loop"| ANTH
     ORCH --&gt; SQL
 </pre>
+<h2>granularity: full</h2>
+<pre class="mermaid">%% granularity: full
+%% files: app/campaign.py, app/agents/council.py, app/agents/runner.py, app/tools.py, app/validators.py, app/ccs.py, app/threadkit.py, app/fal_client.py, app/rag_client.py, app/main.py, prompts/shared_policy.md, prompts/campaign_intake.md, prompts/campaign_planner.md, prompts/council/seat_performance.md, prompts/council/seat_brand.md, prompts/council/seat_platform.md, prompts/council/chair.md
+%% Marketing Studio — complete agentic flow with the file that owns each step.
+%% AGENT = an LLM call. FUNCTION = deterministic server code. Every AGENT box
+%% names its prompt file; every prompt is prefixed with shared_policy.md.
+
+flowchart TB
+
+subgraph ENTRY["Step 0-2 · context capture — app/campaign.py"]
+  direction TB
+  NAME["FUNCTION start_campaign()&lt;br/&gt;campaign.py:204 · stage=name&lt;br/&gt;POST /api/campaigns"]
+  PATHS["FUNCTION paths turn&lt;br/&gt;stage=paths · 2 path cards"]
+  PATHA["FUNCTION save_block() x3&lt;br/&gt;PUT /api/campaigns/{id}/blocks/{block}&lt;br/&gt;product · campaign · brand"]
+  PATHB["AGENT campaign_intake&lt;br/&gt;prompts/campaign_intake.md&lt;br/&gt;model=config.INTAKE_MODEL (haiku)&lt;br/&gt;schema=CampaignContext&lt;br/&gt;campaign.py:675"]
+  VINT["FUNCTION _validate_intake()&lt;br/&gt;campaign.py:706&lt;br/&gt;may NOT rename, drop a block,&lt;br/&gt;or self-confirm claims"]
+  BRAND["FUNCTION brand_extract&lt;br/&gt;app/brand_extract.py&lt;br/&gt;SYSTEM PIPELINE, never an agent tool&lt;br/&gt;SSRF guard re-checked per redirect"]
+  CLAIMS{"user one-tap&lt;br/&gt;claims_confirmed?"}
+  NAME --&gt; PATHS
+  PATHS --&gt;|"path a: forms"| PATHA
+  PATHS --&gt;|"path b: chat"| PATHB --&gt; VINT --&gt; PATHA
+  PATHA -.-&gt;|"optional URL / policy doc"| BRAND -.-&gt; PATHA
+  PATHA --&gt; CLAIMS
+end
+
+CLAIMS --&gt;|"no"| BLOCKED["FUNCTION missing_blocks()&lt;br/&gt;campaign.py:283 · start refused 422"]
+CLAIMS --&gt;|"yes (may be an EMPTY list)"| START
+
+START["POST /api/campaigns/{id}/start&lt;br/&gt;main.py · 503 if no ANTHROPIC_API_KEY&lt;br/&gt;config.llm_unavailable_reason()"]
+
+subgraph RUM["Step 3 · rumination — campaign.py _ruminate()"]
+  direction TB
+  RAG["FUNCTION rag.ensure_ready()&lt;br/&gt;app/rag_client.py&lt;br/&gt;RoutingRag: chunk:* -&gt; :8788&lt;br/&gt;asset:/stat:/trend:* -&gt; :8787"]
+  PLAN["AGENT campaign_planner (pass=options)&lt;br/&gt;prompts/campaign_planner.md v1.3.0&lt;br/&gt;model=config.PLANNER_MODEL (sonnet)&lt;br/&gt;schema=CampaignOptions&lt;br/&gt;campaign.py:911"]
+  VOPT["FUNCTION _validate_options()&lt;br/&gt;campaign.py:916&lt;br/&gt;R2 receipt lexicon + R3 banned&lt;br/&gt;+ 2-layer citation check"]
+  RAG --&gt; PLAN --&gt; VOPT
+end
+
+subgraph COUNCIL["Council — app/agents/council.py (SEATS = performance, brand, platform)"]
+  direction TB
+  S1["AGENT council.performance&lt;br/&gt;prompts/council/seat_performance.md&lt;br/&gt;schema=SeatReview"]
+  S2["AGENT council.brand&lt;br/&gt;prompts/council/seat_brand.md&lt;br/&gt;schema=SeatReview"]
+  S3["AGENT council.platform&lt;br/&gt;prompts/council/seat_platform.md&lt;br/&gt;schema=SeatReview"]
+  BLIND["each seat gets a FRESH dispatcher&lt;br/&gt;= its own retrieval slice.&lt;br/&gt;No seat sees another seat or&lt;br/&gt;the planner's self-ratings"]
+  CHAIR["AGENT council.chair&lt;br/&gt;prompts/council/chair.md&lt;br/&gt;schema=Feedback (UNCHANGED v1)&lt;br/&gt;council.py:50"]
+  VFB["FUNCTION validate_feedback()&lt;br/&gt;app/validators.py&lt;br/&gt;mandatory lens coverage"]
+  CCS["FUNCTION ccs.compute_ccs()&lt;br/&gt;app/ccs.py — server recomputes;&lt;br/&gt;the chair's ccs_final is advisory"]
+  BLIND --&gt; S1 --&gt; S2 --&gt; S3 --&gt; CHAIR --&gt; VFB --&gt; CCS
+end
+
+VOPT --&gt; BLIND
+
+CCS --&gt; FLAG{"_flagged_ids()&lt;br/&gt;app/threadkit.py&lt;br/&gt;kill-flagged or below gate?"}
+FLAG --&gt;|"yes — ONE pass only"| REFINE["AGENT campaign_planner (refine)&lt;br/&gt;agent=campaign_planner.options_refine&lt;br/&gt;untouched options must return&lt;br/&gt;BYTE-IDENTICAL"]
+REFINE --&gt; RECOUNCIL["council re-run on the subset"] --&gt; MERGE["FUNCTION _merge_feedback()&lt;br/&gt;app/threadkit.py"]
+FLAG --&gt;|"no"| OPTIONS
+MERGE --&gt; OPTIONS
+
+OPTIONS["stage=options · 2-3 option cards&lt;br/&gt;kill-flagged ones WITHHELD&lt;br/&gt;ws['killed'] is state, not just UI"]
+
+OPTIONS --&gt;|"user approves one"| TPL
+TPL{"stage=templates&lt;br/&gt;GET /api/templates&lt;br/&gt;manifest empty?"}
+TPL --&gt;|"empty — honest skip"| DETAIL
+TPL --&gt;|"user picks"| DETAIL
+
+DETAIL["AGENT campaign_planner (pass=detail)&lt;br/&gt;prompts/campaign_planner.md&lt;br/&gt;schema=CampaignDetail&lt;br/&gt;campaign.py:1255"]
+VDET["FUNCTION _validate_detail()&lt;br/&gt;campaign.py:1268 — THE COMPLIANCE GATE&lt;br/&gt;claims_used ⊆ CONFIRMED approved_claims&lt;br/&gt;no banned words · style_ref matches pick"]
+DETAIL --&gt; VDET
+VDET --&gt;|"user names a change"| REF2["AGENT campaign_planner (pass=refine)&lt;br/&gt;edits ONLY what was named,&lt;br/&gt;version+1, changes[] says why"] --&gt; VDET
+
+VDET --&gt;|"accepted"| CONFIRM
+
+subgraph GEN["Step 7-8 · generation — cost before spend"]
+  direction TB
+  CONFIRM["FUNCTION model-confirm card&lt;br/&gt;schema=ModelConfirm&lt;br/&gt;cost_usd shown BEFORE any render&lt;br/&gt;media model named EXACTLY here"]
+  ASK{"single or variants?&lt;br/&gt;NEVER self-answered"}
+  PROMPTS["asset_prompt artifacts&lt;br/&gt;POST /api/threads/{id}/prompts/{slot}&lt;br/&gt;edited text used VERBATIM&lt;br/&gt;threadkit._pending()['prompts']"]
+  FAL["FUNCTION fal generate()&lt;br/&gt;app/fal_client.py&lt;br/&gt;nano-banana-2 / veo3.1 / kokoro&lt;br/&gt;bounded retry; MediaError(policy=)"]
+  SET["creative_set · per-asset&lt;br/&gt;accept / re-roll ONLY&lt;br/&gt;never the whole deliverable"]
+  CONFIRM --&gt; ASK --&gt; PROMPTS --&gt; FAL --&gt; SET
+end
+
+SET --&gt; ADCARD["FUNCTION Ad Card&lt;br/&gt;schema=AdCard + ratio spec-table validator&lt;br/&gt;total_cost_credits == store.campaign_spend() / 0.10"]
+ADCARD --&gt; LIVE["POST /api/ad-cards/{id}/mark-live&lt;br/&gt;status=live · results nudge"]
+
+subgraph CROSS["Cross-cutting — every AGENT box above goes through these"]
+  direction TB
+  RUNNER["app/agents/runner.py :: run_agent()&lt;br/&gt;system = shared_policy.md + the prompt file&lt;br/&gt;STREAMING mandatory · max_tokens=32000&lt;br/&gt;AgentTruncated on stop_reason=max_tokens&lt;br/&gt;2 validation retries then AgentHardFail&lt;br/&gt;raw failing body -&gt; data/runs/raw/"]
+  TOOLS["app/tools.py :: ToolDispatcher&lt;br/&gt;search_corpus · search_inspiration&lt;br/&gt;get_benchmarks · get_trends · get_profile&lt;br/&gt;platform hard-filtered to the context"]
+  LOG["data/runs/agent_runs.jsonl&lt;br/&gt;prompt_version · tool_calls&lt;br/&gt;cited_source_ids · validation_errors"]
+  RUNNER --&gt; TOOLS
+  RUNNER --&gt; LOG
+end
+
+classDef agent fill:#4353FF,stroke:#2B37C4,color:#fff
+classDef fn fill:#1E242E,stroke:#2A3140,color:#fff
+classDef gate fill:#E8A13C,stroke:#B87B23,color:#1B1B1F
+classDef stop fill:#E5312B,stroke:#A8221D,color:#fff
+classDef ok fill:#39C36A,stroke:#248C48,color:#1B1B1F
+
+class PATHB,PLAN,S1,S2,S3,CHAIR,DETAIL,REF2,REFINE agent
+class NAME,PATHS,PATHA,BRAND,VINT,RAG,VOPT,VFB,CCS,MERGE,PROMPTS,FAL,SET,CONFIRM,ADCARD,RUNNER,TOOLS,LOG,BLIND,RECOUNCIL,START fn
+class CLAIMS,FLAG,TPL,ASK gate
+class BLOCKED stop
+class LIVE ok
+</pre>
 <script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
 mermaid.initialize({ startOnLoad:false, securityLevel:"loose", theme:"base",

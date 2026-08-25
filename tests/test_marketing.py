@@ -881,3 +881,82 @@ def test_a_storyline_that_only_gestures_at_proof_still_fails_r2():
 
     receipted = "a split screen shows the same monitor before and after, with a -40% callout"
     assert any(cue in receipted.lower() for cue in _RECEIPT_CUES)
+
+
+def test_the_policy_document_is_optional_and_confirming_zero_claims_is_allowed():
+    """The Brand Policy Document is optional, so a brand whose product text has
+    nothing extractable must still be able to finish the Brand card. Confirming
+    an EMPTY list is a legitimate answer, not a loophole: with no approved
+    claim, every persuasion claim is unmapped and the council kill-flags it —
+    which is the invariant working harder, not weaker."""
+    campaign_id = campaign.start_campaign("No policy doc")["campaign_id"]
+
+    # no policy_upload_id anywhere, and an empty confirmed list
+    campaign.save_block(campaign_id, "brand", {
+        "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
+        "approved_claims": [], "banned_words": [], "claims_confirmed": True,
+    })
+    record = main.get_campaign(campaign_id)
+    assert record["context"]["brand"]["policy_upload_id"] is None
+    assert record["cards_done"]["brand"] is True          # the card completes
+
+    # extraction without a policy doc still runs and says what it did
+    out = main.claims_extract(campaign_id)
+    assert any("policy" in note.lower() for note in out["notes"])
+
+    # and the campaign is startable once the other two cards are filled
+    campaign.save_block(campaign_id, "product", PRODUCT)
+    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    assert campaign.missing_blocks(main.get_campaign(campaign_id)["context"]) == []
+
+
+def test_an_unmapped_claim_still_kill_flags_when_the_approved_list_is_empty():
+    """The floor the previous test stands on: confirming zero claims must not
+    become a way to smuggle claims through unchecked."""
+    campaign_id = campaign.start_campaign("Empty list floor")["campaign_id"]
+    campaign.save_block(campaign_id, "brand", {
+        "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
+        "approved_claims": [], "banned_words": [], "claims_confirmed": True,
+    })
+    campaign.save_block(campaign_id, "product", PRODUCT)
+    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    context = CampaignContext.model_validate(main.get_campaign(campaign_id)["context"])
+    assert context.brand.approved_claims == []
+
+    # a detail that states ANY claim is rejected, because none is mapped
+    detail = CampaignDetail(
+        creative_type=context.campaign.creative_type,
+        shots=[{"slot": "slide_01", "duration_s": None,
+                "visual_prompt": "a split screen of the product", "vo_or_copy": "see it"}],
+        copy_primary="c", cta="Shop",
+        claims_used=["Independently tested to cut glare by 40%"],
+        style_ref=None, version=1, changes=[],
+    )
+    with pytest.raises(AgentValidationError) as exc:
+        campaign._validate_detail(detail, context, None)
+    assert "NOT in the confirmed approved_claims" in str(exc.value)
+
+
+def test_real_mode_without_a_key_is_refused_up_front_not_discovered_mid_run(monkeypatch):
+    """MOCK_LLM=0 with no ANTHROPIC_API_KEY is a broken deployment. It must be
+    named at the door — /health and the start route — instead of dying deep in
+    the SDK on the first agent call, which reads as a generic 500."""
+    monkeypatch.setattr(config, "MOCK_LLM", False)
+    monkeypatch.setattr(config, "LLM_KEY_PRESENT", False)
+
+    reason = config.llm_unavailable_reason()
+    assert reason and "ANTHROPIC_API_KEY" in reason
+    assert main.health()["llm_unavailable"] == reason
+
+    campaign_id = campaign.start_campaign("No key")["campaign_id"]
+    campaign.save_block(campaign_id, "product", PRODUCT)
+    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    campaign.save_block(campaign_id, "brand", BRAND)
+    with pytest.raises(HTTPException) as exc:
+        main.start_campaign(campaign_id)
+    assert exc.value.status_code == 503          # not a 500, and not a silent mock
+
+    # with a key present the door is open again
+    monkeypatch.setattr(config, "LLM_KEY_PRESENT", True)
+    assert config.llm_unavailable_reason() is None
+    assert main.health()["llm_unavailable"] is None

@@ -1,0 +1,104 @@
+%% granularity: full
+%% files: app/campaign.py, app/agents/council.py, app/agents/runner.py, app/tools.py, app/validators.py, app/ccs.py, app/threadkit.py, app/fal_client.py, app/rag_client.py, app/main.py, prompts/shared_policy.md, prompts/campaign_intake.md, prompts/campaign_planner.md, prompts/council/seat_performance.md, prompts/council/seat_brand.md, prompts/council/seat_platform.md, prompts/council/chair.md
+%% Marketing Studio — complete agentic flow with the file that owns each step.
+%% AGENT = an LLM call. FUNCTION = deterministic server code. Every AGENT box
+%% names its prompt file; every prompt is prefixed with shared_policy.md.
+
+flowchart TB
+
+subgraph ENTRY["Step 0-2 · context capture — app/campaign.py"]
+  direction TB
+  NAME["FUNCTION start_campaign()<br/>campaign.py:204 · stage=name<br/>POST /api/campaigns"]
+  PATHS["FUNCTION paths turn<br/>stage=paths · 2 path cards"]
+  PATHA["FUNCTION save_block() x3<br/>PUT /api/campaigns/{id}/blocks/{block}<br/>product · campaign · brand"]
+  PATHB["AGENT campaign_intake<br/>prompts/campaign_intake.md<br/>model=config.INTAKE_MODEL (haiku)<br/>schema=CampaignContext<br/>campaign.py:675"]
+  VINT["FUNCTION _validate_intake()<br/>campaign.py:706<br/>may NOT rename, drop a block,<br/>or self-confirm claims"]
+  BRAND["FUNCTION brand_extract<br/>app/brand_extract.py<br/>SYSTEM PIPELINE, never an agent tool<br/>SSRF guard re-checked per redirect"]
+  CLAIMS{"user one-tap<br/>claims_confirmed?"}
+  NAME --> PATHS
+  PATHS -->|"path a: forms"| PATHA
+  PATHS -->|"path b: chat"| PATHB --> VINT --> PATHA
+  PATHA -.->|"optional URL / policy doc"| BRAND -.-> PATHA
+  PATHA --> CLAIMS
+end
+
+CLAIMS -->|"no"| BLOCKED["FUNCTION missing_blocks()<br/>campaign.py:283 · start refused 422"]
+CLAIMS -->|"yes (may be an EMPTY list)"| START
+
+START["POST /api/campaigns/{id}/start<br/>main.py · 503 if no ANTHROPIC_API_KEY<br/>config.llm_unavailable_reason()"]
+
+subgraph RUM["Step 3 · rumination — campaign.py _ruminate()"]
+  direction TB
+  RAG["FUNCTION rag.ensure_ready()<br/>app/rag_client.py<br/>RoutingRag: chunk:* -> :8788<br/>asset:/stat:/trend:* -> :8787"]
+  PLAN["AGENT campaign_planner (pass=options)<br/>prompts/campaign_planner.md v1.3.0<br/>model=config.PLANNER_MODEL (sonnet)<br/>schema=CampaignOptions<br/>campaign.py:911"]
+  VOPT["FUNCTION _validate_options()<br/>campaign.py:916<br/>R2 receipt lexicon + R3 banned<br/>+ 2-layer citation check"]
+  RAG --> PLAN --> VOPT
+end
+
+subgraph COUNCIL["Council — app/agents/council.py (SEATS = performance, brand, platform)"]
+  direction TB
+  S1["AGENT council.performance<br/>prompts/council/seat_performance.md<br/>schema=SeatReview"]
+  S2["AGENT council.brand<br/>prompts/council/seat_brand.md<br/>schema=SeatReview"]
+  S3["AGENT council.platform<br/>prompts/council/seat_platform.md<br/>schema=SeatReview"]
+  BLIND["each seat gets a FRESH dispatcher<br/>= its own retrieval slice.<br/>No seat sees another seat or<br/>the planner's self-ratings"]
+  CHAIR["AGENT council.chair<br/>prompts/council/chair.md<br/>schema=Feedback (UNCHANGED v1)<br/>council.py:50"]
+  VFB["FUNCTION validate_feedback()<br/>app/validators.py<br/>mandatory lens coverage"]
+  CCS["FUNCTION ccs.compute_ccs()<br/>app/ccs.py — server recomputes;<br/>the chair's ccs_final is advisory"]
+  BLIND --> S1 --> S2 --> S3 --> CHAIR --> VFB --> CCS
+end
+
+VOPT --> BLIND
+
+CCS --> FLAG{"_flagged_ids()<br/>app/threadkit.py<br/>kill-flagged or below gate?"}
+FLAG -->|"yes — ONE pass only"| REFINE["AGENT campaign_planner (refine)<br/>agent=campaign_planner.options_refine<br/>untouched options must return<br/>BYTE-IDENTICAL"]
+REFINE --> RECOUNCIL["council re-run on the subset"] --> MERGE["FUNCTION _merge_feedback()<br/>app/threadkit.py"]
+FLAG -->|"no"| OPTIONS
+MERGE --> OPTIONS
+
+OPTIONS["stage=options · 2-3 option cards<br/>kill-flagged ones WITHHELD<br/>ws['killed'] is state, not just UI"]
+
+OPTIONS -->|"user approves one"| TPL
+TPL{"stage=templates<br/>GET /api/templates<br/>manifest empty?"}
+TPL -->|"empty — honest skip"| DETAIL
+TPL -->|"user picks"| DETAIL
+
+DETAIL["AGENT campaign_planner (pass=detail)<br/>prompts/campaign_planner.md<br/>schema=CampaignDetail<br/>campaign.py:1255"]
+VDET["FUNCTION _validate_detail()<br/>campaign.py:1268 — THE COMPLIANCE GATE<br/>claims_used ⊆ CONFIRMED approved_claims<br/>no banned words · style_ref matches pick"]
+DETAIL --> VDET
+VDET -->|"user names a change"| REF2["AGENT campaign_planner (pass=refine)<br/>edits ONLY what was named,<br/>version+1, changes[] says why"] --> VDET
+
+VDET -->|"accepted"| CONFIRM
+
+subgraph GEN["Step 7-8 · generation — cost before spend"]
+  direction TB
+  CONFIRM["FUNCTION model-confirm card<br/>schema=ModelConfirm<br/>cost_usd shown BEFORE any render<br/>media model named EXACTLY here"]
+  ASK{"single or variants?<br/>NEVER self-answered"}
+  PROMPTS["asset_prompt artifacts<br/>POST /api/threads/{id}/prompts/{slot}<br/>edited text used VERBATIM<br/>threadkit._pending()['prompts']"]
+  FAL["FUNCTION fal generate()<br/>app/fal_client.py<br/>nano-banana-2 / veo3.1 / kokoro<br/>bounded retry; MediaError(policy=)"]
+  SET["creative_set · per-asset<br/>accept / re-roll ONLY<br/>never the whole deliverable"]
+  CONFIRM --> ASK --> PROMPTS --> FAL --> SET
+end
+
+SET --> ADCARD["FUNCTION Ad Card<br/>schema=AdCard + ratio spec-table validator<br/>total_cost_credits == store.campaign_spend() / 0.10"]
+ADCARD --> LIVE["POST /api/ad-cards/{id}/mark-live<br/>status=live · results nudge"]
+
+subgraph CROSS["Cross-cutting — every AGENT box above goes through these"]
+  direction TB
+  RUNNER["app/agents/runner.py :: run_agent()<br/>system = shared_policy.md + the prompt file<br/>STREAMING mandatory · max_tokens=32000<br/>AgentTruncated on stop_reason=max_tokens<br/>2 validation retries then AgentHardFail<br/>raw failing body -> data/runs/raw/"]
+  TOOLS["app/tools.py :: ToolDispatcher<br/>search_corpus · search_inspiration<br/>get_benchmarks · get_trends · get_profile<br/>platform hard-filtered to the context"]
+  LOG["data/runs/agent_runs.jsonl<br/>prompt_version · tool_calls<br/>cited_source_ids · validation_errors"]
+  RUNNER --> TOOLS
+  RUNNER --> LOG
+end
+
+classDef agent fill:#4353FF,stroke:#2B37C4,color:#fff
+classDef fn fill:#1E242E,stroke:#2A3140,color:#fff
+classDef gate fill:#E8A13C,stroke:#B87B23,color:#1B1B1F
+classDef stop fill:#E5312B,stroke:#A8221D,color:#fff
+classDef ok fill:#39C36A,stroke:#248C48,color:#1B1B1F
+
+class PATHB,PLAN,S1,S2,S3,CHAIR,DETAIL,REF2,REFINE agent
+class NAME,PATHS,PATHA,BRAND,VINT,RAG,VOPT,VFB,CCS,MERGE,PROMPTS,FAL,SET,CONFIRM,ADCARD,RUNNER,TOOLS,LOG,BLIND,RECOUNCIL,START fn
+class CLAIMS,FLAG,TPL,ASK gate
+class BLOCKED stop
+class LIVE ok

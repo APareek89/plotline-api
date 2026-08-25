@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from typing import Optional
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -49,6 +50,22 @@ INTAKE_VISION_MODEL = os.environ.get("PLOTLINE_INTAKE_VISION_MODEL", "claude-son
 # orchestrator + validators + retrieval still run. For UI dev and tests
 # without an API key. Real mode needs ANTHROPIC_API_KEY in .env.
 MOCK_LLM = os.environ.get("MOCK_LLM", "0") == "1"
+
+# Real mode with no key is a deployment mistake, not a runtime surprise. Without
+# this the first agent call dies deep inside the SDK and the user sees a generic
+# 500 — the same class of dishonesty as parsing a truncated response.
+LLM_KEY_PRESENT = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+
+
+def llm_unavailable_reason() -> Optional[str]:
+    """Why a real agent call cannot be made right now, or None if it can."""
+    if MOCK_LLM:
+        return None
+    if not LLM_KEY_PRESENT:
+        return ("MOCK_LLM=0 but ANTHROPIC_API_KEY is not set on this deployment — "
+                "the agents cannot run. Set the key, or set MOCK_LLM=1 to use "
+                "deterministic sample output.")
+    return None
 
 MAX_VALIDATION_RETRIES = 2  # §3.9: re-run with the error, max 2 retries
 

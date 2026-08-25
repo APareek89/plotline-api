@@ -296,24 +296,24 @@ def test_generation_retries_are_bounded_on_citation_failure():
     bounded number of times (§3.9: max 2 retries) and then hard-fails —
     citations are never silently stripped."""
     from app.agents.runner import AgentHardFail, run_agent
-    from app.schemas import CreatorContext
+    from app.schemas import CampaignOptions
 
     calls = {"n": 0}
 
     def bad_mock(payload, dispatcher):
         calls["n"] += 1
-        return {"clarifying_questions": ["a?", "b?", "c?", "d?"]}  # always invalid
+        return {"options": [{"option_id": "o1"}]}  # always invalid — missing required fields
 
     with pytest.raises(AgentHardFail):
         run_agent(
-            agent="intake.test",
-            prompt_name="intake",
+            agent="campaign_planner.test",
+            prompt_name="campaign_planner",
             model="mock",
             user_payload={},
-            schema=CreatorContext,
-            validate=lambda c: __import__("app.validators", fromlist=["validate_intake"]).validate_intake(c),
+            schema=CampaignOptions,
             mock_fn=bad_mock,
             use_tools=False,
+            prompt_replacements={"receipt_cues": "\"on-screen\""},
         )
     assert calls["n"] == config.MAX_VALIDATION_RETRIES + 1  # bounded, no infinite loop
 
