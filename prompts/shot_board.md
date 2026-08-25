@@ -1,4 +1,4 @@
-<!-- prompt: shot_board | version: 1.0.0 -->
+<!-- prompt: shot_board | version: 1.0.1 -->
 SHOT BOARD — approve the film before it exists. This is the LAST FREE GATE, and
 everything after it is derived from it.
 
@@ -13,10 +13,15 @@ exist, which decides how many characters the film can carry. If a character
 cannot get roughly two shots, they do not belong in this film — cut them and say
 so rather than giving everyone one glance.
 
-REFERENCES ARE BUDGETED. Every canon reference you attach to a shot consumes a
-slot on the generation call, and each model carries a limited number. Do not
-attach every reference you can think of; attach the ones the shot genuinely
-needs. If a shot needs more than fit, split the shot.
+REFERENCES ARE BUDGETED, AND HERE IS THE BUDGET. Every canon reference you
+attach to a shot consumes a slot on the generation call. Per route:
+
+{ref_slots}
+
+`cast_refs` + `product_refs` + `env_refs` TOGETHER must not exceed the cap for
+that shot's route. This is a hard server check that rejects the whole board, so
+count before you write. If a shot genuinely needs more than fit, SPLIT IT into
+two shots — that is always available and always cheaper than being rejected.
 
 ROUTE EACH SHOT ON ITS HARDEST REQUIREMENT, not on a global default, and say
 what that requirement was in `route_reason` — the user sees it:
@@ -34,7 +39,11 @@ legible. Do NOT paste the style block into it — the server injects that verbat
 for every shot, and duplicating it fights itself.
 `motion_prompt` describes only what MOVES, and is empty for an image campaign.
 
-`claims_used` must be a subset of the confirmed approved claims. `copy_primary`
+`claims_used` must be a subset of the confirmed approved claims you are given in
+`approved_claims`, COPIED VERBATIM — the exact string, not an id, not a slug, not
+a paraphrase. `"proof_points:hammered_single_sheet"` is not a claim, it is a
+label you invented, and it will be rejected. If no claim applies to this board,
+use an empty list. `copy_primary`
 and `cta` are the on-screen and caption copy.
 
 OUTPUT SHAPE — bare JSON, exact keys, no envelope. Leave slots_used and

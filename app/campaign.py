@@ -87,6 +87,7 @@ from app.validators import (
     _RECEIPT_CUES,
     resolve_or_fail,
     build_qc_report,
+    ref_slots_text,
     script_thresholds_text,
     validate_canon_sheet,
     validate_council,
@@ -2862,8 +2863,14 @@ def _board_turn(thread_id: str, campaign_id: str) -> None:
             user_payload={"brief": brief, "option": ws.get("approved_option_json"),
                           "hook_rack": ws.get("hook_rack"),
                           "style_block_id": style.get("id"),
-                          "available_routes": sorted(config.MEDIA_MODELS)},
+                          "available_routes": sorted(config.MEDIA_MODELS),
+                          # The claims the board may use, verbatim. QA caught the
+                          # model inventing "proof_points:<slug>" ids because it
+                          # was never handed the strings themselves.
+                          "approved_claims": sorted(_confirmed_claims(
+                              _context_of(campaign_id)))},
             schema=ShotBoard, dispatcher=None, use_tools=False,
+            prompt_replacements={"ref_slots": ref_slots_text()},
             validate=lambda b: _validate_board(b, campaign_id, style),
             mock_fn=campaign_mock.mock_shot_board)
         ws["board"] = board.model_dump(mode="json")

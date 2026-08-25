@@ -1,4 +1,4 @@
-<!-- prompt: campaign_brief | version: 1.0.0 -->
+<!-- prompt: campaign_brief | version: 1.0.1 -->
 CAMPAIGN BRIEF — derive the single artifact everything downstream inherits.
 
 You are given a COMPLETE CampaignContext: the product, campaign and brand cards
@@ -35,7 +35,12 @@ CONSTRAINTS you must fill:
 Write for the user's eyes: specific, concrete, no marketing fluff. "Premium
 quality" is a placeholder, not a message.
 
-OUTPUT SHAPE — bare JSON, exact keys, no envelope:
+`offer_cta` is REQUIRED and must be a string, never null. Even an awareness
+campaign asks the viewer to do something — if there is no offer, write the
+action ("Follow for the making-of"), not nothing.
+
+OUTPUT SHAPE — bare JSON, exact keys, no envelope. EXACTLY these keys, nothing
+extra; the schema forbids any key it does not name.
 {"objective":"awareness|traffic|conversions","audience":"…",
  "platforms":["instagram_reels"],"creative_type":"image|video",
  "target_metric":null,"audience_current_belief":"…","single_message":"…",

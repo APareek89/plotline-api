@@ -2041,7 +2041,13 @@ def test_the_wps_thresholds_reach_the_prompt_from_the_same_constant():
 
     text = script_thresholds_text()
     for lang, (tight, fail) in WPS_LIMITS.items():
-        assert f"{lang}: tight above {tight}, FAIL above {fail}" in text
+        assert f"{lang}: tight above {tight} w/s, FAIL above {fail} w/s" in text
+        # the ARITHMETIC travels too, not just the threshold. QA watched the
+        # model write 10-word hooks into 3-second windows repeatedly: it had the
+        # ceiling and still could not see its own line broke it, because
+        # "3.3 w/s" and "how long must a 10-word line be" are different facts.
+        assert f"a 10-word line needs at least {10 / fail:.1f}s" in text
+        assert f"3.0s window holds at most {int(3.0 * fail)} words" in text
     assert "any other language" in text
 
 
@@ -2719,3 +2725,36 @@ def test_qc_stands_between_the_creative_and_the_ad_card():
 
     _act(tid, "qc", "deliver")
     assert store.list_ad_cards(cid), "deliver did not assemble the Ad Card"
+
+
+def test_the_reference_budget_reaches_the_prompt_from_the_same_constant():
+    """Found by product QA: the board prompt said references were "budgeted"
+    without ever saying the budget, so the model attached three to a route that
+    carries two and could not recover. The check knew a number the prompt did
+    not — the same shape as the R2 lexicon bug and the W1 table."""
+    from app.validators import ref_slots_text
+
+    text = ref_slots_text()
+    for route, cap in config.MEDIA_REF_SLOTS.items():
+        assert f"{route}: {cap} reference(s)" in text
+    assert "anything else" in text
+
+
+def test_the_board_is_handed_the_claims_it_is_allowed_to_use(monkeypatch):
+    """Also found by QA: the model wrote claims_used=['proof_points:<slug>'] —
+    an id it invented, because it was never handed the strings themselves."""
+    seen: dict = {}
+    real = campaign.run_agent
+
+    def spy(**kwargs):
+        if kwargs.get("agent") == "shot_board":
+            seen.update(kwargs["user_payload"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(campaign, "run_agent", spy)
+    cid, tid = _ruminated("Board claims")
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+
+    assert seen, "the board agent never ran"
+    assert seen["approved_claims"] == sorted(BRAND["approved_claims"])

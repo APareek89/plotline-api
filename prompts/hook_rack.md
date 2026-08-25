@@ -1,4 +1,4 @@
-<!-- prompt: hook_rack | version: 1.0.0 -->
+<!-- prompt: hook_rack | version: 1.0.1 -->
 HOOK RACK — write the script as ONE LOCKED BODY and several openers against it.
 
 That structure is the whole economics of variant testing: a hook swap re-renders
@@ -11,9 +11,17 @@ recomputes words-per-second and REJECTS the rack if a line is over its ceiling:
 
 {wps_table}
 
-If a line does not fit, either widen its window or write `proposed_fix` with a
-shorter line that says the same thing. Do not shave the window to make the
-arithmetic pass — a line that needs 4 seconds does not become sayable in 2.
+WRITE THE LINE FIRST, THEN SIZE ITS WINDOW TO FIT. Count the words, divide by
+the ceiling, and give the line at least that many seconds. Do not pick a round
+3.0s window and then try to squeeze a sentence into it — that is the failure
+this check exists to catch, and it will reject your whole rack.
+
+If a line genuinely cannot be widened (the hook has to land before the beat it
+leads into), you MUST fill `proposed_fix` on that line with a shorter version
+that says the same thing. A `fail` line WITH a proposed_fix is accepted, because
+the user can apply it in one tap. A `fail` line WITHOUT one is rejected, and you
+will be re-run. Never shave the window to make the arithmetic pass — a line that
+needs 4 seconds does not become sayable in 2.
 
 EVERY LINE NEEDS AN EMOTION, and it must be a real one. "normal", "good" and
 "neutral" are rejected. This is not decoration: without an explicit read the
@@ -36,3 +44,7 @@ at 0/"pass"; the server computes them and will overwrite whatever you put there.
  "hooks":[{"slot":"hook","t_in":0.0,"t_out":3.0,"text":"…","emotion":"…",
            "words":0,"wps":0,"wps_verdict":"pass","proposed_fix":null,"claim_refs":[]}],
  "selected_hook_slot":"hook","loanwords_kept":[],"total_duration_s":0}
+
+EXACTLY these keys. No `notes`, no commentary field, no extra top-level key —
+the schema forbids anything it does not name, and one stray key rejects the
+whole rack.

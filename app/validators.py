@@ -433,10 +433,18 @@ def script_thresholds_text() -> str:
     what this returns, so a threshold change that misses the prompt fails in the
     suite rather than in a paid run.
     """
-    rows = [f"  {lang}: tight above {tight}, FAIL above {fail} words/second"
-            for lang, (tight, fail) in sorted(WPS_LIMITS.items())]
-    rows.append(f"  any other language: tight above {WPS_DEFAULT[0]}, "
-                f"FAIL above {WPS_DEFAULT[1]} words/second")
+    def row(lang: str, tight: float, fail: float) -> str:
+        # The ARITHMETIC, not just the threshold. QA watched the model write
+        # 10-12 word hooks into 3-second windows over and over: it had the
+        # ceiling and still could not see that its line broke it, because
+        # "3.3 words/second" and "how long must a 10-word line be" are not the
+        # same fact to a writer.
+        return (f"  {lang}: tight above {tight} w/s, FAIL above {fail} w/s — "
+                f"so a 10-word line needs at least {10 / fail:.1f}s, "
+                f"and a 3.0s window holds at most {int(3.0 * fail)} words")
+
+    rows = [row(lang, tight, fail) for lang, (tight, fail) in sorted(WPS_LIMITS.items())]
+    rows.append(row("any other language", *WPS_DEFAULT))
     return "\n".join(rows)
 
 
@@ -727,6 +735,22 @@ _COMPOUND_MOTION = (" then ", " while ", " and ", " into ", " before ")
 def _ref_slots_for(route: str) -> int:
     from app import config as _config
     return _config.MEDIA_REF_SLOTS.get(route, _config.MEDIA_REF_SLOTS_DEFAULT)
+
+
+def ref_slots_text() -> str:
+    """The B3 caps as prompt text, GENERATED from config.MEDIA_REF_SLOTS.
+
+    Found by QA: the board prompt said references were "budgeted" without ever
+    saying the budget, so the model attached three to a route that carries two
+    and could not recover — the check knew a number the prompt did not. Same
+    shape as the W1 lexicon bug, same fix: quote the mechanism from the constant
+    the check reads.
+    """
+    from app import config as _config
+    rows = [f"  {route}: {n} reference(s) per shot"
+            for route, n in sorted(_config.MEDIA_REF_SLOTS.items())]
+    rows.append(f"  anything else: {_config.MEDIA_REF_SLOTS_DEFAULT} reference(s) per shot")
+    return "\n".join(rows)
 
 
 def validate_shot_board(board: "ShotBoard", *, avg_beat_s: float = 3.0) -> "ShotBoard":
