@@ -774,7 +774,8 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     # its doctrine cannot be safely reused), never something the chair produces.
     assert isinstance(feedback, Feedback)
     assert set(Feedback.model_fields) == {"concept_verdicts", "doctrine_version"}
-    assert feedback.doctrine_version == "3.0.0"
+    from app.agents.council import doctrine_version
+    assert feedback.doctrine_version == doctrine_version()
     assert len(reviews) == 3 and all(isinstance(r, SeatReview) for r in reviews)
     assert {r.seat for r in reviews} == {"performance", "brand", "platform"}
 
@@ -1305,8 +1306,18 @@ def test_every_council_citation_is_a_principle():
         assert item.tag == "PRINCIPLE" and item.source_id == "model"
 
     # and the doctrine that produced them is recorded on both, for the audit
-    assert all(r.doctrine_version == "3.0.0" for r in reviews)
-    assert feedback.doctrine_version == "3.0.0"
+    from app.agents.council import doctrine_version
+    live = doctrine_version()
+    assert live and live != "unversioned", "the doctrine must carry a version header"
+    assert all(r.doctrine_version == live for r in reviews)
+    assert feedback.doctrine_version == live
+
+    # the DURABLE audit row carries it too. The agent-run log also records it,
+    # but that surface is gated on PLOTLINE_DEBUG_OBSERVABILITY and off in
+    # production, so it cannot be the audit trail.
+    activity = store.get_artifact_activity(tid, "council")
+    assert activity, "council left no audit row"
+    assert any(f"doctrine {live}" in row["detail"] for row in activity)
 
 
 def test_a_chair_citing_a_retrieved_id_is_rejected():
@@ -1431,6 +1442,7 @@ def test_a_kill_flag_is_never_dropped_in_silence():
 def test_the_doctrine_reaches_every_seat_and_the_chair():
     """Prompt-and-check drift is the bug class that cost this project a paid run
     before (the R2 lexicon). The doctrine is injected, so assert it ARRIVES."""
+    from app.agents.council import doctrine_version
     from app.agents.runner import build_system
     from app.seats import BUILTIN_SEATS
 
@@ -1446,7 +1458,7 @@ def test_the_doctrine_reaches_every_seat_and_the_chair():
         assert system.index("EVIDENCE & HONESTY POLICY") < system.index("COUNCIL DOCTRINE")
         assert system.index("COUNCIL DOCTRINE") < system.index("OUTPUT SHAPE")
         # the composite version answers "which reviewer said this"
-        assert version.endswith("+doctrine@3.0.0")
+        assert version.endswith(f"+doctrine@{doctrine_version()}")
 
 
 # ------------------------------------------------- stakeholder seats (§7 v3) --
@@ -1568,3 +1580,71 @@ def test_progress_labels_follow_the_thread_that_is_running(monkeypatch):
     current_thread.set("thr_second_campaign")
     on_step("drafting options")
     assert campaign._working["thr_second_campaign"] == "drafting options"
+
+
+def test_a_dropped_connection_retries_instead_of_discarding_the_run(monkeypatch):
+    """A transport error used to escape run_agent entirely — no log row (so the
+    node vanished from observability) and the whole rumination discarded because
+    one mid-stream blip hit the last node. On the production models that is
+    minutes of already-paid, already-successful work thrown away.
+
+    It is not a validation failure and must never be reported to the model as
+    one: there was no output to correct."""
+    from app.agents import runner as runner_mod
+
+    calls = {"n": 0}
+    sent: list = []
+
+    def flaky(model, system, messages, dispatcher, use_tools):
+        calls["n"] += 1
+        sent.append(messages)
+        if calls["n"] == 1:
+            raise runner_mod.AgentTransport("peer closed connection mid-stream")
+        return json.dumps(_seat_review("performance"))
+
+    monkeypatch.setattr(config, "MOCK_LLM", False)
+    monkeypatch.setattr(runner_mod, "_llm_call", flaky)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    review, log = runner_mod.run_agent(
+        agent="council.performance", prompt_name="council/seat_performance",
+        model="test-model", user_payload={"stage": "campaign_options"},
+        schema=SeatReview, preludes=["council/doctrine"],
+        dispatcher=None, use_tools=False)
+
+    assert isinstance(review, SeatReview) and calls["n"] == 2 and log.attempts == 2
+
+    # the retry re-issued the request VERBATIM. Telling the model its answer
+    # "failed validation" would make it rewrite a good answer it never sent.
+    assert len(sent[1]) == 1, "a corrective message was appended after a transport drop"
+    assert "failed validation" not in json.dumps(sent[1], default=str)
+
+    # …and the node is in the run log, not missing from observability
+    rows = [json.loads(l) for l in
+            (config.LOG_DIR / "agent_runs.jsonl").read_text().splitlines() if l.strip()]
+    mine = [r for r in rows if r["agent"] == "council.performance"]
+    assert mine and mine[-1]["attempts"] == 2
+    assert any("connection dropped" in e or "peer closed" in e
+               for e in mine[-1]["validation_errors"])
+
+
+def test_an_api_status_error_is_not_retried_as_a_blip(monkeypatch):
+    """Connection-class errors are transient. A 401/403/400 is a real answer from
+    the server and must surface immediately rather than spin the retry loop."""
+    from app.agents import runner as runner_mod
+
+    calls = {"n": 0}
+
+    def refused(model, system, messages, dispatcher, use_tools):
+        calls["n"] += 1
+        raise RuntimeError("401 authentication_error")
+
+    monkeypatch.setattr(config, "MOCK_LLM", False)
+    monkeypatch.setattr(runner_mod, "_llm_call", refused)
+
+    with pytest.raises(RuntimeError):
+        runner_mod.run_agent(
+            agent="council.brand", prompt_name="council/seat_brand", model="test-model",
+            user_payload={}, schema=SeatReview, preludes=["council/doctrine"],
+            dispatcher=None, use_tools=False)
+    assert calls["n"] == 1, "a non-transient error was retried"

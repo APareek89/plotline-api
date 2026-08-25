@@ -21,12 +21,23 @@ Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT au
 Owner decisions taken 2026-08-25: RAG removed from the **council only** (planner keeps it) ·
 canon sheets **workspace-global** · stakeholder seats **ship fully in v3** · final stitch
 **deferred, checkpoints instead**.
-- ✅ **Step 1 council doctrine — code complete, 99 tests green. ONLY real-mode verification
-  is outstanding** (paid; needs owner consent per AGENTS.md). `prompts/council/doctrine.md`
-  v3.0.0 + `build_system(preludes=)` composite versions (`seat_brand@2.0.0+doctrine@3.0.0`);
-  seats/chair → v2.0.0; `dispatcher=None` AND `use_tools=False`; `validate_seat_review` +
-  `validate_council`; `app/seats.py` registry with `can_kill` default-deny + 5-seat cap;
-  `campaign_settings` table; graph cached per seat-roster.
+- ✅ **Step 1 council doctrine — DONE and verified on the production models. 101 tests green.**
+  `prompts/council/doctrine.md` v3.1.0 + `build_system(preludes=)` composite versions
+  (`seat_brand@2.0.1+doctrine@3.1.0`); seats/chair → v2.0.1; `dispatcher=None` AND
+  `use_tools=False`; `validate_seat_review` + `validate_council`; `app/seats.py` registry
+  with `can_kill` default-deny + 5-seat cap; `campaign_settings` table; graph cached per
+  seat-roster. Real-mode result (sonnet-4-6, both council rounds): **7 council nodes, zero
+  retries, zero retrieval calls, no retrieved id cited**, doctrine version on every one.
+- 📌 **Prompt lessons from the paid runs — do not undo these.** Three separate retry causes
+  were found and fixed by prompt, not by weakening a check: (a) seats invented ELEMENT names
+  from doctrine points (`one_idea_per_ad`) → doctrine now states the eight names are a closed
+  set and D-points are lenses; (b) seats/chair invented benchmarks in fields far from the
+  intro rule → doctrine rule 2 now carries a rewrite table and every seat repeats it beside
+  its OUTPUT SHAPE; (c) chair emitted `kill_flags` as objects → chair.md shows a bare-string
+  example. Haiku chair went 3 attempts → 1; Sonnet now needs none.
+- ⚠️ **Sonnet is SLOW here**: chair 477s, full rumination + refine >15 min. Not a regression
+  (the doctrine removed retrieval, so this is model latency), but it is what makes the
+  missing checkpoints expensive.
 - 🔜 **Step 2 `ReviewPolicy`** — storage already exists: put gates/counts in the SAME
   `campaign_settings` blob (`store.get/update_campaign_settings`). The settings ROUTE that
   writes `seats[]` belongs there too and must validate slugs on write; `_campaign_seats`
@@ -52,9 +63,9 @@ canon sheets **workspace-global** · stakeholder seats **ship fully in v3** · f
 - ▶ Loop.MD status: offered (awaiting your answer)
 
 ## PENDING — start here
-- 🔴 **P0-1 `PLOTLINE_ALLOW_SEED_EVIDENCE=1`** lets the 10 synthetic `seed-*` chunks be
-  cited as real evidence; the UI renders them like genuine sources. RPN 336. One-line fix:
-  set `0` and let agents say "no evidence in DB" (they already do this gracefully).
+- ✅ ~~P0-1 seed evidence~~ — `PLOTLINE_ALLOW_SEED_EVIDENCE=0` in `.env` (2026-08-25);
+  `/health` reports `allow_seed_evidence: false`. Note `.env` is gitignored, so this is a
+  LOCAL fix — Render still needs the same change whenever it is next touched.
 - 🔴 **P0-2 Render live, real keys, no auth** — anyone with the URL spends real money.
   RPN 224. Decide: suspend, add auth, or flip to mock. NOTE: flipping `MOCK_LLM=1` would
   ALSO open `/api/agent-runs` publicly (P1-3) — the gate couples two unrelated concerns.

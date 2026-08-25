@@ -237,3 +237,43 @@ went with it. An acceptance check drives `on_step` under a different contextvar 
 per-request value. When memoising a factory, check every callable in its arguments for
 captured request state — the cache key hides the bug, because the second caller gets
 an object built for the first.
+
+## 2026-08-25 — A network blip threw away ten minutes of paid, successful work
+
+**Symptom.** The final real-mode verification on the production models died with
+`httpx.RemoteProtocolError: peer closed connection without sending complete message body`.
+The thread escalated. In the run log the chair had NO ROW AT ALL — it simply was not there.
+
+**Why-chain.**
+1. Why did the rumination fail? The chair raised an httpx transport error.
+2. Why did that kill the run? `run_agent`'s retry loop catches
+   `(ValidationError, AgentValidationError, ValueError, json.JSONDecodeError)`.
+   `httpx.RemoteProtocolError` is none of those, so it propagated out of run_agent.
+3. Why was there no log row? `_persist_log` runs on success and on final validation
+   failure — both INSIDE the loop. An exception escaping the loop skips it, so the node
+   vanished from observability exactly when observability was needed.
+4. Why was the cost so high? The planner (209s) and all three seats (120s/137s/139s)
+   had already SUCCEEDED and been paid for. One blip at the join discarded all of it.
+5. **Deepest why: `code`** — the retry loop was built around "the model gave a bad
+   answer" and had no concept of "the model never got to answer". Those need opposite
+   handling: one re-prompts with a correction, the other re-issues verbatim.
+
+**Action (aimed at why-5).** `AgentTransport(ValueError)` — subclassing ValueError so the
+existing loop picks it up, the same trick `AgentTruncated` uses. `_llm_call` catches
+`httpx.TransportError` and `anthropic.APIConnectionError` ONLY: an `APIStatusError`
+(401/403/400) is a real answer from the server and must surface immediately rather than
+spin. A `last_transport` flag suppresses the "your previous output failed validation"
+message, because there was no output — appending it would make the model rewrite a good
+answer it never sent. Small backoff between attempts; still bounded by
+MAX_VALIDATION_RETRIES. Two acceptance checks pin both halves.
+
+**What this does NOT fix.** The retry re-runs ONE node. The real exposure is that a
+failure anywhere still discards every completed node in the rumination — this run had
+four successful paid nodes riding on the fifth. That is the stage-level checkpoint work
+(Handoff "VIDEO FLOW" item 5), and v3 makes it worse by adding five stages. This bug is
+the cheap half; the structural half is still open.
+
+**Preventive action for the class.** A retry loop around a network call needs to
+distinguish "bad answer" from "no answer". Check what the loop's `except` clause does NOT
+name — anything unlisted escapes past the persistence that makes the failure diagnosable,
+so the most expensive failures become the least visible ones.

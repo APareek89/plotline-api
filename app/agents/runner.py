@@ -52,6 +52,21 @@ class AgentTruncated(ValueError):
     """
 
 
+class AgentTransport(ValueError):
+    """The connection dropped before a complete response arrived.
+
+    Subclasses ValueError so the §3.9 retry loop picks it up — but it is NOT a
+    validation failure and must not be reported to the model as one: there was
+    no output to correct. A dropped stream is safe to re-issue verbatim.
+
+    Before this existed, an httpx error escaped run_agent entirely: no log row
+    was persisted (so the node vanished from observability), and a full paid
+    rumination was discarded because one mid-stream blip hit the last node. On
+    the production models that is minutes of successful, already-paid work
+    thrown away for a network hiccup.
+    """
+
+
 class AgentHardFail(RuntimeError):
     """Validation still failing after max retries — surfaced to the user,
     never silently accepted or repaired (§3.9)."""
@@ -205,6 +220,7 @@ def _llm_call(
     use_tools: bool,
 ) -> str:
     import anthropic
+    import httpx
 
     client = anthropic.Anthropic()
     kwargs: dict[str, Any] = dict(model=model, max_tokens=config.MAX_OUTPUT_TOKENS, system=system)
@@ -220,8 +236,16 @@ def _llm_call(
         # non-streamed ("Streaming is required for operations that may take
         # longer than 10 minutes"). The final message has the same shape, so
         # everything below is unchanged.
-        with client.messages.stream(messages=convo, **kwargs) as stream:
-            resp = stream.get_final_message()
+        try:
+            with client.messages.stream(messages=convo, **kwargs) as stream:
+                resp = stream.get_final_message()
+        except (httpx.TransportError, anthropic.APIConnectionError) as exc:
+            # Connection-class only. An APIStatusError (401/403/400) is a real
+            # answer from the server and must surface, not spin.
+            raise AgentTransport(
+                f"the connection dropped before a complete response arrived ({type(exc).__name__}: "
+                f"{exc}) — nothing was received, so nothing is wrong with the request"
+            ) from exc
         if resp.stop_reason == "tool_use":
             convo.append({"role": "assistant", "content": resp.content})
             results = []
@@ -282,6 +306,7 @@ def run_agent(
 
     last_error: Optional[str] = None
     last_truncated = False
+    last_transport = False
     for attempt in range(config.MAX_VALIDATION_RETRIES + 1):
         log.attempts = attempt + 1
         raw_text: Optional[str] = None
@@ -297,7 +322,11 @@ def run_agent(
                 if extra_content_blocks:
                     content = extra_content_blocks + content
                 messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
-                if last_error:
+                # A transport failure produced no output, so there is nothing to
+                # correct. Re-issue the request verbatim; telling the model its
+                # answer "failed validation" would make it rewrite a good answer
+                # it never got to send.
+                if last_error and not last_transport:
                     messages.append(
                         {
                             "role": "user",
@@ -333,7 +362,12 @@ def run_agent(
         except (ValidationError, AgentValidationError, ValueError, json.JSONDecodeError) as exc:
             last_error = str(exc)
             last_truncated = isinstance(exc, AgentTruncated)
+            last_transport = isinstance(exc, AgentTransport)
             log.validation_errors.append(last_error[:2000])
+            if last_transport:
+                # A blip needs a moment to clear; an instant re-issue tends to
+                # meet the same one. Bounded by MAX_VALIDATION_RETRIES either way.
+                time.sleep(2 * (attempt + 1))
             # Keep the body that failed. Without it a truncation and a genuine
             # schema bug read identically in the log, which is what made this
             # class of failure cost a full re-run to diagnose.

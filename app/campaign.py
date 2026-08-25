@@ -1376,10 +1376,20 @@ def _option_artifact(option: Any, verdict: Any, family: Any) -> ArtifactEnvelope
 
 
 def _record_seat_reviews(thread_id: str, reviews: list) -> None:
-    """Council seats are part of the audit trail, not just an input to the chair."""
+    """Council seats are part of the audit trail, not just an input to the chair.
+
+    The doctrine version rides along because doctrine §8 requires an audit to
+    answer WHICH reviewer said this, and a doctrine change invalidates cached
+    council output. The agent-run log carries it too, but that surface is gated
+    on PLOTLINE_DEBUG_OBSERVABILITY and off in production — this row is the one
+    that durably survives.
+    """
     for review in reviews:
-        detail = f"{review.seat} seat: " + "; ".join(
+        stamp = f" [doctrine {review.doctrine_version}]" if review.doctrine_version else ""
+        detail = f"{review.seat} seat{stamp}: " + "; ".join(
             f"{s.element}={s.rating}" for s in review.element_scores)
+        if review.policy_check_required:
+            detail += " | policy check required: " + "; ".join(review.policy_notes)
         if review.kill_recommendation:
             detail += f" | kill: {review.kill_recommendation}"
         store.log_artifact_activity(thread_id, "council", "proposed", detail[:500])
