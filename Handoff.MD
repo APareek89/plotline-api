@@ -1,188 +1,82 @@
-# Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `a5f161b` (plotline-api) · `f8d312c` (plotline-web)
+# Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
+last-synced: `8bc17ee` (plotline-api) · `a6bb767` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
-> in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
-> anything changed underneath this file before trusting the state below. Then open with
-> the pending points. This file is the single project brain for both repos.
->
-> UPDATE on concrete events: before every checkpoint commit · end of every phase ·
-> low-context signal (secondary). Snapshot, not journal; re-stamp `last-synced`.
+> in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
+> trusting anything below. Then open with the pending points.
+> UPDATE before every checkpoint commit and at end of phase. Snapshot, not journal.
 > Cap: >~40 lines or ~15 ✅ → collapse ✅ into one "Shipped:" line.
 
-## NEXT SESSION — read docs/NEXT-SESSION-PROMPT.md FIRST
-Addendum-03 landed in docs/ (owner's files, HIGHEST precedence): `PRD-addendum-03-ui.html`
-(behavioral spec) + `marketing-studio-demo.html` (the DESIGN CONTRACT). The old generated
-one is kept as `PRD-addendum-03-generated.html` — reference only, NOT authoritative.
-CLEAN-SLATE FRONTEND: nothing from the old product survives (no Avatar/Creative/Content Studio,
-no Plans/My Space, no old design system). Three tabs only: Campaign Studio · My Campaigns ·
-My Brand. Backend is leveraged, not rebuilt.
+## LOCAL ONLY (decided 2026-08-25)
+Render autoDeploy is **off** on both services; nothing is pushed. `origin/master` is
+behind local. Both Render services are still RUNNING with real ANTHROPIC_API_KEY +
+FAL_KEY, publicly, **no auth** — see P0-2.
 
-## WHERE IT STOPPED — start here (2026-08-24)
-Chair + full flow verified, AND the pre-pivot app is DELETED from both repos (-3037 lines
-api, -2600 web). Remaining: brand_profile storage+routes w/ bidirectional pre-fill,
-reference_media[] (user reference > template), campaign archive/restore/rename/delete,
-then the FRONTEND REBUILD to docs/marketing-studio-demo.html (My Campaigns is still a ROW
-LIST — §02 wants a folder-card GRID; My Brand tab does not exist yet and is deliberately
-NOT in the nav, since a link that 404s is worse than a missing one). New acceptance checks
-still to write: brand pre-fill both directions, reference-media priority, grid
-archive/restore.
+## SPEC PRECEDENCE
+`docs/PRD-addendum-03-ui.html` (owner, behavioral) + `docs/marketing-studio-demo.html`
+(owner, THE DESIGN CONTRACT) > `docs/SYSTEM-PROMPT-v2-marketing-studio.md` > Addendum-02 >
+Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT authoritative.
 
-## RENDER STATE (2026-08-25) — NO MOCK, one step left for the user
-Both mocks are OFF in prod: `MOCK_LLM=0`, `MOCK_MEDIA=0`, `FAL_KEY` set.
-**`ANTHROPIC_API_KEY` is still NOT set** — Claude cannot add API keys, the user must.
-Until it is, `/health` reports `llm_unavailable` and `POST /campaigns/{id}/start`
-returns 503 with the reason (config.llm_unavailable_reason()). This is deliberate:
-real mode with no key is a broken deployment and must SAY so, not 500.
-Add the key here: dashboard.render.com/web/srv-da4pufqfngtc73col7rg/env
-WARNING (unchanged): the app is PUBLIC with no auth. Once the key lands, anyone with
-the URL can trigger a ~25-min Sonnet rumination + real fal spend. Cloud RAG is devrag
-SAMPLE data (both PLOTLINE_RAG_URL and _AUX_ point at 127.0.0.1:8787), so real-mode
-cloud output will be honestly PROVISIONAL and weaker than local.
+## CURRENT STATE
+- ✅ Shipped: v2 campaign flow verified END-TO-END on real models + real fal (Ad Card
+  `ad_faa4f000b5` LIVE, credits reconciled exactly); pre-pivot app deleted from both repos
+  (−4.8k lines); rumination ported to LangGraph; observability surface; 4 real-mode prompt
+  bug classes fixed. See git log + Learning.MD.
+- ✅ **83 tests pass.** `tests/test_marketing.py` holds the acceptance floor — never weaken one.
+- ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
+  `MOCK_MEDIA=0`, real key in `.env`. Start: `bash run.sh` (api+rag+devrag), `npm run dev` (web).
+- ✅ Observability = its own nav tab `/observability` (NOT per-thread). Gated on
+  `PLOTLINE_DEBUG_OBSERVABILITY=1` (already in `.env`) + `NODE_ENV !== production`.
+- ▶ Loop.MD status: offered (awaiting your answer)
 
-## POLICY DOC IS OPTIONAL (fixed 2026-08-25)
-It always was in the schema, but the UI only rendered "Confirm claims" when extraction
-returned ≥1 candidate — so a brand with no policy doc and a plain product description
-could NEVER finish the Brand card, and claims_confirmed gates the campaign. Fixed in the
-UI: the confirm surface shows whenever extraction has run, claims/banned words can be
-typed by hand, and confirming NONE is allowed and explained. Not a weakening — an empty
-approved list makes every persuasion claim unmapped, so _validate_detail rejects it.
+## PENDING — start here
+- 🔴 **P0-1 `PLOTLINE_ALLOW_SEED_EVIDENCE=1`** lets the 10 synthetic `seed-*` chunks be
+  cited as real evidence; the UI renders them like genuine sources. RPN 336. One-line fix:
+  set `0` and let agents say "no evidence in DB" (they already do this gracefully).
+- 🔴 **P0-2 Render live, real keys, no auth** — anyone with the URL spends real money.
+  RPN 224. Decide: suspend, add auth, or flip to mock. NOTE: flipping `MOCK_LLM=1` would
+  ALSO open `/api/agent-runs` publicly (P1-3) — the gate couples two unrelated concerns.
+- 🧑 **DECISION NEEDED — video flow reshape.** Proposed from the gofynd reference (below);
+  items 1–3 reshape `CampaignDetail` + planner prompt = architecture-shaping, so it needs
+  your approval BEFORE code. Item 4 is additive/safe.
+- 🤖 Addendum-03 leftovers: `brand_profile` storage+routes + **My Brand tab** (deliberately
+  NOT in nav until its page exists); `reference_media[]` (user reference > template);
+  campaign archive/rename/delete; My Campaigns is still a ROW LIST — §02 wants a folder GRID.
+- 🤖 QA finding: `/studio/campaign` Step 2 disables the prompt bar, so the brief-first path
+  only works from the thread page. Same step, two affordances.
+- 🤖 Dev DB is full of my QA campaigns ("Path A/B", "QA one image no claims", …). No delete
+  route yet — clean directly if they bother you.
+- 🤖 Corpus is the real limit: 25 chunks, **0 with a real URL**. `kb/sources/*.yaml` → ≥60
+  real-URL chunks is what turns this from a working pipeline into grounded expertise.
 
-## WHAT WAS DELETED (2026-08-24) — do not resurrect
-api: app/{thread,creative,orchestrator,commands}.py, app/agents/mock.py, evals/,
-tests/test_{addendum,creative,pipeline_mock}.py, and 19 routes (/api/series/*,
-/api/post-cards/*, /api/diy/*, /api/runs/*, inspiration). web: /avatar /creative /plans
-/space /studio (Content Studio) /studio/[seriesId], 5 components, the LEGACY nav
-dropdown, api.series.*. `/` now redirects to /studio/campaign.
-KEPT ON PURPOSE: **app/ccs.py + app/validators.py are LIVE** (validators imports ccs; the
-council needs the CCF weights) — so tests/test_ccs.py and tests/test_validators.py were
-KEPT too, against the old plan to delete them: deleting a test whose module survives just
-removes coverage from live code.
-NEW: **app/threadkit.py** — neutral thread plumbing (_say/_actions/_thread_lock/_working/
-_pending/_dispatcher/_flagged_ids/_merge_feedback/_niche_of/CREDIT_USD/_asset_url). This
-existed so campaign.py stopped importing from the drivers it replaces. `_working` and
-`_pending` are shared MUTABLE state — always import them, never redefine, or drivers stop
-seeing the same object.
-
-## REAL-MODE BUG CLASS #3 — silent truncation (fixed 2026-08-24)
-The chair was NOT failing on prompt size as predicted. Root cause found by probe:
-`thinking` tokens share the `max_tokens` budget, the response came back
-`stop_reason=max_tokens`, and `runner._llm_call` returned the truncated text WITHOUT
-checking stop_reason — so `json.loads` blamed syntax ("Expecting ',' delimiter") and hid
-a pure overflow. Fixes: `AgentTruncated` raised on stop_reason=max_tokens (retryable, and
-the retry now tells the model it was CUT OFF, not invalid); all text blocks joined (was
-first-only); `config.MAX_OUTPUT_TOKENS` 16000→32000; **streaming is now mandatory** (the
-SDK refuses non-streamed calls whose budget implies >10min); raw failing body persisted to
-`data/runs/raw/` — that capture is what made the next bug findable in one run, not three.
-Then bug #4, same species as #1/#2: R2 receipt is a LITERAL substring check but the prompt
-described it in prose, so the planner wrote "camera holds on the screen" (fails) instead of
-"on-screen" (passes). Prompt now has the lexicon INJECTED from `validators._RECEIPT_CUES`
-via prompt_replacements, so prompt and check cannot drift. planner 1.2.0→1.3.0.
-
-## PIVOT (declared Fri 22 Aug, work starts next session)
-Plotline → MARKETING STUDIO per docs/SYSTEM-PROMPT-v2-marketing-studio.md — the
-GOVERNING brief for all new work. Precedence: v2 > Addendum-02 > Addendum-01 > PRD v1.
-Re-map the existing machine (envelope, panels, validators, fal stack, RAG, council-
-izing the feedback agent); invent nothing architectural. Produce its OUTPUTS in
-order (Addendum-03 doc → schemas → agent prompts → UI copy map → acceptance checks)
-BEFORE implementing. The Monday items below fold in: do the real-mode retest first
-(the council/planner run on real mode), fal-spend decision stands.
-
-## Monday pickup (2026-08-25) — state as of Fri 22 Aug EOD
-- Feedback-1 (Google Doc) APPLIED app-wide: full-bleed layout (rail flush left, chat fills
-  width, panel = 40%, nav spans window), context form fits one viewport, Plans/DIY densified.
-  Doc archived at docs/feedback-01.txt reference; guiding principles: no dead space, clean formatting.
-- REAL-MODE BUG FIXED (untested live): planner.formats failed because real Sonnet wrapped
-  FormatOptions in the AgentMessage envelope (protocol rule 10 read too literally).
-  Fix = runner.unwrap_envelope() + shared_policy rule 15 (v1.3.0) "server owns the envelope".
-  → FIRST THING MONDAY: re-run a real-mode plan (MOCK_LLM=0) end-to-end to confirm.
-- fal LIVE ON RENDER: FAL_KEY + MOCK_MEDIA=0 set on srv-da4pufqfngtc73col7rg — the PUBLIC
-  demo now spends real fal money per generation (no auth on the app). Watch spend / consider
-  reverting MOCK_MEDIA=1 or adding an auth gate.
-- User has been testing real mode locally (threads "Real-mode smoke — 01" etc. in dev DB).
-
-## Compact summary of previous session
-Phase 1 built + RAG/KB integrated + **Addendum-01 applied** (docs/PRD-addendum-01.html —
-chat-first Content Studio; supersedes v1 §12 Content Studio row). Browser-verified:
-context blocks (+3 required positioning fields) → thread with pinned context summary →
-inspiration → PASS 0.5 format options (format-library corpus citations) → concept
-batches of 3 with verdicts/coverage → dual-path approvals (typed + buttons, same
-events) → plan approve → Plans. Right artifact panel w/ Concept/Activity tabs.
-
-## Ownership (changed 2026-08-22)
-- Claude owns the WHOLE stack in THIS repo: api + rag/ (retrieval service) + kb/ (corpus
-  pipeline) + devrag. Codex gets specific delegated tasks only — no standing lane.
-- ~/Documents/plotline-rag is SUPERSEDED by rag/ here (moved 2026-08-22, no git history
-  existed). Safe for the user to archive/delete.
-- AWS fence (binding, from Codex's handoff): profile `plotline-agent`, region ap-south-1,
-  `plotline-*` buckets + `plotline_*` tables ONLY; never touch aarav-*/Handson. DynamoDB
-  stays PROVISIONED 1RCU/1WCU. No LLM calls inside rag/.
-
-## Current state
-- ✅ Shipped: full Phase-1 planning product + integrated RAG/KB (see git log & Learning.MD)
-- ✅ rag/ (S3+DynamoDB, hybrid RRF, :8788): RoutingRag routes chunk:* → rag :8788,
-  asset:/stat:/trend:* → devrag aux :8787. Two-layer citation validation, seed gate,
-  bounded retries. 53 tests (41 api + 12 rag), 20/20 evals, recall@5 10/10, live-verified.
-- ✅ kb/ corpus pipeline: kb/sources/*.yaml → `make -C rag kb` → rag/data/best_practice.jsonl
-  (validates ids/tiers/urls/text; official/expert tiers REQUIRE real http(s) urls; seed
-  chunks pin hashes so sync stays no-op). Then `make -C rag index eval sync`.
-- ✅ Addendum-01: AgentMessage/UserEvent envelope (§05), thread driver + command parser,
-  R2/R3 validators + saturation guard + platform hard filter + evidence-coverage %/
-  PROVISIONAL + niche gate + thin-plan escalation (§7.2/7.3), prompt deltas (§06),
-  format-library corpus (15 curated chunks, synced to S3/DDB — 25 total), chat UI
-  (§01-§04). 69 tests, 20/20 evals. Old stage UI kept at /studio/[seriesId] as the
-  plan board (panel "Expand" target); demo-v2 html stale per §09.
-- ✅ Addendum-02 CREATIVE STUDIO (docs/PRD-addendum-02.html = Phase-2 spec of record):
-  fal.ai media client (queue API; FAL_KEY in .env from Projects/creative-qc-agent; probe-
-  verified model ids NB/NB2/NBPro + veo3.1/fast/i2v + kokoro + minimax-02-hd), MOCK_MEDIA=1
-  default (SVG/ffmpeg/WAV placeholders, $0; no-ffmpeg → poster fallback for Render).
-  Creative thread driver: confidence card → route → script (per-shot edit) → voice
-  (previews) → editable prompts (verbatim, cost-gated) → generate (seam QA + 1 free auto
-  re-roll, per-asset reroll) → end-card → Post Card (one id, 3 surfaces) → next-concept
-  stitch. Plans lifecycle Planned/In production/Ready/Posted + 72h results nudge. DIY at
-  /creative. Real-fal verified: 1 nano-banana image + 1 kokoro TTS (~$0.04). 77 tests.
-- ✅ DEPLOYED 2026-08-22: github.com/APareek89/{plotline-api,plotline-web} (private, branch
-  master) → Render free/singapore: web https://plotline-web.onrender.com · api
-  https://plotline-api-apyq.onrender.com (srv-da4pufqfngtc73col7rg api, srv-da4pujrl550s738l6uag
-  web; owner tea-d3af7615pdvs73cqm9f0; key ~/.claude/secrets/render-api-key). Cloud runs
-  MOCK_LLM=1 with devrag as primary+aux (sample data, no AWS/Anthropic in cloud);
-  render-start.sh boots both. CAVEATS: free tier spins down (~50s cold start); SQLite on
-  ephemeral disk — threads/series reset on redeploy; autoDeploy on push to master.
-- ✅ 101/101 tests (23 in test_marketing.py — 19 acceptance floor + 4 new: truncation never
-  parsed as complete, multi-block joins, prompt/validator lexicon drift guard, R2 floor)
-- ✅ **FULL v2 FLOW VERIFIED END-TO-END ON REAL MODELS + REAL FAL** (campaign srs_5e7715873a,
-  thread thr_42eb12a760, ad card `ad_faa4f000b5`, campaign status LIVE). Every agent passed
-  first try except one legit self-correction: planner 93s/1 attempt (R2 fix held) → 3 seats
-  1 attempt each → **chair 378s/1 attempt, 3 citations** → refine (2 flagged; options_refine
-  needed 2 attempts, caught by "untouched options must come back byte-identical") → 2nd
-  council → options (CCS 83/70/62, 0 killed) → approve o1 → templates HONEST SKIP ("No
-  templates in the library yet") → detail v1 (claims_used ⊆ confirmed claims, style_ref null)
-  → refine → v2 (CTA only, changes[] documents it, rest byte-identical) → model-confirm
-  ($0.24 shown BEFORE generate, model named once w/ reason, single-vs-variants asked) →
-  single → 3 real 928×1152 PNGs on nano-banana-2 → accept → Ad Card → mark-live.
-  **Credits reconcile exactly: total_cost_credits 2.4 == campaign_spend() 0.24 USD / 0.1.**
-  generation_log: 3 rows (model, cost, prompt, seed, asset_id) — audit reachable.
-- ▶ Loop.MD status: offered (awaiting user's answer)
-
-## Pending points
-- 🧑 USER: copy the ANTHROPIC_API_KEY line into plotline-api/.env yourself; set MOCK_LLM=0 to go live, then run one real plan + the golden set
-- 🧑 USER: answer the Loop offer; edit Loop.MD goal/evals to make them yours
-- 🧑 USER: PRD open calls — trademark check on "Plotline"; pricing currency INR vs USD
-- 🤖 AGENT: author the real curated corpus in kb/sources/ (target ≥60 chunks; official/expert
-  tiers need real URLs), retire seed.yaml, set PLOTLINE_ALLOW_SEED_EVIDENCE=0, re-run evals
-- 🤖 AGENT: port asset:/stat:/trend: corpora into rag/ (multi-corpus), drop devrag +
-  PLOTLINE_AUX_RAG_URL (routing collapses to one backend)
-- 🤖 AGENT: platform vocab drift — corpus uses "twitter", app uses "x"; normalize when
-  seed.yaml retires (alias noted in kb/build_corpus.py)
-- 🤖 AGENT: exit-gate instrumentation — approval-within-≤2-regens report from concept_state.regen_count
-- 🤖 AGENT: Addendum leftovers — R6 freshness validator (needs trends corpus / plotline-curator §08); real-mode command parsing for free text beyond the deterministic grammar; context-edit re-run confirm flow; rebuild demo html on request
-- 🤖 AGENT: Addendum-02 leftovers — final stitch (shots+VO → single final.mp4, needs ffmpeg concat), carousel/image-post/audio variants (§03 table — reel path built), credits-low banner (no fal balance API wired), consent gate stub, My Space Post-Card rows, real creative-director agent (mock only; prompts ready)
+## VIDEO FLOW — proposal (reference-only study of gofynd/pixelbin@marketing-studio-service)
+Read for ARCHITECTURE ONLY; nothing copied, nothing of theirs lands here (their stack is
+Node/Remotion, ours Python/fal). Their pipeline: inputs → ad-vector → strategy → assets →
+scenes → shots → keyframes → video. Ours: options → templates → detail → generate → creative.
+1. **Split scenes from shots** — plan narrative beats, then decompose to camera units. Gives
+   a cheap place to critique the story before paying for frames.
+2. **Character plan + safety pass** — `characters[]{character_id, description, role,
+   outfits[]}`; every shot binds exactly ONE role (character+outfit OR product). We have no
+   character primitive today; this is what "character shots" needs.
+3. **Split keyframe/motion prompts with negatives + provider length pre-check** — and a
+   motion-verb lexicon (same trick as our R2 receipt cues).
+4. **Stitching** — we don't stitch at all today; we hand over N clips. ffmpeg concat + audio
+   bed is our equivalent. Pattern worth copying: stitching DEGRADES honestly, never crashes.
+5. **Checkpoints (biggest reliability win, not video-specific)** — stage-level resume. Today
+   a transient error discards a full paid rumination (~25 min, real money).
 
 ## Decisions
-- 2026-08-21 — SQLite + local files for Phase-1 dev (no RDS/AWS in Claude Code lane) — PRD §7 env override; Codex owns plotline_* AWS
-- 2026-08-21 — Dev RAG stub inside plotline-api serving the frozen :8787 contract with sample data — Codex's plotline-rag not landed; swap is a no-op
-- 2026-08-21 — Models: sonnet-4-6 (plan/critique), haiku-4-5 (intake), env-overridable — PRD §7 table
-- 2026-08-21 — MOCK_LLM mode: deterministic agents that still hit real retrieval + validators — full-pipeline dev without key
-- 2026-08-21 — Ports: api 8600, web 3100, RAG 8787 (frozen) — avoid clashes with other local projects
-- 2026-08-21 — DS: cobalt #2946E5 + Avenir Next system stack; Inter/#6933fa banned per PRD §12
-- 2026-08-21 — Git checkpoints: AUTO (user chose in power-coding setup, supersedes earlier propose-only rule for checkpoints)
-- 2026-08-22 — Ownership takeover: rag+kb absorbed into plotline-api, Claude owns full stack, Codex delegate-only — user decision; AWS fence carried over binding
+- 2026-08-21 — SQLite + local files for dev; ports api 8600 / web 3100 / rag 8788 / devrag 8787
+- 2026-08-21 — Models: sonnet-4-6 (plan/critique), haiku-4-5 (intake), env-overridable
+- 2026-08-21 — Git checkpoints AUTO
+- 2026-08-22 — Claude owns the full stack here (api + rag/ + kb/ + devrag); AWS fence binding:
+  profile `plotline-agent`, ap-south-1, `plotline-*` buckets / `plotline_*` tables only
+- 2026-08-25 — Rumination runs as a LangGraph StateGraph (`app/graph.py`); the LINEAR stages
+  stay plain code on purpose — they are a state machine over user events, and a graph there
+  adds ceremony without adding truth
+- 2026-08-25 — Confirming claims GRANTS permission to make them; it does NOT gate the start.
+  Brand has no required field and is defaulted at `begin_rumination`
+- 2026-08-25 — Local only: Render autoDeploy off
+
+**Session efficiency (2026-08-25):** 🎯 ~55% feature · 🔧 ~25% support · 🔁 ~20% rework
+(rework was self-inflicted: unpinned langgraph broke the Render build; unisolated LOG_DIR
+leaked test failures into observability; `npm run build` clobbered dev's `.next` three times)

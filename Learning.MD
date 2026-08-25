@@ -124,3 +124,57 @@ approved list still rejects any claim a detail tries to use.
 gate". The gate was not the problem, and relaxing `claims_confirmed` would have broken a
 stated invariant. Reading the request as a bug report rather than a spec change found a
 fix that made compliance stricter, not looser.
+
+## 2026-08-25 — "Works on my machine" three times in one session
+
+**Symptom.** Three separate breakages, all with the same signature: green locally, broken
+where it actually runs.
+1. `langgraph` imported by `app/graph.py` but never added to `requirements.txt` → 83 tests
+   passed while the Render build produced an app that crashed on import.
+2. `tests/conftest.py` isolated `DB_PATH` but not `LOG_DIR` → every test run appended to the
+   real `agent_runs.jsonl`, and the new observability page showed a deliberate test fixture
+   (`campaign_planner.test` returning `{"options":[{"option_id":"o1"}]}`) as a production
+   failure. The user reported it as an app bug. It was mine.
+3. `npm run build` and `npm run dev` share `.next` → verifying a change with a production
+   build left the running dev server serving MODULE_NOT_FOUND. Cost three restarts.
+
+**Why-chain.** Why did each pass locally? Because the local environment had something the
+target didn't — an extra installed package, a shared writable path, a warm build directory.
+Why wasn't that caught? Because "the tests pass" was treated as equivalent to "this works".
+**Deepest why: `process`** — verification ran in the developer environment, which is by
+definition the one environment where the bug cannot appear.
+
+**Action.** (1) `langgraph>=1.2,<2` pinned, and proven by importing `app.main` from a
+**fresh venv built from requirements.txt alone**. (2) `LOG_DIR` monkeypatched to `tmp_path`,
+with a test asserting `config.LOG_DIR != data/runs`, and the 76 polluted records removed.
+(3) `npm run typecheck` (`tsc --noEmit`) added so compile checks never touch the directory
+dev is serving.
+
+**Preventive action for the class.** A green test run in the dev venv proves the code is
+correct, not that it is *deployable*. Anything that changes dependencies, writes to a shared
+path, or produces build artefacts needs one check in a clean environment before "done" —
+and the check should be constructed so that the old behaviour would have failed it.
+
+## 2026-08-25 — Three bugs stacked behind one refused message
+
+**Symptom.** User typed a real brief with an attached image at the path step and got
+"Didn't catch a campaign command."
+
+**Why-chain.** (1) `_parse` at `stage=paths` only accepted path-choice keywords, so a real
+brief fell through to the hint — the app asked the user to pick a path *after* they had
+answered by typing. (2) Fixing that exposed the attachment being stringified into the prose
+as `[attached images: upl_x]`, so the agent got an opaque id as words with no instruction —
+the file was silently dropped. (3) Fixing that exposed intake hard-failing 3/3 because the
+model emitted a HALF product block (`name: null, description: null`) when the message named
+a use case but not a product. **Deepest why: `design`** — each layer assumed the layer
+before it had produced something well-formed, and none of them said so out loud.
+
+**Action.** Free text at `paths` starts the conversational path with that message; uploads
+travel as `UserEvent.upload_ids` and are applied SERVER-SIDE (`_apply_pending_uploads`) so a
+model that ignores them cannot lose the user's file; prompt 1.3.0 states blocks are
+all-or-nothing with the user's own sentence as the worked example.
+
+**Preventive action.** The tests passed throughout, because they call `save_block()` with
+structured data — they never type like a person. Any conversational surface needs at least
+one test that goes in through the same door a user does. Bugs 1–3 were all reachable only by
+driving the app.
