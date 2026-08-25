@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `14159f1` (plotline-api) · `a6bb767` (plotline-web)
+last-synced: `364e23c` (plotline-api) · `a6bb767` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -29,19 +29,28 @@ council doctrine v3.1.0 + one reviewer · `ReviewPolicy`/settings API/presets ·
 `TakeReject` + `variant_matrix` · **stage checkpoints** · the 5 new stages in
 `CAMPAIGN_STAGES` + `advance_from()`. Step 1 was verified on real sonnet-4-6.
 
-### 🔴 WHAT IS NOT DONE — the app does NOT run the new pipeline yet
-The five new stages have schemas, validators, lints and gates, and `advance_from()` knows
-their order — but **nothing produces their artifacts at runtime**. Specifically:
-1. **No turn handlers.** `_dispatch` routes none of `brief|script|canon|keyframes|qc`.
-   Existing handlers to copy the shape from: `_detail_turn`, `_templates_turn`.
-2. **No prompts.** Need `campaign_brief.md`, `hook_rack.md`, `shot_board.md` (upgrade
-   `campaign_planner.md`'s detail section), `canon_sheet.md`, `qc_report.md`.
-   The W1 table MUST be injected via `validators.script_thresholds_text()`, never hand-copied.
-3. **No web renderers.** `campaign-artifacts.tsx` renders 0 of the 7 new `ArtifactType`s.
-   §12 rendering rules + per-artifact layouts are in `docs/v3-ARTIFACT-SPEC.md`.
-4. **No My Brand tab / canon library page** (still deliberately absent from nav until it exists).
-5. `ReviewPolicy` gates are enforced by `advance_from()` but **no stage handler reads
-   `_pauses_at()` yet** — wire it as each handler lands.
+### ✅ THE PIPELINE RUNS. Verified over HTTP on real Claude.
+Five turn handlers + four prompts + dispatcher routing. Flow: cards → **brief** → options →
+templates(+style block) → **script** (video only) → **board** → **canon** → **keyframes**
+(hard gate) → generate → creative → **qc** → done. `_pauses_at()` is read per stage;
+`advance_from()` steps over `skip`ped work only.
+- **QA image: 21/21 end to end.** QA video: brief/options/script/board all produced.
+- Prompts inject their checks' constants: `script_thresholds_text()` (W1, with the
+  ARITHMETIC not just the ceiling) and `ref_slots_text()` (B3). NEVER hand-copy either.
+- The board is the source of truth; `detail` is its one-way server projection.
+
+### 🔴 WHAT IS STILL MISSING
+1. **No web renderers.** `campaign-artifacts.tsx` renders 0 of the 7 new `ArtifactType`s,
+   so the new gates are API-only. §12 rules + layouts are in `docs/v3-ARTIFACT-SPEC.md`.
+   Flow diagram for orientation: `docs/v3-agentic-flow.html`.
+2. **No My Brand tab / canon library page** (deliberately absent from nav until it exists;
+   canon sheets are workspace-global by owner decision, so it needs its own storage).
+3. **Canon views are planned, never rendered.** `_canon_turn` plans the sheets; nothing
+   generates their coverage images yet, so `validate_canon_sheet(require_coverage=True)`
+   has no caller in the live flow.
+4. **fal untested** — balance is low, so `MOCK_MEDIA=1` throughout. The generate/creative
+   stages are verified for WIRING only; no real image or video has been rendered under v3.
+5. Take taxonomy + variant_matrix exist as contracts with no reject UI behind them.
 
 ### 📌 Prompt lessons from the paid runs — do not undo these
 Three retry causes fixed by prompt, never by weakening a check: (a) the reviewer invented
