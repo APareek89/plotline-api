@@ -17,7 +17,7 @@ FAL_KEY, publicly, **no auth** — see P0-2.
 (owner, THE DESIGN CONTRACT) > `docs/SYSTEM-PROMPT-v2-marketing-studio.md` > Addendum-02 >
 Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT authoritative.
 
-## v3 — PIPELINE RUNS END TO END; UI NOT BUILT (build order in the brief §6)
+## v3 — SHIPPED end to end, API and UI (build order in the brief §6)
 Owner decisions 2026-08-25: RAG removed from the **council only** (planner keeps it) · canon
 sheets **workspace-global** · stakeholder seats ship, but **the council is now ONE Marketing
 Expert** (later owner decision, see below) · final stitch **deferred, checkpoints instead**.
@@ -99,10 +99,10 @@ of the four council calls, which is the main reason it exists.
 - 🟡 `MOCK_MEDIA=1` is set in `.env` from council testing — flip back before media work.
 - 🟡 Corpus is still the real limit: 25 chunks, 0 with a real URL. `kb/sources/*.yaml` →
   ≥60 real-URL chunks. NOTE this now affects the PLANNER ONLY — the reviewer is frozen.
-- 🤖 Addendum-03 leftovers: `brand_profile` storage+routes + **My Brand tab** (deliberately
-  NOT in nav until its page exists — it now also needs to host the Canon library);
-  `reference_media[]` (user reference > template); campaign archive/rename/delete;
-  My Campaigns is still a ROW LIST — §02 wants a folder GRID.
+- 🤖 Addendum-03 leftovers: `brand_profile` storage+routes (My Brand SHIPPED — it hosts the
+  Canon library; brand_profile would be a second section on it); `reference_media[]`
+  (user reference > template); campaign archive/rename/delete; My Campaigns is still a
+  ROW LIST — §02 wants a folder GRID.
 - 🤖 QA finding: `/studio/campaign` Step 2 disables the prompt bar, so the brief-first path
   only works from the thread page. Same step, two affordances.
 - 🤖 Dev DB is full of my QA campaigns ("Path A/B", "QA one image no claims", …). No delete
