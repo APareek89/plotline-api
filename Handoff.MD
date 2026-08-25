@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `364e23c` (plotline-api) · `a6bb767` (plotline-web)
+last-synced: `d6e2347` (plotline-api) · `a6bb767` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -17,12 +17,12 @@ FAL_KEY, publicly, **no auth** — see P0-2.
 (owner, THE DESIGN CONTRACT) > `docs/SYSTEM-PROMPT-v2-marketing-studio.md` > Addendum-02 >
 Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT authoritative.
 
-## v3 — CONTRACTS DONE, RUNTIME NOT WIRED (build order in the brief §6)
+## v3 — PIPELINE RUNS END TO END; UI NOT BUILT (build order in the brief §6)
 Owner decisions 2026-08-25: RAG removed from the **council only** (planner keeps it) · canon
 sheets **workspace-global** · stakeholder seats ship, but **the council is now ONE Marketing
 Expert** (later owner decision, see below) · final stitch **deferred, checkpoints instead**.
 
-**✅ Shipped (147 tests green; floor was 83).** Steps 1-10 of the brief as CONTRACTS:
+**✅ Shipped (155 tests green; floor was 83).** All ten build-order steps:
 council doctrine v3.1.0 + one reviewer · `ReviewPolicy`/settings API/presets ·
 `campaign_brief` · `hook_rack` + W1-W3 · `ShotBoard` + B1-B4 · `style_block` ·
 `canon_sheet` ×4 · `keyframe_board` + hard gate · `qc_report` + rights ledger ·
@@ -67,7 +67,7 @@ of the four council calls, which is the main reason it exists.
   `ad_faa4f000b5` LIVE, credits reconciled exactly); pre-pivot app deleted from both repos
   (−4.8k lines); rumination ported to LangGraph; observability surface; 4 real-mode prompt
   bug classes fixed. See git log + Learning.MD.
-- ✅ **147 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
+- ✅ **155 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
   floor — never weaken one; re-point it only when an INVARIANT changed by owner decision.
 - ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
   real key in `.env`. Start: `bash run.sh` (api+rag+devrag), `npm run dev` (web).
@@ -100,8 +100,6 @@ of the four council calls, which is the main reason it exists.
   only works from the thread page. Same step, two affordances.
 - 🤖 Dev DB is full of my QA campaigns ("Path A/B", "QA one image no claims", …). No delete
   route yet — clean directly if they bother you.
-- 🤖 Corpus is the real limit: 25 chunks, **0 with a real URL**. `kb/sources/*.yaml` → ≥60
-  real-URL chunks is what turns this from a working pipeline into grounded expertise.
 
 ## VIDEO FLOW — RESOLVED by v3 (kept for the rationale)
 Items 1-3 (scenes/shots split, character plan, keyframe/motion split) landed as `ShotBoard`
