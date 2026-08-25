@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 

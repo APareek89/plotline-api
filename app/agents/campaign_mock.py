@@ -213,7 +213,7 @@ def mock_campaign_brief(payload: dict[str, Any], dispatcher: Optional[ToolDispat
         "platforms": list(camp.get("platforms") or []),
         "creative_type": camp.get("creative_type", "image"),
         "target_metric": None,
-        "audience_current_belief": f"they assume every option in this category is the same",
+        "audience_current_belief": "they assume every option in this category is the same",
         "single_message": (claims[0] if claims else product.get("name", "the product"))[:160],
         "brand_role": f"{product.get('name', 'the product')} does the work on screen",
         "offer_cta": "Start now",

@@ -7,7 +7,7 @@ One dead citation fails the whole output.
 from __future__ import annotations
 
 import json
-from typing import Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from app import ccs as ccs_mod
 from app.rag_client import RoutingRag
@@ -26,6 +26,15 @@ from app.schemas import (
     OptionsOutput,
     Plan,
 )
+
+
+if TYPE_CHECKING:  # annotations only — importing these at runtime would close
+    # the loop validators -> schemas -> (nothing), but seats.py and runner.py
+    # both import this module, so keeping the runtime import surface small is
+    # what stops a future edit from creating a cycle.
+    from app.schemas import (CampaignContext, CanonSheet, HookRack, KeyframeBoard,
+                             RightsEntry, ScriptLine, SeatReview, ShotBoard)
+    from app.seats import SeatSpec
 
 
 # Addendum-01 §7.3 thresholds
