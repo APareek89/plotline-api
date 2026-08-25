@@ -69,6 +69,24 @@ canon sheets **workspace-global** · stakeholder seats **ship fully in v3** · f
 - 🔴 **P0-2 Render live, real keys, no auth** — anyone with the URL spends real money.
   RPN 224. Decide: suspend, add auth, or flip to mock. NOTE: flipping `MOCK_LLM=1` would
   ALSO open `/api/agent-runs` publicly (P1-3) — the gate couples two unrelated concerns.
+- 🔴 **CHECKPOINTS — the biggest reliability gap, owner-prioritised over stitching.**
+  A rumination is planner → 3 seats → chair (→ refine repeats the council). Intermediate
+  results live ONLY in memory, so one failure anywhere discards every completed node and
+  the user pays again from zero. Observed live 2026-08-25: planner 209s + seats 120/137/139s
+  all SUCCEEDED, then the chair's connection dropped and all four were binned. The
+  `AgentTransport` retry fixes one node; it does not stop a later failure destroying
+  earlier ones. v3 makes this worse by adding five stages. Fix = persist each stage's
+  output as it completes and resume from the last good one.
+- 🟡 **The council has no UI surface at all.** `Feedback`/`SeatReview` are never emitted as
+  artifacts (CoverageChip renders only on legacy concept/plan/confidence_card, which the v2
+  flow never produces). So doctrine §1's honest-label instruction has no target, and the
+  shipped stakeholder-seat feature produces reviews nobody can see. Backend complete; owner
+  declined the surface for now — small to add.
+- 🟡 `MOCK_MEDIA=1` is set in `.env` from council testing — flip back before media work.
+- 🟡 `/studio/campaign` Step 2 disables the prompt bar, so the brief-first path only works
+  from the thread page. Same step, two affordances.
+- 🟡 Corpus is still the real limit: 25 chunks, 0 with a real URL. `kb/sources/*.yaml` →
+  ≥60 real-URL chunks. NOTE this now affects the PLANNER ONLY — the council is frozen.
 - 🧑 **DECISION NEEDED — video flow reshape.** Proposed from the gofynd reference (below);
   items 1–3 reshape `CampaignDetail` + planner prompt = architecture-shaping, so it needs
   your approval BEFORE code. Item 4 is additive/safe.
