@@ -21,6 +21,29 @@ from app.schemas import CreatorContext, Feedback, Plan, SeatReview
 SEATS = ["performance", "brand", "platform"]
 
 
+def run_seat(
+    seat: str,
+    campaign_payload: dict[str, Any],
+    plan: Plan,
+    dispatcher: Any,
+    mock_seat: Optional[Callable[..., dict]] = None,
+) -> SeatReview:
+    """ONE blind seat. Split out of run_council so the graph can fan the three
+    seats out concurrently — each call is handed its OWN dispatcher, which is
+    what makes the retrieval slices independent."""
+    review, _ = run_agent(
+        agent=f"council.{seat}",
+        prompt_name=f"council/seat_{seat}",
+        model=config.FEEDBACK_MODEL,
+        user_payload={**campaign_payload, "draft": plan.model_dump(mode="json"), "seat": seat},
+        schema=SeatReview,
+        dispatcher=dispatcher,
+        validate=None,
+        mock_fn=(lambda p, d, _s=seat: mock_seat(p, d, _s)) if mock_seat else None,
+    )
+    return review
+
+
 def run_council(
     campaign_payload: dict[str, Any],
     plan: Plan,
@@ -28,24 +51,20 @@ def run_council(
     validate_chair: Callable[[Feedback], Feedback],
     mock_seat: Optional[Callable[..., dict]] = None,
     mock_chair: Optional[Callable[..., dict]] = None,
+    seat_reviews: Optional[list[SeatReview]] = None,
 ) -> tuple[Feedback, list[SeatReview]]:
-    """Blind seats in sequence (each gets a FRESH dispatcher = its own
-    retrieval slice), then the chair merges. Returns (feedback, seat_reviews)
-    — seat outputs are logged for the Activity/audit trail."""
+    """Blind seats (each gets a FRESH dispatcher = its own retrieval slice),
+    then the chair merges. Returns (feedback, seat_reviews) — seat outputs are
+    logged for the Activity/audit trail.
+
+    `seat_reviews` lets a caller that has ALREADY run the seats (the graph, which
+    runs them in parallel) hand them in rather than have them re-run here. The
+    chair path below is identical either way."""
     draft = plan.model_dump(mode="json")
-    reviews: list[SeatReview] = []
-    for seat in SEATS:
-        review, _ = run_agent(
-            agent=f"council.{seat}",
-            prompt_name=f"council/seat_{seat}",
-            model=config.FEEDBACK_MODEL,
-            user_payload={**campaign_payload, "draft": draft, "seat": seat},
-            schema=SeatReview,
-            dispatcher=dispatcher_factory(),
-            validate=None,
-            mock_fn=(lambda p, d, _s=seat: mock_seat(p, d, _s)) if mock_seat else None,
-        )
-        reviews.append(review)
+    reviews: list[SeatReview] = list(seat_reviews) if seat_reviews else [
+        run_seat(seat, campaign_payload, plan, dispatcher_factory(), mock_seat)
+        for seat in SEATS
+    ]
 
     feedback, _ = run_agent(
         agent="council.chair",

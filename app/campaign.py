@@ -31,9 +31,10 @@ from typing import Any, Callable, Optional
 from app import ccs as ccs_mod
 from app import config, store
 from app.agents import campaign_mock
-from app.agents.council import run_council
+from app.agents.council import run_council, run_seat
 from app.agents.runner import AgentHardFail, _cited_ids, run_agent
 from app.fal_client import MediaError, estimate_cost, generate
+from app.graph import RuminationDeps, RuminationState, build_rumination_graph
 from app.rag_client import RagUnavailable, rag
 from app.schemas import (
     AdCard,
@@ -811,7 +812,6 @@ def _options_turn(campaign_id: str, thread_id: str, note: Optional[str] = None,
         rag.ensure_ready()  # dependency-unavailable surfaces BEFORE any agent call
         niche_assets = _niche_asset_count(shadow)
 
-        _working[thread_id] = "drafting options"
         previous = CampaignOptions(options=[ws["options"][oid] for oid in ws["option_order"]]) \
             if regenerate_ids and ws["option_order"] else None
         if previous is not None:
@@ -819,27 +819,14 @@ def _options_turn(campaign_id: str, thread_id: str, note: Optional[str] = None,
             # legal on a regenerate — anything beyond those + what it retrieves
             # NOW is an invented source (same rule as regenerate_concept).
             retrieved |= _cited_ids(previous)
-        options = _run_options(context, shadow, retrieved, niche_assets, note=note,
-                               previous=previous, flagged=set(regenerate_ids or []))
 
-        _working[thread_id] = "council review"
-        plan = _shadow_plan(context, options, shadow)
-        feedback, reviews = _run_council(context, shadow, options, plan, retrieved, niche_assets)
-
-        # One refine loop — kill-flagged or below the qualify gate (v1 cap: ONE).
-        flagged = _flagged_ids(family, feedback)
-        if flagged:
-            _working[thread_id] = f"refining {len(flagged)} option(s) — one pass, diff-checked"
-            fixes = [f.change for v in feedback.concept_verdicts if v.concept_id in flagged for f in v.fixes]
-            options = _run_options(context, shadow, retrieved, niche_assets, note=note,
-                                   previous=options, flagged=flagged, fixes=fixes)
-            plan = _shadow_plan(context, options, shadow)
-            subset = Plan(series=plan.series, concepts=[c for c in plan.concepts if c.id in flagged],
-                          changes=plan.changes)
-            refined_feedback, refined_reviews = _run_council(
-                context, shadow, options, subset, retrieved, niche_assets, only_ids=flagged)
-            feedback = _merge_feedback(feedback, refined_feedback)
-            reviews = reviews + refined_reviews
+        # The rumination pipeline is a GRAPH: plan -> 3 blind seats in parallel
+        # -> chair -> at most one conditional refine. See app/graph.py for why
+        # that shape is load-bearing rather than decorative.
+        options, plan, feedback, reviews, retrieved = _ruminate_graph(
+            context, shadow, retrieved, niche_assets, note=note,
+            previous=previous, regenerate_ids=regenerate_ids,
+            thread_id=thread_id, family=family)
 
         _record_seat_reviews(thread_id, reviews)
         verdicts = {v.concept_id: v for v in feedback.concept_verdicts}
@@ -1043,25 +1030,82 @@ def _shadow_plan(context: CampaignContext, options: CampaignOptions, shadow: Cre
     )
 
 
-def _run_council(context: CampaignContext, shadow: CreatorContext, options: CampaignOptions,
-                 plan: Plan, retrieved: set[str], niche_assets: int,
-                 only_ids: Optional[set[str]] = None) -> tuple[Feedback, list]:
+def _council_payload(context: CampaignContext, options: CampaignOptions, niche_assets: int,
+                     only_ids: Optional[set[str]] = None) -> dict[str, Any]:
     judged = [o.model_dump(mode="json") for o in options.options
               if only_ids is None or o.option_id in only_ids]
-    payload = {
+    return {
         "context": context.model_dump(mode="json"),
         "options": judged,  # verbatim options — seats never judge the truncated shadow copy
         "niche_asset_count": niche_assets,
         "stage": "campaign_options",
     }
+
+
+def _run_seat(*, seat: str, context: CampaignContext, shadow: CreatorContext,
+              options: CampaignOptions, plan: Plan, retrieved: set[str],
+              niche_assets: int, only_ids: Optional[set[str]] = None
+              ) -> tuple[Any, set[str]]:
+    """One blind seat with its OWN dispatcher — the graph calls this three times
+    concurrently. Returns the review AND the ids this seat surfaced, because the
+    chair's citation check is validated against the union of everything
+    retrieved this run."""
+    surfaced = set(retrieved)
+    review = run_seat(
+        seat,
+        _council_payload(context, options, niche_assets, only_ids),
+        plan,
+        _dispatcher(surfaced, context=shadow),
+        campaign_mock.mock_seat,
+    )
+    return review, surfaced
+
+
+_RUMINATION_GRAPH = None
+
+
+def _ruminate_graph(context: CampaignContext, shadow: CreatorContext, retrieved: set[str],
+                    niche_assets: int, *, note: Optional[str], previous: Optional[CampaignOptions],
+                    regenerate_ids: Optional[list[str]], thread_id: str, family: Any):
+    """Run the rumination StateGraph and unpack its final state.
+
+    The graph owns the SHAPE (fan-out, join, one-pass refine cap); every unit of
+    work inside it is the same function the sequential driver called."""
+    global _RUMINATION_GRAPH
+    if _RUMINATION_GRAPH is None:
+        _RUMINATION_GRAPH = build_rumination_graph(RuminationDeps(
+            run_options=_run_options,
+            run_council=_run_council,
+            build_plan=_shadow_plan,
+            flagged_ids=_flagged_ids,
+            merge_feedback=_merge_feedback,
+            objective_family=objective_family,
+            seat_runner=_run_seat,
+            on_step=lambda label: _working.__setitem__(thread_id, label),
+        ))
+    final = _RUMINATION_GRAPH.invoke(RuminationState(
+        context=context, shadow=shadow, niche_assets=niche_assets, note=note,
+        previous=previous, regenerate_ids=list(regenerate_ids or []),
+        retrieved=sorted(retrieved),
+    ))
+    state = final if isinstance(final, RuminationState) else RuminationState(**final)
+    return (state.options, state.plan, state.feedback,
+            list(state.seat_reviews), set(state.retrieved))
+
+
+def _run_council(context: CampaignContext, shadow: CreatorContext, options: CampaignOptions,
+                 plan: Plan, retrieved: set[str], niche_assets: int,
+                 only_ids: Optional[set[str]] = None,
+                 seat_reviews: Optional[list] = None) -> tuple[Feedback, list]:
     return run_council(
-        payload,
+        _council_payload(context, options, niche_assets, only_ids),
         plan,
         dispatcher_factory=lambda: _dispatcher(retrieved, context=shadow),
         validate_chair=lambda f: validate_feedback(
             f, plan, shadow, rag, retrieved_ids=retrieved, niche_asset_count=niche_assets),
         mock_seat=campaign_mock.mock_seat,
         mock_chair=getattr(campaign_mock, "mock_chair", None) or _chair_merge,
+        seat_reviews=seat_reviews,
     )
 
 

@@ -22,10 +22,13 @@ from app.schemas import (
     AgentMessage,
     CampaignContext,
     CampaignDetail,
+    CampaignOption,
     CampaignOptions,
     Feedback,
     ModelConfirm,
+    Plan,
     SeatReview,
+    SeatScore,
     UserEvent,
     objective_family,
 )
@@ -717,7 +720,11 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     monkeypatch.setattr(campaign_mock, "mock_seat", spy)
     cid, tid = _ruminated("Council")
 
-    assert [s["seat"] for s in seen[:3]] == ["performance", "brand", "platform"]
+    # ORDER IS NO LONGER ASSERTED, ON PURPOSE. The seats are fanned out as three
+    # concurrent nodes in the rumination graph, so completion order is not
+    # deterministic — asserting it would pin an artifact of the old for-loop.
+    # What must hold is that ALL THREE ran and none shared a retrieval slice.
+    assert sorted(s["seat"] for s in seen[:3]) == ["brand", "performance", "platform"]
     assert len(dispatchers) == len(set(id(d) for d in dispatchers))   # a fresh slice each
     for record in seen:
         payload = record["payload"]
@@ -960,3 +967,85 @@ def test_real_mode_without_a_key_is_refused_up_front_not_discovered_mid_run(monk
     monkeypatch.setattr(config, "LLM_KEY_PRESENT", True)
     assert config.llm_unavailable_reason() is None
     assert main.health()["llm_unavailable"] is None
+
+
+def test_the_rumination_graph_fans_the_seats_out_and_caps_refine_at_one_pass():
+    """The shape itself is the invariant. In the sequential driver 'three blind
+    seats' and 'one refine pass' were conventions a future edit could quietly
+    break; as a graph they are edges and state, so they are checkable."""
+    from app.graph import RuminationState, build_rumination_graph, RuminationDeps
+    from app.agents.council import SEATS
+
+    graph = build_rumination_graph(RuminationDeps(
+        run_options=lambda *a, **k: None, run_council=lambda *a, **k: (None, []),
+        build_plan=lambda *a, **k: None, flagged_ids=lambda *a, **k: set(),
+        merge_feedback=lambda a, b: a, objective_family=lambda o: o,
+        seat_runner=lambda **k: (None, set()),
+    ))
+    drawn = graph.get_graph()
+    edges = {(e.source, e.target) for e in drawn.edges}
+    nodes = set(drawn.nodes)
+
+    for seat in SEATS:
+        node = f"seat_{seat}"
+        assert node in nodes
+        assert ("plan_options", node) in edges      # fanned out from ONE node…
+        assert (node, "chair") in edges             # …and joined at the chair
+        # blindness as a graph property: no seat feeds another seat
+        for other in SEATS:
+            if other != seat:
+                assert (node, f"seat_{other}") not in edges
+
+    # the refine pass may be entered, but never re-entered
+    assert ("refine", "chair") not in edges
+    assert ("refine", "refine") not in edges
+
+
+def test_refine_cannot_run_twice_even_if_options_stay_flagged():
+    """The one-pass cap lives in state (`refine_done`), so an option that is
+    STILL flagged after refining ends the run instead of looping forever."""
+    from app.graph import RuminationState, build_rumination_graph, RuminationDeps
+
+    calls = {"refine": 0}
+
+    def _refine_council(*a, **k):
+        return Feedback(concept_verdicts=[]), []
+
+    def _opts():
+        return CampaignOptions(options=[
+            CampaignOption(option_id=f"o{i}", name_line=f"Angle {i}",
+                           description="d", storyline="a split screen shows the proof",
+                           objective_echo="conversions", why_it_fits="no evidence in DB",
+                           evidence=[])
+            for i in (1, 2)
+        ])
+
+    def _run_options(*a, **k):
+        if k.get("previous") is not None:
+            calls["refine"] += 1
+        return _opts()
+
+    graph = build_rumination_graph(RuminationDeps(
+        run_options=_run_options,
+        run_council=_refine_council,
+        build_plan=campaign._shadow_plan,          # the real one — no fake Plan to keep valid
+        flagged_ids=lambda f, fb: {"o1"},          # ALWAYS flagged — the pathological case
+        merge_feedback=lambda a, b: a,
+        objective_family=lambda o: o,
+        # a REAL SeatReview: RuminationState validates every value that crosses
+        # an edge, so a None here is rejected before it can reach the chair
+        seat_runner=lambda **k: (
+            SeatReview(seat=k["seat"], element_scores=[
+                SeatScore(element="hook_strength", rating="L", reason="r", evidence=[])
+            ]), set()),
+    ))
+    final = graph.invoke(RuminationState(
+        context=CampaignContext.model_validate({"name": "n", "product": PRODUCT,
+                                                "campaign": CAMPAIGN, "brand": BRAND}),
+        shadow=campaign._shadow_context(
+            CampaignContext.model_validate({"name": "n", "product": PRODUCT,
+                                            "campaign": CAMPAIGN, "brand": BRAND})),
+    ))
+    state = final if isinstance(final, RuminationState) else RuminationState(**final)
+    assert calls["refine"] == 1          # exactly one refine, never two
+    assert state.refine_done is True
