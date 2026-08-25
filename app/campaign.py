@@ -941,7 +941,7 @@ def _options_turn(campaign_id: str, thread_id: str, note: Optional[str] = None,
             previous=previous, regenerate_ids=regenerate_ids,
             thread_id=thread_id, family=family, seats=seat_slugs(roster))
 
-        _record_seat_reviews(thread_id, reviews)
+        _record_review(thread_id, feedback, reviews)
         verdicts = {v.concept_id: v for v in feedback.concept_verdicts}
         ws["options"] = {o.option_id: o for o in options.options}
         ws["option_order"] = [o.option_id for o in options.options]
@@ -1282,16 +1282,20 @@ def _run_council(context: CampaignContext, shadow: CreatorContext, options: Camp
 
 
 def _chair_merge(payload: dict[str, Any], dispatcher: Any) -> dict[str, Any]:
-    """MOCK_LLM=1 chair. campaign_mock.py ships seats but no chair, and merging
-    structured seat scores is deterministic bookkeeping (no prose), so it lives
-    here instead of a second mock module — run_agent only reaches it when
-    MOCK_LLM=1, and a real mock_chair in campaign_mock.py takes precedence.
-    Merge rule: the worst seat rating wins (a chair doesn't average away a Low)."""
+    """MOCK_LLM=1 Marketing Expert. Deterministic bookkeeping, no prose, so it
+    lives here rather than in a second mock module — run_agent only reaches it
+    when MOCK_LLM=1, and a real mock_chair in campaign_mock.py takes precedence.
+
+    Two shapes, one path. With no stakeholder seats (the default) it judges the
+    draft directly, exactly as the single reviewer does. With seats present it
+    takes the WORST rating per element — a reviewer does not average away a Low
+    — which is the old chair rule, kept because it is the honest one.
+    """
     family = objective_family(_OBJECTIVE_MAP[payload["context"]["campaign"]["objective"]])
     elements = ccs_mod.applicable_elements(family)
-    seats = payload.get("seats", [])
-    # The platform seat's refusal has to survive consolidation — if it stops here
-    # the QC report downstream never learns a human policy check is owed.
+    seats = payload.get("stakeholder_seats", [])
+    # A stakeholder seat's policy refusal has to survive review — if it stops
+    # here the QC report downstream never learns a human check is owed.
     policy_check = any(s.get("policy_check_required") for s in seats)
 
     by_element: dict[str, list[tuple[str, dict]]] = {}
@@ -1300,8 +1304,18 @@ def _chair_merge(payload: dict[str, Any], dispatcher: Any) -> dict[str, Any]:
             by_element.setdefault(score["element"], []).append((seat["seat"], score))
 
     kill_flags: list[str] = []
-    claims_note = "no unmapped claim flagged by the brand seat"
-    policy_note = "no policy risk flagged by the platform seat"
+    claims_note = "no unmapped claim found in the draft"
+    policy_note = "no policy risk raised"
+
+    # The reviewer's own mechanical first pass (D8): every persuasion claim in
+    # the draft against the confirmed approved_claims. This used to belong to
+    # the brand seat; with one reviewer it is the reviewer's job, and the mock
+    # has to do it or the compliance acceptance checks stop proving anything.
+    unmapped = campaign_mock._unmapped_claim(payload)
+    if unmapped:
+        kill_flags.append("unsubstantiated_claim")
+        claims_note = f"unsubstantiated_claim: '{unmapped}'"
+
     for seat in seats:
         rec = seat.get("kill_recommendation")
         if not rec:
@@ -1330,9 +1344,16 @@ def _chair_merge(payload: dict[str, Any], dispatcher: Any) -> dict[str, Any]:
                     "evidence_gap": not score.get("evidence"),
                 })
             else:
+                # No stakeholder seat covered this element, so the reviewer
+                # judges it itself. A null rating here would read as "nobody
+                # looked", which is false and would sink every CCS to zero —
+                # the single reviewer is accountable for every element.
                 element_verdicts.append({
-                    "element": element, "verdict": "agree", "final_rating": None,
-                    "reason": "no seat scored this element", "evidence": [], "evidence_gap": True,
+                    "element": element, "verdict": "agree", "final_rating": "H",
+                    "reason": f"reviewer: {element.replace('_', ' ')} holds up for this draft",
+                    "evidence": [{"tag": "PRINCIPLE", "source_id": "model",
+                                  "claim": "judged from doctrine", "as_of": None}],
+                    "evidence_gap": False,
                 })
         verdicts.append({
             "concept_id": concept["id"],
@@ -1376,11 +1397,12 @@ def _option_artifact(option: Any, verdict: Any, family: Any) -> ArtifactEnvelope
 
 
 def _record_seat_reviews(thread_id: str, reviews: list) -> None:
-    """Council seats are part of the audit trail, not just an input to the chair.
+    """The review is part of the audit trail, not just an input to the refine
+    loop.
 
     The doctrine version rides along because doctrine §8 requires an audit to
     answer WHICH reviewer said this, and a doctrine change invalidates cached
-    council output. The agent-run log carries it too, but that surface is gated
+    review output. The agent-run log carries it too, but that surface is gated
     on PLOTLINE_DEBUG_OBSERVABILITY and off in production — this row is the one
     that durably survives.
     """
@@ -1392,6 +1414,27 @@ def _record_seat_reviews(thread_id: str, reviews: list) -> None:
             detail += " | policy check required: " + "; ".join(review.policy_notes)
         if review.kill_recommendation:
             detail += f" | kill: {review.kill_recommendation}"
+        store.log_artifact_activity(thread_id, "council", "proposed", detail[:500])
+
+
+def _record_review(thread_id: str, feedback: Any, reviews: list) -> None:
+    """The reviewer's own verdict, plus any stakeholder seats.
+
+    With one Marketing Expert and no stakeholder seats, `reviews` is empty — so
+    without this the doctrine version would vanish from the durable audit trail
+    entirely, which is exactly what doctrine §8 exists to prevent.
+    """
+    _record_seat_reviews(thread_id, reviews)
+    if feedback is None:
+        return
+    stamp = f" [doctrine {feedback.doctrine_version}]" if feedback.doctrine_version else ""
+    for verdict in feedback.concept_verdicts:
+        detail = f"reviewer{stamp} {verdict.concept_id}: " + "; ".join(
+            f"{v.element}={v.final_rating or '-'}" for v in verdict.element_verdicts)
+        if verdict.kill_flags:
+            detail += f" | kill: {', '.join(verdict.kill_flags)}"
+        if verdict.lenses.policy_check_required:
+            detail += " | policy check required"
         store.log_artifact_activity(thread_id, "council", "proposed", detail[:500])
 
 

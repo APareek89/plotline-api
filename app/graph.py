@@ -169,17 +169,17 @@ def build_rumination_graph(deps: RuminationDeps, seats: Optional[list[str]] = No
         run_seat.__name__ = f"seat_{seat}"
         return run_seat
 
-    # ------------------------------------------------------------------ chair
-    def chair(state: RuminationState) -> dict[str, Any]:
-        _step("council review")
+    # ----------------------------------------------------------------- review
+    def review(state: RuminationState) -> dict[str, Any]:
+        _step("expert review")
         assert state.options is not None and state.plan is not None
-        # DETERMINISM AT THE JOIN. The seats run concurrently, so they land in
-        # the reducer in completion order — i.e. in whatever order the model
-        # happened to answer (92s/175s/119s on the last real run). The chair is
-        # an LLM and LLMs are order-sensitive, so feeding it a different seat
-        # order run-to-run makes the whole rumination irreproducible for the
-        # same input. Sorting to the canonical SEATS order here keeps the
-        # parallel speed-up AND restores a deterministic input to the chair.
+        # DETERMINISM AT THE JOIN, when there is one. Stakeholder seats run
+        # concurrently and land in the reducer in completion order — i.e. in
+        # whatever order the models happened to answer. The reviewer is an LLM
+        # and LLMs are order-sensitive, so a different seat order run-to-run
+        # would make the same input irreproducible. Sorting to the canonical
+        # roster order keeps the parallel speed-up and restores a deterministic
+        # input. With no stakeholder seats this is a sort of an empty list.
         ordered = sorted(
             state.seat_reviews,
             key=lambda r: roster.index(r.seat) if r.seat in roster else len(roster),
@@ -236,14 +236,19 @@ def build_rumination_graph(deps: RuminationDeps, seats: Optional[list[str]] = No
     graph.add_node("plan_options", plan_options)
     for seat in roster:
         graph.add_node(f"seat_{seat}", _seat_node(seat))
-    graph.add_node("chair", chair)
+    graph.add_node("review", review)
     graph.add_node("refine", refine)
 
     graph.add_edge(START, "plan_options")
-    # one edge out to N nodes = concurrent fan-out; they join at the chair
-    for seat in roster:
-        graph.add_edge("plan_options", f"seat_{seat}")
-        graph.add_edge(f"seat_{seat}", "chair")
-    graph.add_conditional_edges("chair", should_refine, {"refine": "refine", END: END})
+    if roster:
+        # stakeholder seats: one edge out to N nodes = concurrent fan-out, and
+        # they join at the reviewer, who judges them rather than averaging them
+        for seat in roster:
+            graph.add_edge("plan_options", f"seat_{seat}")
+            graph.add_edge(f"seat_{seat}", "review")
+    else:
+        # the default shape: plan -> review -> [refine once] -> END
+        graph.add_edge("plan_options", "review")
+    graph.add_conditional_edges("review", should_refine, {"refine": "refine", END: END})
     graph.add_edge("refine", END)
     return graph.compile()

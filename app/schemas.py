@@ -494,6 +494,114 @@ CampaignObjective = Literal["awareness", "traffic", "conversions"]
 CreativeType = Literal["video", "image"]
 
 
+# ------------------------------------------------- v3 §4: the settings model --
+
+GateMode = Literal["review", "auto", "skip"]
+
+# Every stage whose PAUSE can be configured. Deliberately not the same list as
+# CAMPAIGN_STAGES: `name`, `paths`, `cards`, `generate` and `done` are not here,
+# and `generate` is the important absence — see _hard_rules below.
+GATEABLE_STAGES = ["brief", "options", "templates", "script", "detail",
+                   "canon", "keyframes", "creative", "qc"]
+
+# §4.3 rule 5. `skip` means the WORK is not done, so it is legal in exactly two
+# places, and both surface what is being traded away.
+SKIPPABLE_STAGES = {"templates", "canon"}
+
+
+class ReviewPolicy(Strict):
+    """Per-campaign. How deep the pipeline runs and where it stops for you.
+
+    THE SEMANTIC THAT MAKES THIS SAFE: a gate mode controls whether the flow
+    PAUSES. It never controls whether the artifact is PRODUCED. Downstream
+    stages consume upstream artifacts — keyframes cannot exist without a board —
+    and the Activity/generation_log audit trail has to stay complete however
+    fast the user wants to move. An agency that turns gates off still needs to
+    show a client the board afterwards.
+
+    Defaults reproduce today's behaviour exactly: every gate `review`, every
+    media count 1.
+    """
+
+    gates: dict[str, GateMode] = Field(
+        default_factory=lambda: {g: "review" for g in GATEABLE_STAGES})
+
+    # counts apply from IMAGE GENERATION ONWARDS — each one multiplies real spend
+    keyframes_per_shot: int = Field(default=1, ge=1, le=4)
+    takes_per_shot: int = Field(default=1, ge=1, le=4)
+    variants: int = Field(default=1, ge=1, le=3)
+    voice_candidates: int = Field(default=1, ge=1, le=12)
+
+    # free/text stages — separate, because they cost nothing and more is better
+    options_count: int = Field(default=3, ge=2, le=3)
+    hooks_count: int = Field(default=5, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def _hard_rules(self) -> "ReviewPolicy":
+        """§4.3 — the rules no setting may configure away."""
+        unknown = sorted(set(self.gates) - set(GATEABLE_STAGES))
+        if unknown:
+            # `generate` lands here on purpose. The model_confirm card and the
+            # single-vs-variants question ALWAYS precede generation; there is no
+            # setting that removes a cost gate, so `generate` is not gateable and
+            # naming it is an error rather than a no-op.
+            raise ValueError(
+                f"{unknown} are not gateable stages. Cost gates (model_confirm, "
+                "single-vs-variants) and claims_confirmed always fire and cannot be "
+                f"configured away; gateable stages are {GATEABLE_STAGES}")
+        for stage, mode in self.gates.items():
+            if mode != "skip":
+                continue
+            if stage == "qc":
+                raise ValueError(
+                    "qc cannot be skipped. `auto` means 'do not stop for me to read the "
+                    "accepted-tier items' — it never means 'do not check'; blocking "
+                    "findings halt delivery regardless of gate mode")
+            if stage == "keyframes":
+                raise ValueError(
+                    "keyframes cannot be skipped. Animating an unapproved frame is the "
+                    "mistake the whole cost ladder exists to prevent; for an image "
+                    "campaign the keyframes ARE the deliverable, so skip is meaningless")
+            if stage not in SKIPPABLE_STAGES:
+                raise ValueError(
+                    f"{stage} cannot be skipped — skip means the work is not done, and it "
+                    f"is only legal on {sorted(SKIPPABLE_STAGES)}, both of which surface "
+                    "what is traded away")
+        return self
+
+    def mode(self, stage: str) -> GateMode:
+        """Non-gateable stages always `review`: absent config can never mean an
+        absent gate."""
+        if stage not in GATEABLE_STAGES:
+            return "review"
+        return self.gates.get(stage, "review")
+
+    def pauses_at(self, stage: str) -> bool:
+        return self.mode(stage) == "review"
+
+
+# §4.4 — presets write the SAME ReviewPolicy; they are not a second model.
+POLICY_PRESETS: dict[str, dict[str, Any]] = {
+    "full_craft": {},  # every default — brand work, new client, client review
+    "fast": {  # known brand, repeat campaign
+        "gates": {**{g: "review" for g in GATEABLE_STAGES},
+                  "brief": "auto", "templates": "auto", "script": "auto", "canon": "auto"},
+    },
+    "volume": {  # performance testing, hook fan-out
+        "gates": {**{g: "auto" for g in GATEABLE_STAGES},
+                  "keyframes": "review", "qc": "review"},
+        "takes_per_shot": 2,
+        "variants": 3,
+    },
+}
+
+
+def policy_from_preset(name: str) -> "ReviewPolicy":
+    if name not in POLICY_PRESETS:
+        raise ValueError(f"unknown preset {name!r} — one of {sorted(POLICY_PRESETS)}")
+    return ReviewPolicy.model_validate(POLICY_PRESETS[name])
+
+
 class ProductBlock(Strict):
     name: str
     description: str

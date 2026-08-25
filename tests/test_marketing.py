@@ -289,24 +289,23 @@ def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves
 
 
 def test_unmapped_claim_produces_a_kill_flag_and_withholds_the_option(monkeypatch):
-    """Brand seat holds the kill flag: a persuasion claim outside the CONFIRMED
-    approved list is killed, and a killed option never reaches the user."""
-    dispatcher = threadkit._dispatcher(set())
-    review = SeatReview.model_validate(campaign_mock.mock_seat(
-        {"context": {"brand": {"approved_claims": ["files GST in 60 seconds"]}},
-         "draft": {"concepts": [{"id": "o1", "claims_used": ["3x faster than QuickBooks"]}]}},
-        dispatcher, "brand"))
-    assert review.kill_recommendation and "3x faster than QuickBooks" in review.kill_recommendation
+    """The reviewer holds the kill flag: a persuasion claim outside the CONFIRMED
+    approved list is killed, and a killed option never reaches the user.
 
-    seat_of = campaign_mock.mock_seat
+    This used to belong to the Brand seat. With one Marketing Expert (owner
+    decision 2026-08-25) the compliance pass is the reviewer's own mechanical
+    first pass — the rule is unchanged, the holder is."""
+    real = campaign._chair_merge
 
-    def brand_seat_kills(payload, dispatcher, seat):
-        out = seat_of(payload, dispatcher, seat)
-        if seat == "brand":
-            out["kill_recommendation"] = "unsubstantiated claim: '3x faster than QuickBooks' is not confirmed"
+    def reviewer_kills(payload, dispatcher):
+        out = real(payload, dispatcher)
+        for verdict in out["concept_verdicts"]:
+            verdict["kill_flags"] = ["unsubstantiated_claim"]
+            verdict["lenses"]["claims_safety"] = (
+                "unsubstantiated_claim: '3x faster than QuickBooks' is not confirmed")
         return out
 
-    monkeypatch.setattr(campaign_mock, "mock_seat", brand_seat_kills)
+    monkeypatch.setattr(campaign, "_chair_merge", reviewer_kills)
     cid, tid = _ruminated("Killed")
 
     assert _artifacts(tid, "campaign_option") == []     # nothing shipped
@@ -721,45 +720,38 @@ def test_campaign_lifecycle_lands_in_the_store():
         AgentMessage.model_validate(envelope)               # ≤2 sentences, ≤1 question
 
 
-# ----------------------------------------- check 10: blind council + one chair --
+# ------------------------------- check 10: one reviewer, the v1 Feedback shape --
 
 
-def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeypatch):
+def test_the_reviewer_judges_blind_and_returns_the_v1_feedback(monkeypatch):
+    """Owner decision 2026-08-25: after the planner, ONE Marketing Expert reviews
+    the draft and feeds refinement. Three blind seats plus a chair were four LLM
+    calls whose combined product was one Feedback; the reviewer emits it
+    directly, so the consolidation step is gone rather than faster.
+
+    What did NOT change: the reviewer never sees the planner's self-ratings, and
+    the Feedback contract the refine loop consumes is untouched."""
     seen: list[dict] = []
-    dispatchers: list = []                 # held so identity comparison is meaningful
-    seat_of = campaign_mock.mock_seat
+    real = campaign._chair_merge
 
-    def spy(payload, dispatcher, seat):
-        seen.append({"seat": seat, "payload": payload})
-        dispatchers.append(dispatcher)
-        return seat_of(payload, dispatcher, seat)
+    def spy(payload, dispatcher):
+        seen.append({"payload": payload, "dispatcher": dispatcher})
+        return real(payload, dispatcher)
 
-    monkeypatch.setattr(campaign_mock, "mock_seat", spy)
-    cid, tid = _ruminated("Council")
+    monkeypatch.setattr(campaign, "_chair_merge", spy)
+    cid, tid = _ruminated("Reviewer")
 
-    # The seats EXECUTE concurrently, so the order they finish in is not fixed —
-    # that is why this asserts the set. Determinism is restored where it matters:
-    # the chair node sorts to the canonical SEATS order before the chair sees
-    # them (see test_the_chair_always_sees_seats_in_canonical_order), so the same
-    # input yields the same chair input regardless of who answered first.
-    assert sorted(s["seat"] for s in seen[:3]) == ["brand", "performance", "platform"]
-    # v3: blindness used to be expressed as "a fresh dispatcher each, so each seat
-    # sees its own retrieval slice". The council no longer retrieves at all, so
-    # the same invariant is now the stronger statement — NO seat gets a
-    # dispatcher, and there is no slice to leak between them. The other half of
-    # blindness (no seat sees another's output) is asserted in the loop below and
-    # is unchanged.
-    assert dispatchers and all(d is None for d in dispatchers)
+    assert seen, "the reviewer never ran"
     for record in seen:
         payload = record["payload"]
-        assert "seats" not in payload and "feedback" not in payload   # no sight of each other
-        assert not any("kill_recommendation" in json.dumps(v, default=str)
-                       for k, v in payload.items() if k != "draft")
-        # no planner self-ratings travel to a seat
-        assert all(c["element_scores"] == [] for c in payload["draft"]["concepts"])
+        # judges from doctrine: no tools, no retrieval slice to leak
+        assert record["dispatcher"] is None
+        # no stakeholder seats configured, so there is nothing to consolidate
+        assert "stakeholder_seats" not in payload
+        # and no planner self-ratings reach the reviewer — its judgment is its own
+        assert all(c["element_scores"] == [] for c in payload["plan"]["concepts"])
         assert payload["options"] and payload["stage"] == "campaign_options"
 
-    # …and the chair consolidates into the UNCHANGED v1 Feedback schema
     context = campaign._context_of(cid)
     shadow = campaign._shadow_context(context)
     options = CampaignOptions(options=list(campaign._ws(tid)["options"].values()))
@@ -768,33 +760,36 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     niche = campaign._niche_asset_count(shadow)
     feedback, reviews = campaign._run_council(context, shadow, options, plan, retrieved, niche)
 
-    # The v1 CONSOLIDATION contract is untouched: concept_verdicts is still the
-    # whole of what the chair decides. doctrine_version is an audit stamp the
-    # server writes after validation (doctrine §8 — a Feedback that cannot name
-    # its doctrine cannot be safely reused), never something the chair produces.
+    # The v1 contract is untouched: concept_verdicts is still the whole of what
+    # the review decides. doctrine_version is an audit stamp the server writes
+    # after validation (doctrine §8), never something the model produces.
     assert isinstance(feedback, Feedback)
     assert set(Feedback.model_fields) == {"concept_verdicts", "doctrine_version"}
     from app.agents.council import doctrine_version
     assert feedback.doctrine_version == doctrine_version()
-    assert len(reviews) == 3 and all(isinstance(r, SeatReview) for r in reviews)
-    assert {r.seat for r in reviews} == {"performance", "brand", "platform"}
+    # one reviewer, so no seat reviews at all unless a stakeholder seat is added
+    assert reviews == []
 
     family = objective_family(shadow.objective)
     required = set(ccs_mod.applicable_elements(family))
     assert {v.concept_id for v in feedback.concept_verdicts} == {c.id for c in plan.concepts}
     for verdict in feedback.concept_verdicts:
         assert {e.element for e in verdict.element_verdicts} >= required
-        assert verdict.lenses.saturation.insufficient_data is (niche < 25)
+        # unconditional now: a doctrine reviewer scans no corpus, so no asset
+        # count earns a real saturation answer
+        assert verdict.lenses.saturation.insufficient_data is True
         assert verdict.ccs_final == ccs_mod.compute_ccs(family, ccs_mod.final_ratings_of(verdict))
     # the v1 validator accepts it untouched — no campaign-shaped escape hatch
     assert validate_feedback(feedback, plan, shadow, campaign.rag,
                              retrieved_ids=retrieved, niche_asset_count=niche) is feedback
 
-    # every seat's score is in the audit trail, not just in the chair's head
+    # the review is in the audit trail, not just in the reviewer's head — one row
+    # per option, each naming the doctrine that produced it (doctrine §8)
     logged = [a["detail"] for a in store.get_artifact_activity(tid, "council")]
-    assert len(logged) >= 3
-    assert {seat for seat in ("performance", "brand", "platform")
-            if any(seat in detail for detail in logged)} == {"performance", "brand", "platform"}
+    assert logged, "the review left no audit row"
+    assert all(d.startswith("reviewer [doctrine ") for d in logged)
+    assert {oid for oid in campaign._ws(tid)["options"]} <= {
+        d.split("] ", 1)[1].split(":", 1)[0] for d in logged}
 
 
 def test_a_truncated_agent_response_is_never_parsed_as_if_complete(monkeypatch):
@@ -1082,28 +1077,35 @@ def test_refine_cannot_run_twice_even_if_options_stay_flagged():
     assert state.refine_done is True
 
 
-def test_the_chair_always_sees_seats_in_canonical_order(monkeypatch):
-    """The seats EXECUTE concurrently, so they finish in whatever order the
-    model answers (92s/175s/119s on the last real run). The chair is an LLM and
-    LLMs are order-sensitive, so an unsorted join would make the same input
-    produce different rumination run-to-run. The chair node sorts to the
-    canonical SEATS order — parallel speed, deterministic input."""
-    from app.agents import council as council_mod
+def test_the_reviewer_sees_stakeholder_seats_in_canonical_order(tmp_path, monkeypatch):
+    """Stakeholder seats EXECUTE concurrently, so they finish in whatever order
+    the models answer. The reviewer is an LLM and LLMs are order-sensitive, so an
+    unsorted join would make the same input produce a different review
+    run-to-run. The review node sorts to the canonical roster order — parallel
+    speed, deterministic input.
 
-    seen: list[list[str]] = []
-    real = council_mod.run_council
+    With no stakeholder seats (the default) there is no join to make
+    deterministic, which is one more thing the single reviewer removed."""
+    from app import seats as seats_mod
 
-    def spy(payload, plan, *a, seat_reviews=None, **k):
-        if seat_reviews:
-            seen.append([r.seat for r in seat_reviews])
-        return real(payload, plan, *a, seat_reviews=seat_reviews, **k)
+    _stakeholder_prompts(tmp_path, monkeypatch,
+                         {"my_cmo": "SEAT — the client's CMO.",
+                          "legal": "SEAT — client legal."})
+    roster = seats_mod.resolve(["my_cmo", "legal"])
+    order = seats_mod.slugs(roster)
+    assert order == ["my_cmo", "legal"]
 
-    monkeypatch.setattr(campaign, "run_council", spy)
-    _ruminated("Canonical order")
-
-    assert seen, "the chair never received pre-computed seat reviews"
-    for order in seen:
-        assert order == council_mod.SEATS, f"chair saw {order}, not {council_mod.SEATS}"
+    from app.graph import RuminationDeps, build_rumination_graph
+    graph = build_rumination_graph(RuminationDeps(
+        run_options=lambda *a, **k: None, run_council=lambda *a, **k: (None, []),
+        build_plan=lambda *a, **k: None, flagged_ids=lambda *a, **k: set(),
+        merge_feedback=lambda a, b: a, objective_family=lambda o: o,
+        seat_runner=lambda **k: (None, set()),
+    ), seats=order)
+    edges = {(e.source, e.target) for e in graph.get_graph().edges}
+    for slug in order:
+        assert ("plan_options", f"seat_{slug}") in edges
+        assert (f"seat_{slug}", "review") in edges
 
 
 def test_one_product_image_is_enough_and_claims_do_not_block_the_start():
@@ -1288,8 +1290,8 @@ def test_a_council_pass_makes_zero_retrieval_calls():
 
 
 def test_every_council_citation_is_a_principle():
-    """A seat with no corpus has nothing to cite but its own judgment, and must
-    say so in the tag rather than borrowing an id the planner retrieved."""
+    """A reviewer with no corpus has nothing to cite but its own judgment, and
+    must say so in the tag rather than borrowing an id the planner retrieved."""
     cid, tid = _ruminated("Principle only")
     context = campaign._context_of(cid)
     shadow = campaign._shadow_context(context)
@@ -1442,11 +1444,11 @@ def test_a_kill_flag_is_never_dropped_in_silence():
 def test_the_doctrine_reaches_every_seat_and_the_chair():
     """Prompt-and-check drift is the bug class that cost this project a paid run
     before (the R2 lexicon). The doctrine is injected, so assert it ARRIVES."""
-    from app.agents.council import doctrine_version
+    from app.agents.council import REVIEWER_PROMPT, doctrine_version
     from app.agents.runner import build_system
     from app.seats import BUILTIN_SEATS
 
-    for name in [f"council/seat_{s}" for s in BUILTIN_SEATS] + ["council/chair"]:
+    for name in [f"council/seat_{s}" for s in BUILTIN_SEATS] + [REVIEWER_PROMPT]:
         system, version = build_system(name, None, ["council/doctrine"])
         # the persona, the beliefs, and the red lines all arrived
         assert "would I put my name on this going live tomorrow" in system
@@ -1483,7 +1485,8 @@ def test_a_stakeholder_seat_joins_the_council_without_a_schema_change(tmp_path, 
     _stakeholder_prompts(tmp_path, monkeypatch, {"my_cmo": "SEAT — the client's CMO."})
     roster = seats_mod.resolve(["my_cmo"])
 
-    assert seats_mod.slugs(roster) == ["performance", "brand", "platform", "my_cmo"]
+    # the reviewer is not a seat, so a campaign's roster is exactly its guests
+    assert seats_mod.slugs(roster) == ["my_cmo"]
     assert SeatReview.model_validate(_seat_review(seat="my_cmo")).seat == "my_cmo"
 
     # …and it becomes exactly one more node on the graph, nothing else
@@ -1497,14 +1500,15 @@ def test_a_stakeholder_seat_joins_the_council_without_a_schema_change(tmp_path, 
     drawn = graph.get_graph()
     edges = {(e.source, e.target) for e in drawn.edges}
     assert "seat_my_cmo" in set(drawn.nodes)
-    assert ("plan_options", "seat_my_cmo") in edges and ("seat_my_cmo", "chair") in edges
-    for other in ("performance", "brand", "platform"):
-        assert ("seat_my_cmo", f"seat_{other}") not in edges   # blindness holds for guests too
+    assert ("plan_options", "seat_my_cmo") in edges and ("seat_my_cmo", "review") in edges
+    # with a guest present the planner no longer feeds the reviewer directly —
+    # the guest is in between, and the reviewer judges it
+    assert ("plan_options", "review") not in edges
 
 
 def test_a_stakeholder_seat_cannot_kill_unless_its_file_grants_it(tmp_path, monkeypatch):
-    """Compliance authority stays with the Brand seat by default. The failure
-    mode is a client's guest reviewer silently killing a campaign."""
+    """Compliance authority stays with the Marketing Expert by default. The
+    failure mode is a client's guest reviewer silently killing a campaign."""
     from app import seats as seats_mod
     from app.validators import validate_seat_review
 
@@ -1515,7 +1519,6 @@ def test_a_stakeholder_seat_cannot_kill_unless_its_file_grants_it(tmp_path, monk
     by_slug = {s.slug: s for s in seats_mod.resolve(["my_cmo", "legal"])}
     assert by_slug["my_cmo"].can_kill is False
     assert by_slug["legal"].can_kill is True
-    assert by_slug["brand"].can_kill is True        # built-ins keep their flags
 
     killing = SeatReview.model_validate(
         _seat_review(seat="my_cmo", kill_recommendation="policy_risk: I don't like it"))
@@ -1533,9 +1536,9 @@ def test_the_seat_cap_holds_and_an_unknown_seat_is_refused(tmp_path, monkeypatch
     from app.seats import SeatConfigError
 
     _stakeholder_prompts(tmp_path, monkeypatch,
-                         {f"guest{i}": f"SEAT — guest {i}." for i in range(4)})
+                         {f"guest{i}": f"SEAT — guest {i}." for i in range(6)})
     with pytest.raises(SeatConfigError) as exc:
-        seats_mod.resolve([f"guest{i}" for i in range(4)])
+        seats_mod.resolve([f"guest{i}" for i in range(6)])
     assert "cap" in str(exc.value)
 
     with pytest.raises(SeatConfigError) as exc:
@@ -1543,14 +1546,15 @@ def test_the_seat_cap_holds_and_an_unknown_seat_is_refused(tmp_path, monkeypatch
     assert "no prompt at" in str(exc.value)
 
 
-def test_campaign_settings_default_to_the_builtin_council():
+def test_campaign_settings_default_to_a_single_reviewer():
     """Defaults must reproduce today's behaviour exactly — an absent settings row
-    can never mean an absent capability."""
+    can never mean an absent capability. After the owner's simplification that
+    default is ONE Marketing Expert and no seats at all."""
     from app.seats import slugs
 
     cid, _ = _filled("Default council")
     assert store.get_campaign_settings(cid) == {}
-    assert slugs(campaign._campaign_seats(cid)) == ["performance", "brand", "platform"]
+    assert slugs(campaign._campaign_seats(cid)) == []
 
     store.update_campaign_settings(cid, {"seats": []})
     store.update_campaign_settings(cid, {"unrelated": 1})
@@ -1600,19 +1604,19 @@ def test_a_dropped_connection_retries_instead_of_discarding_the_run(monkeypatch)
         sent.append(messages)
         if calls["n"] == 1:
             raise runner_mod.AgentTransport("peer closed connection mid-stream")
-        return json.dumps(_seat_review("performance"))
+        return json.dumps(_feedback().model_dump(mode="json"))
 
     monkeypatch.setattr(config, "MOCK_LLM", False)
     monkeypatch.setattr(runner_mod, "_llm_call", flaky)
     monkeypatch.setattr("time.sleep", lambda _s: None)
 
     review, log = runner_mod.run_agent(
-        agent="council.performance", prompt_name="council/seat_performance",
+        agent="council.marketing_expert", prompt_name="council/marketing_expert",
         model="test-model", user_payload={"stage": "campaign_options"},
-        schema=SeatReview, preludes=["council/doctrine"],
+        schema=Feedback, preludes=["council/doctrine"],
         dispatcher=None, use_tools=False)
 
-    assert isinstance(review, SeatReview) and calls["n"] == 2 and log.attempts == 2
+    assert isinstance(review, Feedback) and calls["n"] == 2 and log.attempts == 2
 
     # the retry re-issued the request VERBATIM. Telling the model its answer
     # "failed validation" would make it rewrite a good answer it never sent.
@@ -1622,7 +1626,7 @@ def test_a_dropped_connection_retries_instead_of_discarding_the_run(monkeypatch)
     # …and the node is in the run log, not missing from observability
     rows = [json.loads(l) for l in
             (config.LOG_DIR / "agent_runs.jsonl").read_text().splitlines() if l.strip()]
-    mine = [r for r in rows if r["agent"] == "council.performance"]
+    mine = [r for r in rows if r["agent"] == "council.marketing_expert"]
     assert mine and mine[-1]["attempts"] == 2
     assert any("connection dropped" in e or "peer closed" in e
                for e in mine[-1]["validation_errors"])
@@ -1644,7 +1648,7 @@ def test_an_api_status_error_is_not_retried_as_a_blip(monkeypatch):
 
     with pytest.raises(RuntimeError):
         runner_mod.run_agent(
-            agent="council.brand", prompt_name="council/seat_brand", model="test-model",
-            user_payload={}, schema=SeatReview, preludes=["council/doctrine"],
-            dispatcher=None, use_tools=False)
+            agent="council.marketing_expert", prompt_name="council/marketing_expert",
+            model="test-model", user_payload={}, schema=Feedback,
+            preludes=["council/doctrine"], dispatcher=None, use_tools=False)
     assert calls["n"] == 1, "a non-transient error was retried"

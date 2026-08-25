@@ -1,33 +1,31 @@
-"""Addendum-03 evaluator — the Agent Council.
+"""The reviewer — one Marketing Expert who judges the planner's draft.
 
-2-5 reviewer seats score BLIND (no planner ratings, no sight of each other),
-then a chair consolidates into the single Feedback schema — final authority,
-mandatory lens coverage, server-recomputed CCS, one refine loop. All v1 feedback
-mechanics stay intact; only the reviewer topology changes.
+v3.2 (owner decision 2026-08-25): "after planner only one agent (Marketing
+expert) reviewing the plan and giving feedback to planner for refinement."
 
-v3 — THE COUNCIL NO LONGER RETRIEVES.
-Every seat and the chair now judge from a frozen doctrine
-(`prompts/council/doctrine.md`) instead of opening their own RAG slice. Three
-reasons, in order of weight: a reviewer grounded in sample data has sample-grade
-opinions; a creative director applies judgment rather than citing a document, so
-forcing a citation produced either "no evidence in DB" (a broken-looking
-reviewer) or citation theatre; and three retrieval fan-outs per pass — twice
-when refine fires — were the bulk of a ~25 minute rumination.
+WHAT THIS REPLACED, AND WHY
+---------------------------
+Three blind seats plus a chair. Four LLM calls whose combined product was one
+`Feedback` object: the seats each judged through one lens, and the chair's whole
+job was to merge them back together. On the production models that shape cost
+most of a ~15 minute rumination — roughly two minutes per seat and nearly eight
+for the chair, because consolidating three full reviews is a big generation.
 
-The PLANNER keeps its retrieval. The corpus informs the draft; the doctrine
-judges it. That division is the point, not a compromise.
+The Marketing Expert carries all three lenses and emits `Feedback` directly, so
+the consolidation step is removed rather than made faster. The refine loop, the
+CCS recomputation, the kill flags and every validator are untouched: the same
+schema arrives at the same checks, from one call instead of four.
 
-TWO THINGS THAT LOOK OPTIONAL AND ARE NOT.
-`use_tools=False` matters as much as `dispatcher=None`: run_agent attaches
-TOOL_DEFS independently of the dispatcher, so passing None alone would leave the
-seats calling tools that answer {"error": "no tools available"} — retrieval
-removed in spirit, tool-loop turns burned in fact.
-And `doctrine_version` is stamped HERE, after validation, never emitted by the
-model: the audit question is which doctrine actually ran, not which one the model
-believed it was reading.
+WHAT SURVIVED
+-------------
+The frozen doctrine (`prompts/council/doctrine.md`) — still the reviewer's only
+knowledge, still no retrieval, still PRINCIPLE/model citations only. The planner
+keeps its RAG: the corpus informs the draft, the doctrine judges it.
 
-Seats are prompt-configurable files (prompts/council/seat_*.md) — edit the file,
-change the reviewer; add a file, add a reviewer. See app/seats.py.
+Stakeholder seats survive too, as an ADDITIVE opt-in (doctrine §7, the agency
+sale). None configured — the default — is one agent and one call. Configure a
+client's reviewer and it runs first; the Marketing Expert then treats it as one
+more opinion to judge, never to average.
 """
 from __future__ import annotations
 
@@ -42,10 +40,11 @@ from app.seats import resolve as resolve_seats
 from app.validators import validate_seat_review
 
 DOCTRINE_PROMPT = "council/doctrine"
+REVIEWER_PROMPT = "council/marketing_expert"
+REVIEWER_AGENT = "council.marketing_expert"
 
-# The default council. Kept as a module constant because the graph and the
-# chair's deterministic ordering both need a canonical list; a campaign with
-# stakeholder seats passes its own list instead.
+# Kept as a name other modules import. Empty by default: the reviewer is not a
+# seat, and a campaign with no stakeholder seats has no seats at all.
 SEATS = list(BUILTIN_SEATS)
 
 
@@ -66,20 +65,12 @@ def run_seat(
     mock_seat: Optional[Callable[..., dict]] = None,
     spec: Optional[SeatSpec] = None,
 ) -> SeatReview:
-    """ONE blind seat. Split out of run_council so the graph can fan the seats
-    out concurrently.
+    """One optional stakeholder seat — a client's own reviewer.
 
-    No dispatcher and no tools: this seat judges from doctrine. The blindness
-    that used to be "its own retrieval slice" is now simply that it sees the
-    draft and nothing else.
-
-    Its output is validated HERE rather than at the chair, so a seat that breaks
-    doctrine re-runs alone instead of failing the chair over an input the chair
-    had no part in.
+    No dispatcher and no tools: it judges from doctrine like the reviewer does.
+    Validated here so a seat that breaks doctrine re-runs alone rather than
+    poisoning the reviewer's input.
     """
-    # available(), not resolve(): resolve() returns one campaign's roster, and a
-    # stakeholder seat is absent from the default one. A seat with a prompt file
-    # on disk has a well-defined spec regardless of who configured it.
     resolved = spec or available_seats().get(seat)
     if resolved is None:
         raise SeatConfigError(f"unknown council seat {seat!r}")
@@ -96,8 +87,6 @@ def run_seat(
         validate=lambda r: validate_seat_review(r, resolved),
         mock_fn=(lambda p, d, _s=seat: mock_seat(p, d, _s)) if mock_seat else None,
     )
-    # Stamped, not asked for: the audit question is which doctrine ran, and only
-    # the server knows which file it loaded.
     review.doctrine_version = doctrine_version()
     return review
 
@@ -111,28 +100,31 @@ def run_council(
     seat_reviews: Optional[list[SeatReview]] = None,
     seats: Optional[list[SeatSpec]] = None,
 ) -> tuple[Feedback, list[SeatReview]]:
-    """Blind seats, then the chair merges. Returns (feedback, seat_reviews) —
-    seat outputs are logged for the Activity/audit trail.
+    """The review pass: optional stakeholder seats, then the Marketing Expert.
 
-    `seat_reviews` lets a caller that has ALREADY run the seats (the graph, which
-    runs them in parallel) hand them in rather than have them re-run here. The
-    chair path below is identical either way.
+    Returns (feedback, seat_reviews). With no stakeholder seats configured the
+    list is empty and this is exactly one LLM call.
+
+    `validate_chair` keeps its name because it is the same validator chain the
+    chair used to run through — validate_feedback then validate_council.
     """
     roster = seats if seats is not None else resolve_seats()
-    draft = plan.model_dump(mode="json")
     reviews: list[SeatReview] = list(seat_reviews) if seat_reviews else [
         run_seat(spec.slug, campaign_payload, plan, mock_seat) for spec in roster
     ]
 
+    payload: dict[str, Any] = {
+        **campaign_payload,
+        "plan": plan.model_dump(mode="json"),
+    }
+    if reviews:
+        payload["stakeholder_seats"] = [r.model_dump(mode="json") for r in reviews]
+
     feedback, _ = run_agent(
-        agent="council.chair",
-        prompt_name="council/chair",
+        agent=REVIEWER_AGENT,
+        prompt_name=REVIEWER_PROMPT,
         model=config.FEEDBACK_MODEL,
-        user_payload={
-            **campaign_payload,
-            "plan": draft,
-            "seats": [r.model_dump(mode="json") for r in reviews],
-        },
+        user_payload=payload,
         schema=Feedback,
         preludes=[DOCTRINE_PROMPT],
         dispatcher=None,

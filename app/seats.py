@@ -18,10 +18,20 @@ from typing import Iterable, Optional
 
 from app import config
 
-# The three seats the doctrine defines. Always present: they are the only
-# holders of the three kill flags, and a council that can lose its Brand seat
-# is a council that can lose compliance authority by configuration.
-BUILTIN_SEATS: tuple[str, ...] = ("performance", "brand", "platform")
+# v3.2 — ONE reviewer by default (owner decision 2026-08-25: "after planner only
+# one agent reviewing the plan and giving feedback to planner for refinement").
+#
+# The three blind seats plus a chair were four sequential-ish LLM calls whose
+# only job was to be recombined into one Feedback. On the production models that
+# was most of a ~15 minute rumination — three seats at roughly two minutes each
+# and a chair at nearly eight. The Marketing Expert carries all three lenses and
+# emits that Feedback directly, so the consolidation step disappears rather than
+# being done faster.
+#
+# BUILTIN_SEATS is now empty: the reviewer is not a "seat". Stakeholder seats
+# remain available and ADDITIVE — configure one and it runs first, and the
+# reviewer treats it as one more opinion to judge (never to average).
+BUILTIN_SEATS: tuple[str, ...] = ()
 
 # Doctrine §7. Past this the chair's consolidation degrades and the extra cost
 # is not repaid — so it is a cap, not a suggestion.
