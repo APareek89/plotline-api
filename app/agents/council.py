@@ -37,6 +37,7 @@ from app import config
 from app.agents.runner import load_prompt, run_agent
 from app.schemas import Feedback, Plan, SeatReview
 from app.seats import BUILTIN_SEATS, SeatConfigError, SeatSpec
+from app.seats import available as available_seats
 from app.seats import resolve as resolve_seats
 from app.validators import validate_seat_review
 
@@ -76,7 +77,10 @@ def run_seat(
     doctrine re-runs alone instead of failing the chair over an input the chair
     had no part in.
     """
-    resolved = spec or next((s for s in resolve_seats() if s.slug == seat), None)
+    # available(), not resolve(): resolve() returns one campaign's roster, and a
+    # stakeholder seat is absent from the default one. A seat with a prompt file
+    # on disk has a well-defined spec regardless of who configured it.
+    resolved = spec or available_seats().get(seat)
     if resolved is None:
         raise SeatConfigError(f"unknown council seat {seat!r}")
 

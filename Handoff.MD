@@ -21,12 +21,17 @@ Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT au
 Owner decisions taken 2026-08-25: RAG removed from the **council only** (planner keeps it) ·
 canon sheets **workspace-global** · stakeholder seats **ship fully in v3** · final stitch
 **deferred, checkpoints instead**.
-- ▶ **Step 1 council doctrine — core landed, stakeholder seats next.** Done: `prompts/council/
-  doctrine.md` v3.0.0 + `build_system(preludes=)` composite versions; seats/chair → v2.0.0;
-  `dispatcher=None` AND `use_tools=False`; `validate_seat_review` + `validate_council`;
-  `app/seats.py` registry. Remaining: campaign settings storage, seat-aware graph, §7 checks,
-  real-mode pass.
-- ⚠️ Brief says "101 tests" — the real floor is **83** (71 `tests/` + 12 `rag/tests/`).
+- ✅ **Step 1 council doctrine — code complete, 99 tests green. ONLY real-mode verification
+  is outstanding** (paid; needs owner consent per AGENTS.md). `prompts/council/doctrine.md`
+  v3.0.0 + `build_system(preludes=)` composite versions (`seat_brand@2.0.0+doctrine@3.0.0`);
+  seats/chair → v2.0.0; `dispatcher=None` AND `use_tools=False`; `validate_seat_review` +
+  `validate_council`; `app/seats.py` registry with `can_kill` default-deny + 5-seat cap;
+  `campaign_settings` table; graph cached per seat-roster.
+- 🔜 **Step 2 `ReviewPolicy`** — storage already exists: put gates/counts in the SAME
+  `campaign_settings` blob (`store.get/update_campaign_settings`). The settings ROUTE that
+  writes `seats[]` belongs there too and must validate slugs on write; `_campaign_seats`
+  degrades to the built-ins on a bad roster rather than losing a paid run.
+- ⚠️ Brief says "101 tests" — the floor was **83** (71 `tests/` + 12 `rag/tests/`), now **99**.
 - ⚠️ Council output has **no UI surface at all** (Feedback/SeatReview are never emitted as
   artifacts; CoverageChip renders only on legacy concept/plan/confidence_card). So doctrine §1's
   "replace the coverage chip with an honest label" has no target, and a user-added stakeholder

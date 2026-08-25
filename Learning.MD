@@ -178,3 +178,62 @@ all-or-nothing with the user's own sentence as the worked example.
 structured data — they never type like a person. Any conversational surface needs at least
 one test that goes in through the same door a user does. Bugs 1–3 were all reachable only by
 driving the app.
+
+## 2026-08-25 — A validator and a doctrine gave the same seat opposite orders
+
+**Symptom.** With the frozen council doctrine wired up, `test_unmapped_claim_produces_a_kill_flag`
+failed: the whole campaign hard-failed after 3 chair attempts with
+`a multiplier claim ('3x faster')`. The council had correctly caught an unapproved
+claim and was rejected for saying so.
+
+**Why-chain.**
+1. Why did the chair fail? `validate_council`'s benchmark guard matched "3x faster".
+2. Why was that text there? The Brand seat put it in `kill_recommendation`, and the
+   chair relayed it into `lenses.claims_safety`.
+3. Why did the seat write a number? Because doctrine D8 ORDERS it to: "quote the
+   offending phrase verbatim when you flag it."
+4. Why did the guard exist? Because a council with no corpus cannot know a benchmark,
+   so a magnitude in its output is a fabrication.
+5. **Deepest why: `design`** — both rules were right, and neither knew about the other.
+   The guard could not distinguish a magnitude the council ASSERTS from one it QUOTES
+   in order to refuse. They are opposites, and the one place they collide is the
+   compliance path — the highest-value thing the council does.
+
+**Action (aimed at why-5).** `_check_no_benchmarks` strips paired-quote spans before
+scanning. A number held at arm's length is attributed to the draft; only what is left
+is the council speaking in its own voice. The guard was NOT weakened for anything
+unquoted, and the patterns stayed narrow (percentages, ad-metric acronyms, duration
+thresholds, multipliers) so a seat can still reference the draft's own numbers —
+"shot 2 runs 4 seconds" is the feasibility judgment D10 asks for.
+
+**Preventive action for the class.** When a mechanical check and a prompt instruction
+touch the same field, ask what the check does to the output the instruction REQUIRES.
+The R2 lexicon bug was prompt-and-validator drift — two representations of one rule.
+This is its mirror: two rules, each correct, whose overlap nobody owned. A guard on
+model output needs to know the difference between the model's own voice and text it
+is quoting, or it will punish the model hardest exactly when it is most right.
+
+## 2026-08-25 — A cached graph pinned every campaign's progress to the first thread
+
+**Symptom.** Found while making the rumination graph seat-aware, not from a report.
+`_RUMINATION_GRAPH` was a module-level singleton built on first use, and its
+`on_step` was `lambda label: _working.__setitem__(thread_id, label)` — closing over
+the `thread_id` of whichever campaign happened to build it.
+
+**Why.** Every later campaign in the same process wrote its progress labels onto the
+FIRST campaign's thread. "Labelled working steps, never a bare spinner" therefore held
+on campaign one and broke silently on campaign two — the second user would sit on a
+bare spinner while a stale thread flickered. A server restart between campaigns hides
+it, which is why local testing never surfaced it.
+**Deepest why: `code`** — a closure captured a per-request value into a
+process-lifetime object.
+
+**Action.** `on_step` reads `runner.current_thread` (a contextvar already set per
+worker thread at the top of every turn) instead of a closure. Graphs are now cached
+per seat-roster, so the cache itself grew a legitimate key and the bug's hiding place
+went with it. An acceptance check drives `on_step` under a different contextvar value.
+
+**Preventive action.** Anything cached for the process lifetime must not close over a
+per-request value. When memoising a factory, check every callable in its arguments for
+captured request state — the cache key hides the bug, because the second caller gets
+an object built for the first.

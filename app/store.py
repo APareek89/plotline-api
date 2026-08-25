@@ -41,6 +41,18 @@ def _init(conn: sqlite3.Connection) -> None:
             created_at REAL NOT NULL
         );
 
+        -- Per-campaign settings. A SEPARATE TABLE rather than a column on
+        -- `series` on purpose: CREATE TABLE IF NOT EXISTS upgrades an existing
+        -- dev database for free, where adding a column would need an ALTER and
+        -- a migration path this project does not have yet.
+        -- v3 holds `seats` here; the ReviewPolicy gates and counts land in the
+        -- same blob at build-order step 2, so this stays one primitive.
+        CREATE TABLE IF NOT EXISTS campaign_settings (
+            series_id TEXT PRIMARY KEY,
+            data TEXT NOT NULL DEFAULT '{}',
+            updated_at REAL
+        );
+
         CREATE TABLE IF NOT EXISTS series_plan (
             series_id TEXT PRIMARY KEY,
             version INTEGER NOT NULL DEFAULT 1,
@@ -275,6 +287,40 @@ def list_series() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+# -------------------------------------------------- campaign settings (v3) --
+
+
+def get_campaign_settings(series_id: str) -> dict[str, Any]:
+    """Never None. A campaign with no row has default settings, and defaults
+    must reproduce today's behaviour exactly — an absent settings row can never
+    mean an absent capability."""
+    with _lock:
+        row = get_conn().execute(
+            "SELECT data FROM campaign_settings WHERE series_id = ?", (series_id,)
+        ).fetchone()
+    if not row:
+        return {}
+    try:
+        return json.loads(row["data"]) or {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def update_campaign_settings(series_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """Merge top-level keys, so a PATCH of one setting cannot silently clear the
+    rest. Returns the settings as they now stand."""
+    merged = {**get_campaign_settings(series_id), **patch}
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO campaign_settings (series_id, data, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(series_id) DO UPDATE SET data = excluded.data, "
+            "updated_at = excluded.updated_at",
+            (series_id, json.dumps(merged), _now()),
+        )
+        get_conn().commit()
+    return merged
 
 
 # -------------------------------------------------------------------- plan --

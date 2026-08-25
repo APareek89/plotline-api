@@ -31,7 +31,10 @@ from typing import Any, Callable, Optional
 from app import ccs as ccs_mod
 from app import config, store
 from app.agents import campaign_mock
-from app.agents.council import run_council, run_seat
+from app.agents.council import SEATS, run_council, run_seat
+from app.seats import SeatConfigError, SeatSpec
+from app.seats import resolve as resolve_seats
+from app.seats import slugs as seat_slugs
 from app.agents.runner import AgentHardFail, _cited_ids, current_thread, run_agent
 from app.fal_client import MediaError, estimate_cost, generate
 from app.graph import RuminationDeps, RuminationState, build_rumination_graph
@@ -929,13 +932,14 @@ def _options_turn(campaign_id: str, thread_id: str, note: Optional[str] = None,
             # NOW is an invented source (same rule as regenerate_concept).
             retrieved |= _cited_ids(previous)
 
-        # The rumination pipeline is a GRAPH: plan -> 3 blind seats in parallel
+        # The rumination pipeline is a GRAPH: plan -> N blind seats in parallel
         # -> chair -> at most one conditional refine. See app/graph.py for why
         # that shape is load-bearing rather than decorative.
+        roster = _campaign_seats(campaign_id)
         options, plan, feedback, reviews, retrieved = _ruminate_graph(
             context, shadow, retrieved, niche_assets, note=note,
             previous=previous, regenerate_ids=regenerate_ids,
-            thread_id=thread_id, family=family)
+            thread_id=thread_id, family=family, seats=seat_slugs(roster))
 
         _record_seat_reviews(thread_id, reviews)
         verdicts = {v.concept_id: v for v in feedback.concept_verdicts}
@@ -1139,6 +1143,27 @@ def _shadow_plan(context: CampaignContext, options: CampaignOptions, shadow: Cre
     )
 
 
+def _campaign_seats(campaign_id: str) -> list[SeatSpec]:
+    """This campaign's council roster: the three built-ins, plus any stakeholder
+    seats it configured (doctrine §7 — the seat an agency defines for their
+    client's reviewer).
+
+    A broken roster degrades to the built-in council rather than failing the run.
+    Losing a guest reviewer costs one opinion; raising here would discard a
+    rumination that costs real money and ~25 minutes, over a config typo. The
+    settings route that WRITES this list validates it up front (build-order step
+    2), so this path is the backstop for a prompt file deleted after the fact,
+    not the primary check.
+    """
+    try:
+        configured = store.get_campaign_settings(campaign_id).get("seats") or []
+        return resolve_seats(configured)
+    except SeatConfigError as exc:
+        logger.warning(
+            "campaign %s: %s — falling back to the built-in council", campaign_id, exc)
+        return resolve_seats()
+
+
 def _council_payload(context: CampaignContext, options: CampaignOptions,
                      only_ids: Optional[set[str]] = None) -> dict[str, Any]:
     """What every seat and the chair see.
@@ -1180,29 +1205,48 @@ def _run_seat(*, seat: str, context: CampaignContext, shadow: CreatorContext,
     return review, set()
 
 
-_RUMINATION_GRAPH = None
+# Keyed by the seat roster, because the roster decides the graph's node set. The
+# default three-seat key is built once and reused exactly as the old singleton
+# was; a campaign with stakeholder seats compiles its own and caches it too.
+_RUMINATION_GRAPHS: dict[tuple[str, ...], Any] = {}
+
+
+def _rumination_graph(roster: tuple[str, ...]):
+    if roster not in _RUMINATION_GRAPHS:
+        _RUMINATION_GRAPHS[roster] = build_rumination_graph(
+            RuminationDeps(
+                run_options=_run_options,
+                run_council=_run_council,
+                build_plan=_shadow_plan,
+                flagged_ids=_flagged_ids,
+                merge_feedback=_merge_feedback,
+                objective_family=objective_family,
+                seat_runner=_run_seat,
+                # Read the thread from the contextvar, NOT from a closure. The
+                # graph is compiled once and cached, so a captured thread_id
+                # would pin every later campaign's progress labels onto the
+                # FIRST campaign's thread — the "labelled working steps, never a
+                # bare spinner" invariant would hold on campaign one and quietly
+                # break on campaign two. current_thread is set per worker thread
+                # at the top of every turn.
+                on_step=lambda label: _working.__setitem__(
+                    current_thread.get() or "", label),
+            ),
+            seats=list(roster),
+        )
+    return _RUMINATION_GRAPHS[roster]
 
 
 def _ruminate_graph(context: CampaignContext, shadow: CreatorContext, retrieved: set[str],
                     niche_assets: int, *, note: Optional[str], previous: Optional[CampaignOptions],
-                    regenerate_ids: Optional[list[str]], thread_id: str, family: Any):
+                    regenerate_ids: Optional[list[str]], thread_id: str, family: Any,
+                    seats: Optional[list[str]] = None):
     """Run the rumination StateGraph and unpack its final state.
 
     The graph owns the SHAPE (fan-out, join, one-pass refine cap); every unit of
     work inside it is the same function the sequential driver called."""
-    global _RUMINATION_GRAPH
-    if _RUMINATION_GRAPH is None:
-        _RUMINATION_GRAPH = build_rumination_graph(RuminationDeps(
-            run_options=_run_options,
-            run_council=_run_council,
-            build_plan=_shadow_plan,
-            flagged_ids=_flagged_ids,
-            merge_feedback=_merge_feedback,
-            objective_family=objective_family,
-            seat_runner=_run_seat,
-            on_step=lambda label: _working.__setitem__(thread_id, label),
-        ))
-    final = _RUMINATION_GRAPH.invoke(RuminationState(
+    graph = _rumination_graph(tuple(seats) if seats else tuple(SEATS))
+    final = graph.invoke(RuminationState(
         context=context, shadow=shadow, niche_assets=niche_assets, note=note,
         previous=previous, regenerate_ids=list(regenerate_ids or []),
         retrieved=sorted(retrieved),

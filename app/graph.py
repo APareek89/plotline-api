@@ -107,8 +107,15 @@ class RuminationDeps(BaseModel):
     on_step: Optional[Callable[[str], None]] = None
 
 
-def build_rumination_graph(deps: RuminationDeps):
-    """plan -> (3 blind seats in parallel) -> chair -> [refine once] -> END."""
+def build_rumination_graph(deps: RuminationDeps, seats: Optional[list[str]] = None):
+    """plan -> (N blind seats in parallel) -> chair -> [refine once] -> END.
+
+    `seats` is the campaign's roster. It defaults to the three built-in seats, so
+    every existing caller is unchanged; a campaign with stakeholder seats passes
+    its own list and gets one extra node per extra seat, which is the whole of
+    what adding a reviewer costs structurally.
+    """
+    roster = list(seats) if seats else list(SEATS)
 
     def _step(label: str) -> None:
         if deps.on_step:
@@ -175,7 +182,7 @@ def build_rumination_graph(deps: RuminationDeps):
         # parallel speed-up AND restores a deterministic input to the chair.
         ordered = sorted(
             state.seat_reviews,
-            key=lambda r: SEATS.index(r.seat) if r.seat in SEATS else len(SEATS),
+            key=lambda r: roster.index(r.seat) if r.seat in roster else len(roster),
         )
         feedback, reviews = deps.run_council(
             state.context, state.shadow, state.options, state.plan,
@@ -227,14 +234,14 @@ def build_rumination_graph(deps: RuminationDeps):
 
     graph = StateGraph(RuminationState)
     graph.add_node("plan_options", plan_options)
-    for seat in SEATS:
+    for seat in roster:
         graph.add_node(f"seat_{seat}", _seat_node(seat))
     graph.add_node("chair", chair)
     graph.add_node("refine", refine)
 
     graph.add_edge(START, "plan_options")
-    # one edge out to three nodes = concurrent fan-out; they join at the chair
-    for seat in SEATS:
+    # one edge out to N nodes = concurrent fan-out; they join at the chair
+    for seat in roster:
         graph.add_edge("plan_options", f"seat_{seat}")
         graph.add_edge(f"seat_{seat}", "chair")
     graph.add_conditional_edges("chair", should_refine, {"refine": "refine", END: END})

@@ -25,6 +25,7 @@ from app.schemas import (
     CampaignDetail,
     CampaignOption,
     CampaignOptions,
+    Evidence,
     Feedback,
     ModelConfirm,
     Plan,
@@ -1205,3 +1206,365 @@ def test_an_attached_image_survives_until_there_is_a_product_to_put_it_on():
     # and it is not applied twice
     again = campaign._apply_pending_uploads(thread_id, applied)
     assert again.product.image_upload_ids == ["upl_held"]
+
+
+# ================================================================================
+# v3 §7 — the frozen council doctrine
+# The council stopped retrieving and started judging. Everything below pins the
+# part of that which a prompt cannot enforce on its own.
+# ================================================================================
+
+
+def _seat_review(seat: str = "performance", **over) -> dict:
+    """A minimal well-formed seat output, doctrine-shaped."""
+    base = {
+        "seat": seat,
+        "element_scores": [{
+            "element": "hook_strength", "rating": "M", "reason": "the opener states a stake",
+            "evidence": [{"tag": "PRINCIPLE", "source_id": "model",
+                          "claim": "an opening earns attention", "as_of": None}],
+        }],
+        "kill_recommendation": None,
+        "policy_check_required": False,
+        "policy_notes": [],
+        "fixes": [],
+    }
+    base.update(over)
+    return base
+
+
+def _feedback(**lens_over) -> Feedback:
+    lenses = {
+        "saturation": {"similar_count": 0, "source_id": None,
+                       "note": "judged from doctrine, not a corpus scan",
+                       "insufficient_data": True},
+        "claims_safety": "no unmapped claim", "feasibility": "producible",
+        "platform_policy": "no assertion made", "policy_check_required": False,
+    }
+    lenses.update(lens_over)
+    return Feedback.model_validate({"concept_verdicts": [{
+        "concept_id": "o1",
+        "element_verdicts": [{"element": "hook_strength", "verdict": "agree",
+                              "final_rating": "M", "reason": "brand seat: reads clean",
+                              "evidence": [], "evidence_gap": True}],
+        "lenses": lenses, "kill_flags": [], "fixes": [], "ccs_final": 0,
+    }]})
+
+
+def _spec(slug: str = "performance", can_kill: bool = True):
+    from app.seats import SeatSpec
+    return SeatSpec(slug=slug, prompt_name=f"council/seat_{slug}",
+                    can_kill=can_kill, builtin=True)
+
+
+def test_a_council_pass_makes_zero_retrieval_calls():
+    """The doctrine change is only real if the tools are actually gone. Dropping
+    the dispatcher alone would NOT do it: run_agent attaches TOOL_DEFS
+    independently, so a seat would still call tools and get
+    {"error": "no tools available"} back — retrieval removed in spirit, tool-loop
+    turns burned in fact."""
+    from app.agents import council as council_mod
+
+    real = council_mod.run_agent
+    calls: list[dict] = []
+
+    def spy(**kwargs):
+        if kwargs.get("agent", "").startswith("council."):
+            calls.append(kwargs)
+        return real(**kwargs)
+
+    council_mod.run_agent = spy
+    try:
+        _ruminated("Zero retrieval")
+    finally:
+        council_mod.run_agent = real
+
+    assert calls, "no council agent ran"
+    for kwargs in calls:
+        assert kwargs["dispatcher"] is None, f"{kwargs['agent']} was handed a dispatcher"
+        assert kwargs["use_tools"] is False, f"{kwargs['agent']} still had tools attached"
+        assert kwargs["preludes"] == ["council/doctrine"]
+
+
+def test_every_council_citation_is_a_principle():
+    """A seat with no corpus has nothing to cite but its own judgment, and must
+    say so in the tag rather than borrowing an id the planner retrieved."""
+    cid, tid = _ruminated("Principle only")
+    context = campaign._context_of(cid)
+    shadow = campaign._shadow_context(context)
+    options = CampaignOptions(options=list(campaign._ws(tid)["options"].values()))
+    plan = campaign._shadow_plan(context, options, shadow)
+    feedback, reviews = campaign._run_council(
+        context, shadow, options, plan, set(), campaign._niche_asset_count(shadow))
+
+    cited = [e for r in reviews for s in r.element_scores for e in s.evidence]
+    cited += [e for v in feedback.concept_verdicts
+              for ev in v.element_verdicts for e in ev.evidence]
+    assert cited, "the council cited nothing at all"
+    for item in cited:
+        assert item.tag == "PRINCIPLE" and item.source_id == "model"
+
+    # and the doctrine that produced them is recorded on both, for the audit
+    assert all(r.doctrine_version == "3.0.0" for r in reviews)
+    assert feedback.doctrine_version == "3.0.0"
+
+
+def test_a_chair_citing_a_retrieved_id_is_rejected():
+    """The planner's ids are still in scope when the chair runs. Without this the
+    doctrine would be prompt-deep: a chair citing chunk:C0421 would validate."""
+    from app.validators import validate_council
+
+    borrowed = _feedback()
+    borrowed.concept_verdicts[0].element_verdicts[0].evidence = [
+        Evidence(tag="REF", source_id="chunk:C0421",
+                 claim="borrowed from the planner", as_of=None)
+    ]
+    with pytest.raises(AgentValidationError) as exc:
+        validate_council(borrowed)
+    assert "PRINCIPLE" in str(exc.value)
+
+
+def test_the_saturation_lens_always_declares_insufficient_data():
+    """Saturation is a measurement over a corpus. validate_feedback only forced
+    this BELOW a niche-asset threshold, which implied a big enough corpus would
+    earn a real answer. Under the doctrine no count does."""
+    from app.validators import validate_council
+
+    with pytest.raises(AgentValidationError) as exc:
+        validate_council(_feedback(saturation={
+            "similar_count": 0, "source_id": None, "note": "looks fresh",
+            "insufficient_data": False}))
+    assert "insufficient_data" in str(exc.value)
+
+    # …and it cannot report a count either, having scanned nothing
+    with pytest.raises(AgentValidationError):
+        validate_council(_feedback(saturation={
+            "similar_count": 12, "source_id": None, "note": "n",
+            "insufficient_data": True}))
+
+
+def test_the_doctrine_file_states_no_benchmark():
+    """The doctrine is the council's whole knowledge base, so a number in it is a
+    fabrication every seat would inherit."""
+    from app.validators import _check_no_benchmarks
+
+    text = (config.PROMPTS_DIR / "council" / "doctrine.md").read_text()
+    errors: list[str] = []
+    for line in text.splitlines():
+        _check_no_benchmarks(line, "doctrine", errors)
+    assert errors == [], f"doctrine states a benchmark: {errors}"
+
+
+def test_an_invented_benchmark_in_a_seat_reason_is_rejected():
+    from app.validators import validate_seat_review
+
+    for bad in ("retention drops 40% after the third beat",
+                "this lifts CTR",
+                "the hook must land in the first 3 seconds",
+                "delivers 3x more saves"):
+        review = SeatReview.model_validate(_seat_review(element_scores=[{
+            "element": "hook_strength", "rating": "L", "reason": bad,
+            "evidence": [{"tag": "PRINCIPLE", "source_id": "model",
+                          "claim": "openers matter", "as_of": None}]}]))
+        with pytest.raises(AgentValidationError):
+            validate_seat_review(review, _spec())
+
+
+def test_a_quoted_claim_is_not_mistaken_for_an_invented_benchmark():
+    """D8 ORDERS the Brand seat to quote the offending phrase when it flags an
+    unmapped claim — so the most important thing this council catches arrives
+    with a number inside it by design. Scanning the quote rejected the seat for
+    doing its job and hard-failed the campaign on the compliance path
+    specifically. Quoted spans are attributed to the draft, not to the council."""
+    from app.validators import validate_seat_review
+
+    review = SeatReview.model_validate(_seat_review(
+        seat="brand",
+        element_scores=[{
+            "element": "persuasion_proof", "rating": "L",
+            "reason": "the line '3x faster than QuickBooks' has no approved claim behind it",
+            "evidence": [{"tag": "PRINCIPLE", "source_id": "model",
+                          "claim": "an unmapped claim is a liability", "as_of": None}]}],
+        kill_recommendation="unsubstantiated_claim: '3x faster than QuickBooks'"))
+    assert validate_seat_review(review, _spec("brand")) is review
+
+
+def test_a_seat_cannot_rate_with_no_evidence_at_all():
+    """SeatScore.evidence has no min_length, so 'every citation is a PRINCIPLE'
+    would otherwise pass by citing nothing."""
+    from app.validators import validate_seat_review
+
+    review = SeatReview.model_validate(_seat_review(element_scores=[{
+        "element": "hook_strength", "rating": "H", "reason": "good", "evidence": []}]))
+    with pytest.raises(AgentValidationError) as exc:
+        validate_seat_review(review, _spec())
+    assert "no evidence" in str(exc.value)
+
+
+def test_the_platform_seat_flags_a_policy_check_instead_of_stating_the_rule():
+    """Inventing policy text is the worst failure mode this product has. The seat
+    names what a human must check; it never answers the question."""
+    from app.validators import validate_council, validate_seat_review
+
+    review = SeatReview.model_validate(_seat_review(
+        seat="platform", policy_check_required=True,
+        policy_notes=["before/after imagery needs a check against Meta's current ad rules"]))
+    assert validate_seat_review(review, _spec("platform")) is review
+
+    # and the refusal must survive consolidation, or QC never learns it is owed
+    with pytest.raises(AgentValidationError) as exc:
+        validate_council(_feedback(), seat_reviews=[review])
+    assert "policy_check_required" in str(exc.value)
+    validate_council(_feedback(policy_check_required=True), seat_reviews=[review])
+
+
+def test_a_kill_flag_is_never_dropped_in_silence():
+    from app.validators import validate_council
+
+    killer = SeatReview.model_validate(
+        _seat_review(seat="brand", kill_recommendation="unsubstantiated_claim: 'seamless'"))
+    with pytest.raises(AgentValidationError) as exc:
+        validate_council(_feedback(), seat_reviews=[killer])
+    assert "never drop it" in str(exc.value)
+
+
+def test_the_doctrine_reaches_every_seat_and_the_chair():
+    """Prompt-and-check drift is the bug class that cost this project a paid run
+    before (the R2 lexicon). The doctrine is injected, so assert it ARRIVES."""
+    from app.agents.runner import build_system
+    from app.seats import BUILTIN_SEATS
+
+    for name in [f"council/seat_{s}" for s in BUILTIN_SEATS] + ["council/chair"]:
+        system, version = build_system(name, None, ["council/doctrine"])
+        # the persona, the beliefs, and the red lines all arrived
+        assert "would I put my name on this going live tomorrow" in system
+        assert "D8 — Claims are a liability surface" in system
+        assert "unsubstantiated_claim" in system
+        # ordering is load-bearing: the doctrine NARROWS shared_policy (whose
+        # rule 2 demands a retrieved source_id a doctrine seat can never produce),
+        # so it has to come after it and before the seat's own lens.
+        assert system.index("EVIDENCE & HONESTY POLICY") < system.index("COUNCIL DOCTRINE")
+        assert system.index("COUNCIL DOCTRINE") < system.index("OUTPUT SHAPE")
+        # the composite version answers "which reviewer said this"
+        assert version.endswith("+doctrine@3.0.0")
+
+
+# ------------------------------------------------- stakeholder seats (§7 v3) --
+
+
+def _stakeholder_prompts(tmp_path: Path, monkeypatch, extra: dict[str, str]) -> None:
+    """A prompts dir with the real council plus some stakeholder seats."""
+    council = tmp_path / "council"
+    council.mkdir(parents=True)
+    for path in (config.PROMPTS_DIR / "council").glob("*.md"):
+        (council / path.name).write_text(path.read_text())
+    for slug, body in extra.items():
+        (council / f"seat_{slug}.md").write_text(body)
+    monkeypatch.setattr(config, "PROMPTS_DIR", tmp_path)
+
+
+def test_a_stakeholder_seat_joins_the_council_without_a_schema_change(tmp_path, monkeypatch):
+    """The agency sale: a seat for the CLIENT's reviewer. SeatReview.seat was a
+    three-value Literal, so this could not previously validate at all."""
+    from app import seats as seats_mod
+
+    _stakeholder_prompts(tmp_path, monkeypatch, {"my_cmo": "SEAT — the client's CMO."})
+    roster = seats_mod.resolve(["my_cmo"])
+
+    assert seats_mod.slugs(roster) == ["performance", "brand", "platform", "my_cmo"]
+    assert SeatReview.model_validate(_seat_review(seat="my_cmo")).seat == "my_cmo"
+
+    # …and it becomes exactly one more node on the graph, nothing else
+    from app.graph import RuminationDeps, build_rumination_graph
+    graph = build_rumination_graph(RuminationDeps(
+        run_options=lambda *a, **k: None, run_council=lambda *a, **k: (None, []),
+        build_plan=lambda *a, **k: None, flagged_ids=lambda *a, **k: set(),
+        merge_feedback=lambda a, b: a, objective_family=lambda o: o,
+        seat_runner=lambda **k: (None, set()),
+    ), seats=seats_mod.slugs(roster))
+    drawn = graph.get_graph()
+    edges = {(e.source, e.target) for e in drawn.edges}
+    assert "seat_my_cmo" in set(drawn.nodes)
+    assert ("plan_options", "seat_my_cmo") in edges and ("seat_my_cmo", "chair") in edges
+    for other in ("performance", "brand", "platform"):
+        assert ("seat_my_cmo", f"seat_{other}") not in edges   # blindness holds for guests too
+
+
+def test_a_stakeholder_seat_cannot_kill_unless_its_file_grants_it(tmp_path, monkeypatch):
+    """Compliance authority stays with the Brand seat by default. The failure
+    mode is a client's guest reviewer silently killing a campaign."""
+    from app import seats as seats_mod
+    from app.validators import validate_seat_review
+
+    _stakeholder_prompts(tmp_path, monkeypatch, {
+        "my_cmo": "SEAT — the client's CMO.",
+        "legal": "SEAT — client legal.\ncan_kill: true",
+    })
+    by_slug = {s.slug: s for s in seats_mod.resolve(["my_cmo", "legal"])}
+    assert by_slug["my_cmo"].can_kill is False
+    assert by_slug["legal"].can_kill is True
+    assert by_slug["brand"].can_kill is True        # built-ins keep their flags
+
+    killing = SeatReview.model_validate(
+        _seat_review(seat="my_cmo", kill_recommendation="policy_risk: I don't like it"))
+    with pytest.raises(AgentValidationError) as exc:
+        validate_seat_review(killing, by_slug["my_cmo"])
+    assert "does not hold one" in str(exc.value)
+
+    granted = SeatReview.model_validate(
+        _seat_review(seat="legal", kill_recommendation="policy_risk: unlicensed music bed"))
+    assert validate_seat_review(granted, by_slug["legal"]) is granted
+
+
+def test_the_seat_cap_holds_and_an_unknown_seat_is_refused(tmp_path, monkeypatch):
+    from app import seats as seats_mod
+    from app.seats import SeatConfigError
+
+    _stakeholder_prompts(tmp_path, monkeypatch,
+                         {f"guest{i}": f"SEAT — guest {i}." for i in range(4)})
+    with pytest.raises(SeatConfigError) as exc:
+        seats_mod.resolve([f"guest{i}" for i in range(4)])
+    assert "cap" in str(exc.value)
+
+    with pytest.raises(SeatConfigError) as exc:
+        seats_mod.resolve(["nobody_home"])
+    assert "no prompt at" in str(exc.value)
+
+
+def test_campaign_settings_default_to_the_builtin_council():
+    """Defaults must reproduce today's behaviour exactly — an absent settings row
+    can never mean an absent capability."""
+    from app.seats import slugs
+
+    cid, _ = _filled("Default council")
+    assert store.get_campaign_settings(cid) == {}
+    assert slugs(campaign._campaign_seats(cid)) == ["performance", "brand", "platform"]
+
+    store.update_campaign_settings(cid, {"seats": []})
+    store.update_campaign_settings(cid, {"unrelated": 1})
+    assert store.get_campaign_settings(cid) == {"seats": [], "unrelated": 1}   # merge, not clobber
+
+
+def test_progress_labels_follow_the_thread_that_is_running(monkeypatch):
+    """The graph is compiled once and cached. on_step used to CLOSE OVER
+    thread_id, so every campaign after the first wrote its progress labels onto
+    the FIRST campaign's thread — 'labelled working steps, never a bare spinner'
+    held on campaign one and quietly broke on campaign two."""
+    from app.agents.runner import current_thread
+
+    captured: list = []
+    real = campaign.build_rumination_graph
+
+    def spy(deps, seats=None):
+        captured.append(deps)
+        return real(deps, seats=seats)
+
+    monkeypatch.setattr(campaign, "build_rumination_graph", spy)
+    campaign._RUMINATION_GRAPHS.clear()
+    _ruminated("Thread labels")
+    assert captured, "graph was never built"
+
+    on_step = captured[0].on_step
+    current_thread.set("thr_second_campaign")
+    on_step("drafting options")
+    assert campaign._working["thr_second_campaign"] == "drafting options"
