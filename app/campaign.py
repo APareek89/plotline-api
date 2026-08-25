@@ -38,6 +38,7 @@ from app.graph import RuminationDeps, RuminationState, build_rumination_graph
 from app.rag_client import RagUnavailable, rag
 from app.schemas import (
     AdCard,
+    BrandBlock,
     ArtifactEnvelope,
     Cadence,
     CampaignContext,
@@ -295,9 +296,17 @@ def cards_done(context: Any) -> dict[str, bool]:
     return done
 
 
+_REQUIRED_BLOCKS = ("product", "campaign")   # brand has NO required field
+
+
 def missing_blocks(context: Any) -> list[str]:
+    """What genuinely blocks a rumination. Brand is absent on purpose: every one
+    of its fields is optional, so demanding the block exist was ceremony. It is
+    defaulted at start (see begin_rumination) rather than demanded here, which
+    lets a conversational intake stop asking about it while still capturing it
+    if the user volunteers it."""
     ctx = _as_dict(context)
-    return [b for b in _BLOCKS if not ctx.get(b)]
+    return [b for b in _REQUIRED_BLOCKS if not ctx.get(b)]
 
 
 def templates() -> list[dict[str, Any]]:
@@ -381,8 +390,11 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
         context = _context_of(campaign_id)
         opener = ("Three cards, then I ruminate — half-filled cards keep their draft."
                   if ws["sub_mode"] == "structured"
-                  else "I'll ask one thing at a time — the cards fill themselves as you answer.")
-        _say(thread_id, opener, [_progress_artifact(context)], question=_next_question(context))
+                  else "Tell me about it in your own words and attach the product image — "
+                       "I'll fill the cards and only come back for what I genuinely can't proceed without.")
+        _say(thread_id, opener, [_progress_artifact(context)],
+             question=(_combined_question(context) if ws["sub_mode"] == "conversational"
+                       else _next_question(context)))
         return
 
     # ---- step 2: elicitation + the start gate
@@ -701,7 +713,7 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
         )
         store.update_series_context(campaign_id, context.model_dump(mode="json"))
         store.log_artifact_activity(thread_id, "intake", "refined", "conversational turn")
-        _progress_turn(thread_id, context, before=current)
+        _progress_turn(thread_id, context, before=current, conversational=True)
     except AgentHardFail as exc:
         _fail(thread_id, "Intake couldn't produce a valid context after retries — nothing was guessed.", str(exc))
     except Exception as exc:
@@ -744,8 +756,21 @@ def _validate_intake(new: CampaignContext, current: CampaignContext) -> Campaign
 _BLOCK_LABEL = {"product": "Product", "campaign": "Campaign", "brand": "Brand"}
 
 
+def _autofill_brand(campaign_id: str, context: CampaignContext) -> CampaignContext:
+    """Brand has no required field, so an empty one is a valid, honest state:
+    no palette, no claims, no constraints. Filling it here is what lets a
+    conversational intake stop asking about brand entirely — the user can still
+    open the Brand card and set any of it."""
+    if context.brand is not None:
+        return context
+    context = context.model_copy(update={"brand": BrandBlock()})
+    store.update_series_context(campaign_id, context.model_dump(mode="json"))
+    return context
+
+
 def _progress_turn(thread_id: str, context: CampaignContext,
-                   before: Optional[CampaignContext] = None) -> None:
+                   before: Optional[CampaignContext] = None,
+                   conversational: bool = False) -> None:
     """One progress card + at most ONE question for the next missing field.
 
     The text names WHAT was just filed rather than repeating "Filed." every
@@ -763,7 +788,8 @@ def _progress_turn(thread_id: str, context: CampaignContext,
             and (before is None or getattr(before, b) is None)
         ]
         text = f"{', '.join(filled)} filed." if filled else "Noted."
-        _say(thread_id, text, [_progress_artifact(context)], question=_next_question(context))
+        question = _combined_question(context) if conversational else _next_question(context)
+        _say(thread_id, text, [_progress_artifact(context)], question=question)
     store.log_artifact_activity(thread_id, "intake", "proposed",
                                 "complete" if complete else f"next: {_next_field(context)}")
 
@@ -787,6 +813,32 @@ def _next_field(context: CampaignContext) -> Optional[str]:
     return None
 
 
+# Only these stop the rumination. Brand has NO required field, so a
+# conversational intake never asks about it — an empty brand block means "no
+# brand constraints", which is true, and the Brand card is still there to edit.
+_CRITICAL_ASK = {
+    "product": "what the product is — its name and one line on what it actually does",
+    "campaign": "the objective (awareness, traffic or conversions), who it is for, "
+                "and which platforms it runs on",
+}
+
+
+def _critical_gaps(context: CampaignContext) -> list[str]:
+    return [ask for block, ask in _CRITICAL_ASK.items() if getattr(context, block) is None]
+
+
+def _combined_question(context: CampaignContext) -> Optional[str]:
+    """ONE question covering everything still blocking, rather than a queue of
+    them. Path b is meant to be faster than the cards, not the same work asked
+    slowly — if it interrogates block by block there is no reason to pick it."""
+    gaps = _critical_gaps(context)
+    if not gaps:
+        return None
+    if len(gaps) == 1:
+        return f"Still need {gaps[0]}. What is it?"
+    return "Still need " + "; and ".join(gaps) + "."
+
+
 def _next_question(context: CampaignContext) -> Optional[str]:
     return {
         "product": "What's the product — name, one-line description, and at least one image for the consistency pack (up to 8)?",
@@ -808,6 +860,9 @@ def begin_rumination(campaign_id: str) -> None:
     missing = missing_blocks(context)
     if missing:
         raise ValueError("Campaign context incomplete — still needed: " + ", ".join(missing))
+    # everything downstream assumes a brand object exists; an empty one is the
+    # honest default (no palette, no claims, no constraints)
+    context = _autofill_brand(campaign_id, context)
     thread_id = _campaign_thread_id(campaign_id)
     if not thread_id:
         raise ValueError("this campaign has no thread to ruminate in")

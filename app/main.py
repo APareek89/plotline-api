@@ -510,15 +510,10 @@ def _truthy_env(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-@app.get("/api/threads/{thread_id}/agent-runs")
-def agent_runs(thread_id: str) -> dict[str, Any]:
-    """Structured node I/O for one thread. Dev-only."""
-    if not _debug_enabled():
-        raise HTTPException(404, "observability is disabled on this deployment")
+def _read_runs() -> list[dict[str, Any]]:
     path = config.LOG_DIR / "agent_runs.jsonl"
     if not path.exists():
-        return {"thread_id": thread_id, "runs": []}
-
+        return []
     runs: list[dict[str, Any]] = []
     buf = ""
     for line in path.read_text(errors="replace").splitlines(True):
@@ -528,6 +523,29 @@ def agent_runs(thread_id: str) -> dict[str, Any]:
         except Exception:
             continue                       # a pretty-printed record spans lines
         buf = ""
-        if row.get("thread_id") == thread_id:
-            runs.append(row)
-    return {"thread_id": thread_id, "runs": runs[-60:]}
+        runs.append(row)
+    return runs
+
+
+@app.get("/api/agent-runs")
+def all_agent_runs(limit: int = 200) -> dict[str, Any]:
+    """Every node run, newest last, with the campaign each belongs to.
+
+    Observability is its own surface, not a tab hanging off one thread: the
+    question "which node failed" is usually asked ACROSS runs, and tying the
+    view to a thread means you cannot see a run whose thread you have not
+    opened."""
+    if not _debug_enabled():
+        raise HTTPException(404, "observability is disabled on this deployment")
+
+    series_names = {row["id"]: row["name"] for row in store.list_series()}
+    names = {
+        t["id"]: series_names.get(t["series_id"], "")
+        for t in store.list_threads()
+    }
+
+    runs = _read_runs()
+    for row in runs:
+        tid = row.get("thread_id")
+        row["campaign_name"] = names.get(tid or "", None)
+    return {"runs": runs[-limit:]}
