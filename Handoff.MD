@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `64c2952` (plotline-api) · `a6bb767` (plotline-web)
+last-synced: `14159f1` (plotline-api) · `a6bb767` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -17,32 +17,41 @@ FAL_KEY, publicly, **no auth** — see P0-2.
 (owner, THE DESIGN CONTRACT) > `docs/SYSTEM-PROMPT-v2-marketing-studio.md` > Addendum-02 >
 Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT authoritative.
 
-## v3 — IN PROGRESS (build order in the brief §6; 10 steps)
-Owner decisions taken 2026-08-25: RAG removed from the **council only** (planner keeps it) ·
-canon sheets **workspace-global** · stakeholder seats **ship fully in v3** · final stitch
-**deferred, checkpoints instead**.
-- ✅ **Step 1 council doctrine — DONE and verified on the production models. 101 tests green.**
-  `prompts/council/doctrine.md` v3.1.0 + `build_system(preludes=)` composite versions
-  (`seat_brand@2.0.1+doctrine@3.1.0`); seats/chair → v2.0.1; `dispatcher=None` AND
-  `use_tools=False`; `validate_seat_review` + `validate_council`; `app/seats.py` registry
-  with `can_kill` default-deny + 5-seat cap; `campaign_settings` table; graph cached per
-  seat-roster. Real-mode result (sonnet-4-6, both council rounds): **7 council nodes, zero
-  retries, zero retrieval calls, no retrieved id cited**, doctrine version on every one.
-- 📌 **Prompt lessons from the paid runs — do not undo these.** Three separate retry causes
-  were found and fixed by prompt, not by weakening a check: (a) seats invented ELEMENT names
-  from doctrine points (`one_idea_per_ad`) → doctrine now states the eight names are a closed
-  set and D-points are lenses; (b) seats/chair invented benchmarks in fields far from the
-  intro rule → doctrine rule 2 now carries a rewrite table and every seat repeats it beside
-  its OUTPUT SHAPE; (c) chair emitted `kill_flags` as objects → chair.md shows a bare-string
-  example. Haiku chair went 3 attempts → 1; Sonnet now needs none.
-- ⚠️ **Sonnet is SLOW here**: chair 477s, full rumination + refine >15 min. Not a regression
-  (the doctrine removed retrieval, so this is model latency), but it is what makes the
-  missing checkpoints expensive.
-- 🔜 **Step 2 `ReviewPolicy`** — storage already exists: put gates/counts in the SAME
-  `campaign_settings` blob (`store.get/update_campaign_settings`). The settings ROUTE that
-  writes `seats[]` belongs there too and must validate slugs on write; `_campaign_seats`
-  degrades to the built-ins on a bad roster rather than losing a paid run.
-- ⚠️ Brief says "101 tests" — the floor was **83** (71 `tests/` + 12 `rag/tests/`), now **99**.
+## v3 — CONTRACTS DONE, RUNTIME NOT WIRED (build order in the brief §6)
+Owner decisions 2026-08-25: RAG removed from the **council only** (planner keeps it) · canon
+sheets **workspace-global** · stakeholder seats ship, but **the council is now ONE Marketing
+Expert** (later owner decision, see below) · final stitch **deferred, checkpoints instead**.
+
+**✅ Shipped (147 tests green; floor was 83).** Steps 1-10 of the brief as CONTRACTS:
+council doctrine v3.1.0 + one reviewer · `ReviewPolicy`/settings API/presets ·
+`campaign_brief` · `hook_rack` + W1-W3 · `ShotBoard` + B1-B4 · `style_block` ·
+`canon_sheet` ×4 · `keyframe_board` + hard gate · `qc_report` + rights ledger ·
+`TakeReject` + `variant_matrix` · **stage checkpoints** · the 5 new stages in
+`CAMPAIGN_STAGES` + `advance_from()`. Step 1 was verified on real sonnet-4-6.
+
+### 🔴 WHAT IS NOT DONE — the app does NOT run the new pipeline yet
+The five new stages have schemas, validators, lints and gates, and `advance_from()` knows
+their order — but **nothing produces their artifacts at runtime**. Specifically:
+1. **No turn handlers.** `_dispatch` routes none of `brief|script|canon|keyframes|qc`.
+   Existing handlers to copy the shape from: `_detail_turn`, `_templates_turn`.
+2. **No prompts.** Need `campaign_brief.md`, `hook_rack.md`, `shot_board.md` (upgrade
+   `campaign_planner.md`'s detail section), `canon_sheet.md`, `qc_report.md`.
+   The W1 table MUST be injected via `validators.script_thresholds_text()`, never hand-copied.
+3. **No web renderers.** `campaign-artifacts.tsx` renders 0 of the 7 new `ArtifactType`s.
+   §12 rendering rules + per-artifact layouts are in `docs/v3-ARTIFACT-SPEC.md`.
+4. **No My Brand tab / canon library page** (still deliberately absent from nav until it exists).
+5. `ReviewPolicy` gates are enforced by `advance_from()` but **no stage handler reads
+   `_pauses_at()` yet** — wire it as each handler lands.
+
+### 📌 Prompt lessons from the paid runs — do not undo these
+Three retry causes fixed by prompt, never by weakening a check: (a) the reviewer invented
+ELEMENT names out of doctrine points (`one_idea_per_ad`) → the doctrine states the eight names
+are a CLOSED set and D-points are lenses; (b) benchmarks appeared in fields far from the intro
+rule → doctrine rule 2 carries a rewrite table and every prompt repeats it beside its OUTPUT
+SHAPE; (c) `kill_flags` came back as objects → the output shape shows a bare string.
+Haiku's chair went 3 attempts → 1; Sonnet needs none.
+⚠️ **Sonnet is slow here** — the old chair alone took 477s. The single reviewer removes three
+of the four council calls, which is the main reason it exists.
 - ⚠️ Council output has **no UI surface at all** (Feedback/SeatReview are never emitted as
   artifacts; CoverageChip renders only on legacy concept/plan/confidence_card). So doctrine §1's
   "replace the coverage chip with an honest label" has no target, and a user-added stakeholder
