@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app import brand_extract, campaign, ccs as ccs_mod, config, creative, main, orchestrator, store
+from app import brand_extract, campaign, ccs as ccs_mod, config, main, store, threadkit
 from app.agents import campaign_mock
 from app.schemas import (
     AdCard,
@@ -76,7 +76,7 @@ def marketing_env(monkeypatch, tmp_path, local_rag):
     # client the autouse conftest fixture builds for everyone else.
     monkeypatch.setattr(campaign, "rag", local_rag)
     campaign._WORKSPACES.clear()
-    creative._WORKSPACES.clear()
+    threadkit._WORKSPACES.clear()
 
     def _sync(thread_id, fn, *args):
         campaign._ws(thread_id)["retry"] = (fn, args)  # Retry still has a target
@@ -271,7 +271,7 @@ def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves
 def test_unmapped_claim_produces_a_kill_flag_and_withholds_the_option(monkeypatch):
     """Brand seat holds the kill flag: a persuasion claim outside the CONFIRMED
     approved list is killed, and a killed option never reaches the user."""
-    dispatcher = orchestrator._dispatcher(set())
+    dispatcher = threadkit._dispatcher(set())
     review = SeatReview.model_validate(campaign_mock.mock_seat(
         {"context": {"brand": {"approved_claims": ["files GST in 60 seconds"]}},
          "draft": {"concepts": [{"id": "o1", "claims_used": ["3x faster than QuickBooks"]}]}},
@@ -416,9 +416,11 @@ def _request_body_properties(spec: dict) -> set[tuple[str, str]]:
 def test_settings_icon_is_disabled_and_hides_no_live_capability():
     """The icon is rendered-but-disabled with a tooltip; that is honest only if
     nothing behind it takes a model. The whole API is swept: no path, no query
-    or path parameter, and no request-body field names a model — with ONE
-    documented exception, the pre-Addendum-03 DIY route, whose `model_tier`
-    picks among the fixed stack (draft/final/pro) and can never name a model."""
+    or path parameter, and no request-body field names a model.
+
+    This check got STRICTER when the pre-Addendum-03 app was deleted: the DIY
+    route's `model_tier` was the one documented exception, and it is gone, so
+    the exception set is now empty. Never re-add one."""
     assert ModelConfirm.model_fields["settings_note"].default == SETTINGS_TOOLTIP
 
     spec = main.app.openapi()
@@ -432,8 +434,8 @@ def test_settings_icon_is_disabled_and_hides_no_live_capability():
 
     model_ish = {(path, prop) for path, prop in _request_body_properties(spec)
                  if "model" in prop.lower()}
-    assert model_ish == {("/api/diy/generate", "model_tier")}
-    assert "model" not in main.DiyBody.model_fields            # a tier, never a model id
+    assert model_ish == set(), f"a request body names a model: {model_ish}"
+    # the fixed stack still exists server-side — it is chosen FOR the user
     assert {f"image_{tier}" for tier in ("draft", "final", "pro")} <= set(config.MEDIA_MODELS)
 
     # the campaign surfaces are extra="forbid" — a smuggled override 422s
@@ -658,7 +660,7 @@ def test_ad_card_credits_account_for_every_paid_render(monkeypatch):
     card = store.list_ad_cards(cid)[0]
     assert store.campaign_spend(cid) == pytest.approx(quoted)      # we spent the quote
     assert card["total_cost_credits"] == pytest.approx(
-        round(store.campaign_spend(cid) / creative.CREDIT_USD, 1))
+        round(store.campaign_spend(cid) / threadkit.CREDIT_USD, 1))
 
 
 # ------------------------------------------------ check 9: campaign lifecycle --
@@ -691,7 +693,7 @@ def test_campaign_lifecycle_lands_in_the_store():
     assert row["status"] == "live" and row["creative_count"] == 1
     assert row["objective"] == "conversions" and row["thread_id"] == tid
     assert row["spend_credits"] == pytest.approx(
-        round(store.campaign_spend(cid) / creative.CREDIT_USD, 1))
+        round(store.campaign_spend(cid) / threadkit.CREDIT_USD, 1))
 
     with pytest.raises(ValueError):
         store.set_campaign_status(cid, "archived")          # only the five states

@@ -7,7 +7,7 @@ start_campaign() and save_block(); path a (cards) and path b (conversation)
 write the IDENTICAL CampaignContext — path b is elicitation UX, not a second
 data model.
 
-Same shape as app/creative.py: an in-memory per-thread workspace, long work on
+An in-memory per-thread workspace (app/threadkit.py), long work on
 a daemon thread with labeled _working steps (never a bare spinner), honest
 error cards. The durable record is thread_messages + assets + generation_log +
 ad_cards; a process restart loses the workspace, not the audit trail.
@@ -29,14 +29,11 @@ import traceback
 from typing import Any, Callable, Optional
 
 from app import ccs as ccs_mod
-from app import config, creative, store
+from app import config, store
 from app.agents import campaign_mock
 from app.agents.council import run_council
-from app.agents.mock import _niche_of
 from app.agents.runner import AgentHardFail, _cited_ids, run_agent
-from app.creative import CREDIT_USD, _asset_url
 from app.fal_client import MediaError, estimate_cost, generate
-from app.orchestrator import _dispatcher, _flagged_ids, _merge_feedback
 from app.rag_client import RagUnavailable, rag
 from app.schemas import (
     AdCard,
@@ -60,7 +57,19 @@ from app.schemas import (
     VariantSpec,
     objective_family,
 )
-from app.thread import _actions, _say, _thread_lock, _working
+from app.threadkit import (
+    CREDIT_USD,
+    _actions,
+    _asset_url,
+    _dispatcher,
+    _flagged_ids,
+    _merge_feedback,
+    _niche_of,
+    _pending,
+    _say,
+    _thread_lock,
+    _working,
+)
 from app.validators import (
     BANNED_ABSTRACTIONS,
     SATURATION_MIN_ASSETS,
@@ -124,7 +133,7 @@ def _ws(thread_id: str) -> dict[str, Any]:
             "options": {}, "verdicts": {}, "option_order": [], "killed": set(),
             "approved_option": None, "template": None, "detail": None,
             "ratios": [], "variant_specs": [], "variant_group_id": None, "variant_count": 1,
-            "prompts": creative._pending(thread_id)["prompts"],
+            "prompts": _pending(thread_id)["prompts"],
             "items": [], "assets": {}, "accepted": set(), "reference": None,
             "spent": 0.0, "cards": [], "retry": None,
         }

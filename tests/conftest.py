@@ -48,6 +48,6 @@ def local_rag(monkeypatch):
     monkeypatch.setattr(RagClient, "health", _health)
 
     routing = RoutingRag(primary=RagClient("http://test"), aux=RagClient("http://test"), enabled=True)
-    for module in ("app.rag_client", "app.orchestrator", "app.main"):
+    for module in ("app.rag_client", "app.threadkit", "app.campaign", "app.main"):
         monkeypatch.setattr(f"{module}.rag", routing, raising=False)
     return routing

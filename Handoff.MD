@@ -18,13 +18,30 @@ no Plans/My Space, no old design system). Three tabs only: Campaign Studio · My
 My Brand. Backend is leveraged, not rebuilt.
 
 ## WHERE IT STOPPED — start here (2026-08-24)
-Backend chair + full flow are DONE and verified (see Current state). The remaining work is
-the FRONTEND REBUILD (docs/marketing-studio-demo.html is the contract) plus the backend it
-implies: app/threadkit.py helper extraction BEFORE deleting old drivers, brand_profile
-storage+routes w/ bidirectional pre-fill, reference_media[] (user reference > template),
-campaign archive/restore/rename/delete, then the dead-code deletion pass. New acceptance
-checks still to write: brand pre-fill both directions, reference-media priority, grid
+Chair + full flow verified, AND the pre-pivot app is DELETED from both repos (-3037 lines
+api, -2600 web). Remaining: brand_profile storage+routes w/ bidirectional pre-fill,
+reference_media[] (user reference > template), campaign archive/restore/rename/delete,
+then the FRONTEND REBUILD to docs/marketing-studio-demo.html (My Campaigns is still a ROW
+LIST — §02 wants a folder-card GRID; My Brand tab does not exist yet and is deliberately
+NOT in the nav, since a link that 404s is worse than a missing one). New acceptance checks
+still to write: brand pre-fill both directions, reference-media priority, grid
 archive/restore.
+
+## WHAT WAS DELETED (2026-08-24) — do not resurrect
+api: app/{thread,creative,orchestrator,commands}.py, app/agents/mock.py, evals/,
+tests/test_{addendum,creative,pipeline_mock}.py, and 19 routes (/api/series/*,
+/api/post-cards/*, /api/diy/*, /api/runs/*, inspiration). web: /avatar /creative /plans
+/space /studio (Content Studio) /studio/[seriesId], 5 components, the LEGACY nav
+dropdown, api.series.*. `/` now redirects to /studio/campaign.
+KEPT ON PURPOSE: **app/ccs.py + app/validators.py are LIVE** (validators imports ccs; the
+council needs the CCF weights) — so tests/test_ccs.py and tests/test_validators.py were
+KEPT too, against the old plan to delete them: deleting a test whose module survives just
+removes coverage from live code.
+NEW: **app/threadkit.py** — neutral thread plumbing (_say/_actions/_thread_lock/_working/
+_pending/_dispatcher/_flagged_ids/_merge_feedback/_niche_of/CREDIT_USD/_asset_url). This
+existed so campaign.py stopped importing from the drivers it replaces. `_working` and
+`_pending` are shared MUTABLE state — always import them, never redefine, or drivers stop
+seeing the same object.
 
 ## REAL-MODE BUG CLASS #3 — silent truncation (fixed 2026-08-24)
 The chair was NOT failing on prompt size as predicted. Root cause found by probe:
