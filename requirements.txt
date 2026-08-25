@@ -5,4 +5,8 @@ anthropic>=0.40
 python-dotenv>=1.0
 httpx>=0.27
 python-multipart>=0.0.9
+# app/graph.py drives rumination as a StateGraph. Pinning this was missed when
+# the port landed: pip-installing it locally made the tests pass while the
+# Render build produced an app that crashed on import.
+langgraph>=1.2,<2
 pytest>=8.0
