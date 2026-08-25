@@ -1989,3 +1989,124 @@ def test_the_wps_thresholds_reach_the_prompt_from_the_same_constant():
     for lang, (tight, fail) in WPS_LIMITS.items():
         assert f"{lang}: tight above {tight}, FAIL above {fail}" in text
     assert "any other language" in text
+
+
+# ================================================================================
+# v3 §5 — the shot board. The LAST FREE GATE, and the artifact everything after
+# it derives from.
+# ================================================================================
+
+
+def _shot(slot="shot_01", **over) -> dict:
+    base = {
+        "slot": slot, "duration_s": 3.0, "beat": "she lifts the bottle to the light",
+        "action": "slow lift", "camera": "push_in", "shot_size": "MCU",
+        "emotion": "quiet interest", "keyframe_prompt": "copper bottle, warm window light",
+        "motion_prompt": "gentle push in", "model_route": "image_final",
+        "route_reason": "legible on-pack text", "est_cost_usd": 0.08,
+    }
+    base.update(over)
+    return base
+
+
+def _board(**over) -> dict:
+    base = {"creative_type": "image", "shots": [_shot()],
+            "copy_primary": "no seam, no leak", "cta": "Shop the range"}
+    base.update(over)
+    return base
+
+
+def test_b1_splits_a_two_action_beat_and_records_the_split():
+    """A clip carrying two unrelated actions degrades reliably. This one is
+    auto-fixable, so it is fixed AND recorded — the board logs its own edits
+    instead of quietly applying them."""
+    from app.schemas import ShotBoard
+    from app.validators import validate_shot_board
+
+    board = validate_shot_board(ShotBoard.model_validate(_board(shots=[
+        _shot(beat="macro insert on the seam then back to her face")])))
+    assert board.lints.beats.status == "warn"
+    assert board.lints.beats.resolution and "split" in board.lints.beats.resolution[0]
+    assert any("B1 auto-split" in c for c in board.changes)
+
+
+def test_b2_flags_a_cast_the_runtime_cannot_carry():
+    """Cast size is an OUTPUT of duration, not an input to it. This is the check
+    that prevents a twenty-second film with four protagonists."""
+    from app.schemas import ShotBoard
+    from app.validators import validate_shot_board
+
+    with pytest.raises(AgentValidationError) as exc:
+        validate_shot_board(ShotBoard.model_validate(_board(shots=[
+            _shot(slot="shot_01", cast_refs=["@priya"]),
+            _shot(slot="shot_02", cast_refs=["@arjun", "@meera", "@sam"])])))
+    assert "screen time" in str(exc.value)
+
+
+def test_b3_forces_a_choice_and_never_silently_truncates():
+    """A silently dropped product reference is exactly how label and geometry
+    drift enter a campaign. The cap is per-model and lives in config, not in a
+    prompt."""
+    from app.schemas import ShotBoard
+    from app.validators import validate_shot_board
+
+    cap = config.MEDIA_REF_SLOTS["video"]
+    over = [f"@ref{i}" for i in range(cap + 2)]
+    with pytest.raises(AgentValidationError) as exc:
+        validate_shot_board(ShotBoard.model_validate(_board(
+            creative_type="video",
+            shots=[_shot(model_route="video", product_refs=over,
+                         route_reason="dialogue to camera")])))
+    message = str(exc.value)
+    assert "drop a reference or split the shot" in message
+    assert "geometry drift" in message
+    # the refs are all still named — nothing was quietly removed
+    for ref in over:
+        assert ref in message
+
+    fits = validate_shot_board(ShotBoard.model_validate(_board(
+        creative_type="video",
+        shots=[_shot(model_route="video", product_refs=over[:cap],
+                     route_reason="dialogue to camera")])))
+    assert fits.lints.slots.status == "pass" and fits.shots[0].slots_used == cap
+
+
+def test_b4_flags_a_multi_stage_camera_move():
+    from app.schemas import ShotBoard
+    from app.validators import validate_shot_board
+
+    board = validate_shot_board(ShotBoard.model_validate(_board(shots=[
+        _shot(motion_prompt="descend then orbit into a push")])))
+    assert board.lints.motion.status == "warn"
+    assert "one short clip holds one move" in board.lints.motion.findings[0]
+
+
+def test_the_board_never_invents_a_model_id_or_a_price():
+    """Model ids come from config.MEDIA_MODELS and costs from MEDIA_COST_USD.
+    route_reason is user-visible and is a large part of why an agency trusts it."""
+    from app.schemas import ShotBoard
+    from app.validators import validate_shot_board
+
+    with pytest.raises(AgentValidationError) as exc:
+        validate_shot_board(ShotBoard.model_validate(_board(shots=[
+            _shot(model_route="veo-3-ultra-turbo")])))
+    assert "never the model's to invent" in str(exc.value)
+
+    with pytest.raises(AgentValidationError) as exc:
+        validate_shot_board(ShotBoard.model_validate(_board(shots=[_shot(route_reason="  ")])))
+    assert "HARDEST requirement" in str(exc.value)
+
+    priced = validate_shot_board(ShotBoard.model_validate(_board(shots=[
+        _shot(slot="shot_01", est_cost_usd=0.08), _shot(slot="shot_02", est_cost_usd=0.15)])))
+    assert priced.est_total_usd == 0.23
+
+
+def test_the_board_shows_its_lints_even_when_everything_passes():
+    """A lint panel that only appears on failure teaches the user nothing about
+    what was checked."""
+    from app.schemas import ShotBoard
+    from app.validators import validate_shot_board
+
+    board = validate_shot_board(ShotBoard.model_validate(_board()))
+    for name in ("beats", "runtime", "slots", "motion"):
+        assert getattr(board.lints, name).status == "pass"

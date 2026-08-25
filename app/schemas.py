@@ -798,6 +798,82 @@ class DetailShot(Strict):
     vo_or_copy: Optional[str] = None
 
 
+CameraMove = Literal["static", "push_in", "pull_out", "pan", "tilt",
+                     "handheld", "orbit", "macro_slide"]
+ShotSize = Literal["ECU", "CU", "MCU", "MS", "WS", "EWS"]
+
+
+class LintResult(Strict):
+    """A lint that says only PASS is a lint nobody reads. `findings` names what
+    was wrong and `resolution` names what was DONE about it, so the board records
+    its own edits rather than quietly applying them."""
+
+    status: Literal["pass", "warn", "fail"] = "pass"
+    findings: list[str] = Field(default_factory=list)
+    resolution: list[str] = Field(default_factory=list)
+
+
+class BoardLints(Strict):
+    beats: LintResult = Field(default_factory=LintResult)      # B1
+    runtime: LintResult = Field(default_factory=LintResult)    # B2
+    slots: LintResult = Field(default_factory=LintResult)      # B3
+    motion: LintResult = Field(default_factory=LintResult)     # B4
+
+
+class BoardShot(Strict):
+    """One row of the board. Built on the Phase-2 `Shot` vocabulary
+    (keyframe_prompt / motion_prompt) rather than a third shot language.
+
+    NOTE the one spec conflict, resolved here: `Shot.duration_s` caps at 8 and
+    the v3 artifact spec caps BoardShot at 10. v3 is the spec of record, so 10
+    wins — and it is recorded rather than silently differing.
+    """
+
+    slot: str
+    duration_s: float = Field(gt=0, le=10)
+    beat: str                                    # ONE beat — B1
+    dialogue_ref: Optional[str] = None           # ScriptLine.slot
+    action: str
+    camera: CameraMove
+    shot_size: ShotSize
+    emotion: str
+    cast_refs: list[str] = Field(default_factory=list)
+    product_refs: list[str] = Field(default_factory=list)
+    env_refs: list[str] = Field(default_factory=list)
+    keyframe_prompt: str        # style_block injected SERVER-side, not by the model
+    motion_prompt: str = ""
+    model_route: str            # key into config.MEDIA_MODELS
+    route_reason: str           # the shot's HARDEST requirement, user-visible
+    slots_used: int = 0
+    est_cost_usd: float = 0.0
+
+    @property
+    def all_refs(self) -> list[str]:
+        return [*self.cast_refs, *self.product_refs, *self.env_refs]
+
+
+class ShotBoard(Strict):
+    """v3 §5 — "approve the film before it exists". THE LAST FREE GATE.
+
+    Everything after this derives from it. A hook swap edits one row and
+    re-renders one shot; if variants were derived from the finished video
+    instead, every axis would multiply a full re-render. The board, not the MP4,
+    is the source of truth — that single decision is the difference between
+    variant testing being a habit and being a quote.
+    """
+
+    creative_type: CreativeType
+    shots: list[BoardShot] = Field(min_length=1)
+    copy_primary: str
+    cta: str
+    claims_used: list[str] = Field(default_factory=list)
+    style_block_id: Optional[str] = None
+    lints: BoardLints = Field(default_factory=BoardLints)
+    est_total_usd: float = 0.0
+    version: int = 1
+    changes: list[str] = Field(default_factory=list)
+
+
 class CampaignDetail(Strict):
     """Step 5 artifact → right-panel Context tab. Script (video) or image
     prompt set (statics) + structure, copy, CTA, claims used."""

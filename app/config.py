@@ -100,6 +100,18 @@ MEDIA_COST_USD = {
     "tts_final_per_1k": float(os.environ.get("PLOTLINE_COST_TTS_FINAL", "0.10")),
 }
 
+# v3 §5 lint B3 — how many reference images one call to each model can carry.
+# Per-model and in CONFIG, never in a prompt: a silently dropped product
+# reference is exactly how label and geometry drift enter a campaign, so the
+# board has to force an explicit drop-or-split against a real number.
+MEDIA_REF_SLOTS = {
+    "image_draft": int(os.environ.get("PLOTLINE_REF_SLOTS_IMAGE_DRAFT", "3")),
+    "image_final": int(os.environ.get("PLOTLINE_REF_SLOTS_IMAGE_FINAL", "4")),
+    "image_pro": int(os.environ.get("PLOTLINE_REF_SLOTS_IMAGE_PRO", "6")),
+    "video": int(os.environ.get("PLOTLINE_REF_SLOTS_VIDEO", "2")),
+}
+MEDIA_REF_SLOTS_DEFAULT = int(os.environ.get("PLOTLINE_REF_SLOTS_DEFAULT", "2"))
+
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "plotline.db"

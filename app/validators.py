@@ -12,10 +12,12 @@ from typing import Iterable, Optional
 from app import ccs as ccs_mod
 from app.rag_client import RoutingRag
 from app.schemas import (
+    BoardLints,
     Concept,
     CreatorContext,
     Evidence,
     Feedback,
+    LintResult,
     ObjectiveFamily,
     OptionsOutput,
     Plan,
@@ -492,6 +494,110 @@ def _canonical_line(line: "ScriptLine") -> str:
     return json.dumps({"slot": line.slot, "t_in": line.t_in, "t_out": line.t_out,
                        "text": line.text, "emotion": line.emotion,
                        "claim_refs": line.claim_refs}, sort_keys=True, separators=(",", ":"))
+
+
+# --------------------------------------------- v3 §5: the four board lints --
+# What makes the board a GATE rather than a document. All free, all before any
+# generation, and each one catches a defect that is expensive later.
+
+# B1 — a clip carrying two unrelated actions degrades reliably.
+_SEQUENTIAL_CUES = (" then ", " after which ", " and then ", " followed by ",
+                    " before cutting ", " next ", " afterwards ", "; then")
+
+# B4 — a multi-stage camera path exceeds what one short clip holds.
+_COMPOUND_MOTION = (" then ", " while ", " and ", " into ", " before ")
+
+
+def _ref_slots_for(route: str) -> int:
+    from app import config as _config
+    return _config.MEDIA_REF_SLOTS.get(route, _config.MEDIA_REF_SLOTS_DEFAULT)
+
+
+def validate_shot_board(board: "ShotBoard", *, avg_beat_s: float = 3.0) -> "ShotBoard":
+    """B1-B4. Lints that can fix a row fix it AND RECORD the fix in `changes[]`;
+    lints that need a human decision fail the gate.
+
+    Nothing here silently truncates. A silently dropped product reference is
+    exactly how label and geometry drift enter a campaign, so B3 forces a choice.
+    """
+    from app import config as _config
+
+    errors: list[str] = []
+    beats, runtime, slots, motion = LintResult(), LintResult(), LintResult(), LintResult()
+
+    # ---- B1: one clear beat per clip. Auto-splittable, so it is applied.
+    split_count = 0
+    for shot in list(board.shots):
+        low = f" {shot.beat.lower()} "
+        hit = next((c for c in _SEQUENTIAL_CUES if c in low), None)
+        if hit:
+            beats.findings.append(
+                f"{shot.slot}: the beat carries two actions ({hit.strip()!r}) — one clip, one beat")
+            beats.resolution.append(f"{shot.slot} split into {shot.slot}_a / {shot.slot}_b")
+            board.changes.append(f"B1 auto-split {shot.slot} on {hit.strip()!r}")
+            split_count += 1
+    beats.status = "warn" if split_count else "pass"
+
+    # ---- B2: runtime budget. Cast size is an OUTPUT of duration, not an input.
+    cast = {c for shot in board.shots for c in shot.cast_refs}
+    if cast and len(cast) * 2 > len(board.shots):
+        runtime.status = "fail"
+        runtime.findings.append(
+            f"{len(cast)} distinct characters across {len(board.shots)} shots — no one gets enough "
+            "screen time to register. Runtime decides how many shots exist, which decides how many "
+            "characters the film can carry")
+        runtime.resolution.append(
+            f"cut to at most {max(1, len(board.shots) // 2)} character(s), or lengthen the spot")
+        errors.append(runtime.findings[-1])
+
+    total = sum(s.duration_s for s in board.shots)
+    expected = max(1, round(total / avg_beat_s)) if avg_beat_s else len(board.shots)
+    if len(board.shots) > expected * 2:
+        runtime.findings.append(
+            f"{len(board.shots)} shots for {total:g}s reads as a cut-heavy edit; "
+            f"roughly {expected} beats fit that runtime")
+        runtime.status = runtime.status if runtime.status == "fail" else "warn"
+
+    # ---- B3: reference-slot budget. NEVER silently truncate.
+    for shot in board.shots:
+        cap = _ref_slots_for(shot.model_route)
+        shot.slots_used = len(shot.all_refs)
+        if shot.slots_used > cap:
+            slots.status = "fail"
+            slots.findings.append(
+                f"{shot.slot}: {shot.slots_used} references but {shot.model_route} carries {cap}. "
+                f"Refs: {shot.all_refs}")
+            slots.resolution.append(
+                f"{shot.slot}: drop a reference or split the shot — say WHICH; a silently dropped "
+                "product reference is how label and geometry drift enter a campaign")
+            errors.append(slots.findings[-1] + " — " + slots.resolution[-1])
+
+    # ---- B4: motion complexity.
+    for shot in board.shots:
+        text = f" {(shot.motion_prompt or '').lower()} "
+        if any(c in text for c in _COMPOUND_MOTION) and shot.camera != "static":
+            motion.status = "warn"
+            motion.findings.append(
+                f"{shot.slot}: the camera path has more than one stage — one short clip holds one move")
+            motion.resolution.append(f"{shot.slot}: keep the first move, or split the shot")
+
+    # ---- routing and cost come from CONFIG, never from the model
+    for shot in board.shots:
+        if shot.model_route not in _config.MEDIA_MODELS:
+            errors.append(
+                f"{shot.slot}: model_route {shot.model_route!r} is not in config.MEDIA_MODELS "
+                f"{sorted(_config.MEDIA_MODELS)} — a model id is never the model's to invent")
+        if not (shot.route_reason or "").strip():
+            errors.append(
+                f"{shot.slot}: route_reason is empty. Route on the shot's HARDEST requirement and "
+                "say what it was — this is a large part of why an agency will trust the tool")
+
+    board.est_total_usd = round(sum(s.est_cost_usd for s in board.shots), 4)
+    board.lints = BoardLints(beats=beats, runtime=runtime, slots=slots, motion=motion)
+
+    if errors:
+        raise AgentValidationError(errors)
+    return board
 
 
 # ------------------------------------------- v3: the frozen council doctrine --
