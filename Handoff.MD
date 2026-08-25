@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline (plotline-api + plotline-web)
-last-synced: `f9790a7` (plotline-api) · `df51116` (plotline-web)
+last-synced: `a5f161b` (plotline-api) · `f8d312c` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api and ~/Documents/plotline-web) — reconcile
 > anything changed underneath this file before trusting the state below. Then open with
@@ -26,6 +26,26 @@ LIST — §02 wants a folder-card GRID; My Brand tab does not exist yet and is d
 NOT in the nav, since a link that 404s is worse than a missing one). New acceptance checks
 still to write: brand pre-fill both directions, reference-media priority, grid
 archive/restore.
+
+## RENDER STATE (2026-08-25) — NO MOCK, one step left for the user
+Both mocks are OFF in prod: `MOCK_LLM=0`, `MOCK_MEDIA=0`, `FAL_KEY` set.
+**`ANTHROPIC_API_KEY` is still NOT set** — Claude cannot add API keys, the user must.
+Until it is, `/health` reports `llm_unavailable` and `POST /campaigns/{id}/start`
+returns 503 with the reason (config.llm_unavailable_reason()). This is deliberate:
+real mode with no key is a broken deployment and must SAY so, not 500.
+Add the key here: dashboard.render.com/web/srv-da4pufqfngtc73col7rg/env
+WARNING (unchanged): the app is PUBLIC with no auth. Once the key lands, anyone with
+the URL can trigger a ~25-min Sonnet rumination + real fal spend. Cloud RAG is devrag
+SAMPLE data (both PLOTLINE_RAG_URL and _AUX_ point at 127.0.0.1:8787), so real-mode
+cloud output will be honestly PROVISIONAL and weaker than local.
+
+## POLICY DOC IS OPTIONAL (fixed 2026-08-25)
+It always was in the schema, but the UI only rendered "Confirm claims" when extraction
+returned ≥1 candidate — so a brand with no policy doc and a plain product description
+could NEVER finish the Brand card, and claims_confirmed gates the campaign. Fixed in the
+UI: the confirm surface shows whenever extraction has run, claims/banned words can be
+typed by hand, and confirming NONE is allowed and explained. Not a weakening — an empty
+approved list makes every persuasion claim unmapped, so _validate_detail rejects it.
 
 ## WHAT WAS DELETED (2026-08-24) — do not resurrect
 api: app/{thread,creative,orchestrator,commands}.py, app/agents/mock.py, evals/,

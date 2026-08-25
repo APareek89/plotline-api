@@ -93,3 +93,34 @@ validator was NOT weakened. planner 1.2.0→1.3.0.
 **Preventive action.** When a check is mechanical, the prompt must quote the mechanism,
 generated from the same constant the check reads — never a hand-copy. A test asserts every
 enforced cue appears in the built system prompt, so drift fails in CI, not in a paid run.
+
+## 2026-08-25 — An optional field that was impossible to skip
+
+**Symptom.** "Make policy extract optional." The Brand Policy Document was ALREADY
+optional in `BrandBlock` and `_policy_text` handled its absence gracefully, so the
+request looked like it was already satisfied.
+
+**Why-chain.**
+1. Why does it feel mandatory? Because the Brand card cannot be completed without it.
+2. Why not? `claims_confirmed` gates the card, and the only way to set it is the
+   "Confirm claims" button.
+3. Why can't that button be reached? It rendered only when
+   `aux.candidates.approved_claims.length > 0 || banned_words.length > 0`.
+4. Why would that ever be zero? No policy doc + a product description with nothing
+   quotable extracts nothing — confirmed live: `{approved_claims: [], banned_words: []}`.
+5. **Deepest why: `design`** — an optional INPUT was wired to a mandatory OUTPUT. The
+   schema said optional; the only path through the UI said otherwise.
+
+**Action (aimed at why-5).** Show the confirm surface whenever extraction has run, allow
+manual entry, and permit confirming an empty list with the consequence stated inline.
+
+**Preventive action for the class.** When a field is optional, trace the whole path it
+feeds and check the terminal action is still reachable when it is absent. "Optional" is a
+property of the PATH, not of the field declaration — a nullable column proves nothing.
+Two acceptance checks now pin it: the card completes with no policy doc, and an empty
+approved list still rejects any claim a detail tries to use.
+
+**Second lesson, cheaper.** The instinct was to read "make it optional" as "relax the
+gate". The gate was not the problem, and relaxing `claims_confirmed` would have broken a
+stated invariant. Reading the request as a bug report rather than a spec change found a
+fix that made compliance stricter, not looser.
