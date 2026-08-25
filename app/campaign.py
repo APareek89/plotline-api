@@ -47,6 +47,7 @@ from app.schemas import (
     BrandBlock,
     ArtifactEnvelope,
     Cadence,
+    CampaignBrief,
     CampaignContext,
     CampaignDetail,
     CampaignOption,
@@ -1570,6 +1571,70 @@ def _run_detail(context: CampaignContext, shadow: CreatorContext, option: Any,
     return detail
 
 
+def _confirmed_claims(context: CampaignContext) -> set[str]:
+    """CONFIRMED is the operative word. A saved-but-unconfirmed list is a set of
+    CANDIDATES, not permissions — treating it as approved would let the extractor
+    grant itself authority.
+
+    Extracted so the brief's proof_points and the detail's claims_used ask the
+    SAME question. Two copies of a compliance rule is one copy plus a bug.
+    """
+    brand = context.brand
+    if brand is None or not brand.claims_confirmed:
+        return set()
+    return set(brand.approved_claims)
+
+
+def _unmapped_claims(used: list[str], context: CampaignContext) -> list[str]:
+    approved = _confirmed_claims(context)
+    return [c for c in used if c not in approved]
+
+
+def _validate_brief(brief: CampaignBrief, context: CampaignContext) -> CampaignBrief:
+    """v3 §1. Free to produce, so every check here is free too — and each one
+    catches something that would otherwise cost money further down."""
+    errors: list[str] = []
+
+    unmapped = _unmapped_claims(brief.proof_points, context)
+    if unmapped:
+        errors.append(
+            f"proof_points {unmapped} are NOT in the confirmed approved_claims "
+            f"{sorted(_confirmed_claims(context))} — a proof point IS a claim; drop it or "
+            "get it approved. An unmapped claim is a kill flag, not a stretch")
+
+    campaign_block = context.campaign
+    if campaign_block is not None:
+        if brief.objective != campaign_block.objective:
+            errors.append(
+                f"brief objective {brief.objective!r} contradicts the campaign card's "
+                f"{campaign_block.objective!r} — the brief ECHOES the cards, it does not re-decide them")
+        if brief.creative_type != campaign_block.creative_type:
+            errors.append(
+                f"brief creative_type {brief.creative_type!r} contradicts the campaign card's "
+                f"{campaign_block.creative_type!r}")
+        stray = [p for p in brief.platforms if p not in campaign_block.platforms]
+        if stray:
+            errors.append(f"brief names platform(s) {stray} that the campaign card does not")
+
+    if errors:
+        raise AgentValidationError(errors)
+
+    # WARNINGS, not errors — D2 is a judgment call and blocking on a heuristic
+    # would make the brief harder to produce than the ad. They render on the card.
+    warnings: list[str] = []
+    if " and " in brief.single_message:
+        warnings.append(
+            "single_message joins two propositions with \"and\" — D2 says an ad that says two "
+            "things communicates neither. Check this is one idea, not two.")
+    product = context.product
+    if product is not None and product.name and product.name.lower() not in brief.brand_role.lower():
+        warnings.append(
+            f"brand_role does not name {product.name} — D4 asks how the brand FUNCTIONS in the "
+            "story, not that it appears at the end.")
+    brief.warnings = warnings
+    return brief
+
+
 def _validate_detail(detail: CampaignDetail, context: CampaignContext,
                      template: Optional[TemplateRef], *,
                      previous: Optional[dict[str, Any]] = None,
@@ -1587,8 +1652,8 @@ def _validate_detail(detail: CampaignDetail, context: CampaignContext,
     # extractor grant itself authority. This used to be implicit (the campaign
     # could not start unconfirmed); now that confirming is optional it has to be
     # explicit, or dropping the gate would silently approve every candidate.
-    approved = set(brand.approved_claims) if brand.claims_confirmed else set()
-    unmapped = [c for c in detail.claims_used if c not in approved]
+    approved = _confirmed_claims(context)
+    unmapped = _unmapped_claims(detail.claims_used, context)
     if unmapped:
         errors.append(
             f"claims_used {unmapped} are NOT in the confirmed approved_claims {sorted(approved)} — "

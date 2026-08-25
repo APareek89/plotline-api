@@ -339,6 +339,14 @@ ArtifactType = Literal[
     "creative_set",
     "ad_card",
     "intake_progress",
+    # v3 — appended, never reordered
+    "campaign_brief",
+    "hook_rack",
+    "style_block",
+    "canon_sheet",
+    "keyframe_board",
+    "qc_report",
+    "variant_matrix",
 ]
 
 ActionStyle = Literal["primary", "secondary", "danger"]
@@ -650,6 +658,63 @@ class CampaignContext(Strict):
         )
 
 
+# The placement spec table. ONE source — AdCard._spec_table and CampaignBrief
+# both read it, because two lists drift and the second one is always the wrong
+# one. Anything rendered has to be a ratio we actually produce.
+PLACEMENT_RATIOS = {"9:16", "1:1", "16:9", "4:5"}
+
+
+class CampaignBrief(Strict):
+    """v3 §1 — "are we making the right ad?", and the format constraints
+    everything downstream inherits.
+
+    Costs nothing: the intake agent derives it from the three completed cards.
+    Four of these fields materially change downstream output and had nowhere to
+    live before — objective, audience and platforms already existed but sat in
+    three separate cards with no single artifact anyone could approve or reject.
+    """
+
+    # derived from CampaignBlock — echoed, never re-asked
+    objective: CampaignObjective
+    audience: str
+    platforms: list[Platform] = Field(min_length=1)
+    creative_type: CreativeType
+
+    # the fields with no home before v3
+    target_metric: Optional[str] = None      # "2,000 units in 6 weeks at <=Rs420 CAC"
+    audience_current_belief: str             # D9: what they believe BEFORE this ad
+    single_message: str = Field(max_length=160)   # the one thing they should remember
+    brand_role: str                          # D4: how the brand functions IN the story
+    offer_cta: str
+
+    # format constraints — locked here, propagated everywhere
+    aspect_ratios: list[str] = Field(min_length=1)
+    duration_s: Optional[float] = None       # video only
+    languages: list[str] = Field(min_length=1)    # BCP-47; first = primary
+    multi_format_policy: Literal["safe_area", "native_regen"] = "safe_area"
+
+    mandatories: list[str] = Field(default_factory=list)
+    guardrails: list[str] = Field(default_factory=list)
+
+    # appetite — scope is cut to fit this, not the reverse
+    budget_credits: Optional[float] = None
+    proof_points: list[str] = Field(default_factory=list)   # ⊆ confirmed approved_claims
+
+    version: int = 1
+    warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _format_table(self) -> "CampaignBrief":
+        bad = [r for r in self.aspect_ratios if r not in PLACEMENT_RATIOS]
+        if bad:
+            raise ValueError(
+                f"ratio(s) {bad} outside the placement spec table "
+                f"{sorted(PLACEMENT_RATIOS)} — every ratio on a brief is one we render")
+        if self.creative_type == "video" and self.duration_s is not None and self.duration_s <= 0:
+            raise ValueError("duration_s must be positive for a video brief")
+        return self
+
+
 class CampaignOption(Strict):
     option_id: str  # o1, o2, o3
     name_line: str
@@ -732,10 +797,13 @@ class AdCard(Strict):
 
     @model_validator(mode="after")
     def _spec_table(self) -> "AdCard":
-        allowed = {"9:16", "1:1", "16:9", "4:5"}
-        bad = [r for r in self.ratios if r not in allowed]
+        # PLACEMENT_RATIOS, not a local literal: the brief validates against the
+        # same table, and two copies of a spec drift apart with the second one
+        # always being the stale one.
+        bad = [r for r in self.ratios if r not in PLACEMENT_RATIOS]
         if bad:
-            raise ValueError(f"ratio(s) {bad} outside the placement spec table {sorted(allowed)}")
+            raise ValueError(
+                f"ratio(s) {bad} outside the placement spec table {sorted(PLACEMENT_RATIOS)}")
         return self
 
 

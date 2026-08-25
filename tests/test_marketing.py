@@ -21,6 +21,7 @@ from app.agents import campaign_mock
 from app.schemas import (
     AdCard,
     AgentMessage,
+    CampaignBrief,
     CampaignContext,
     CampaignDetail,
     CampaignOption,
@@ -1770,3 +1771,103 @@ def test_a_campaign_reads_its_own_policy_and_a_corrupt_one_fails_safe():
     # an unreadable blob must not become a MORE permissive setting
     store.update_campaign_settings(cid, {"review_policy": {"gates": {"detail": "banana"}}})
     assert campaign._pauses_at(cid, "detail") is True
+
+
+# ================================================================================
+# v3 §1 — campaign_brief. The gate that asks "are we making the right ad?"
+# ================================================================================
+
+
+def _brief(**over) -> dict:
+    base = {
+        "objective": "conversions", "audience": CAMPAIGN["target_audience"],
+        "platforms": CAMPAIGN["platforms"], "creative_type": "image",
+        "target_metric": None,
+        "audience_current_belief": "they think every invoicing app is the same",
+        "single_message": "files GST in 60 seconds",
+        "brand_role": "Ledger does the filing on screen while the timer runs",
+        "offer_cta": "Start free",
+        "aspect_ratios": ["9:16"], "languages": ["en-IN"],
+        "proof_points": ["files GST in 60 seconds"],
+    }
+    base.update(over)
+    return base
+
+
+def test_the_brief_validates_ratios_against_the_same_table_as_the_ad_card():
+    """ONE spec table. Two lists drift, and the second one is always the stale
+    one — so the brief reads exactly what AdCard enforces."""
+    from app.schemas import PLACEMENT_RATIOS
+
+    assert CampaignBrief.model_validate(_brief(aspect_ratios=sorted(PLACEMENT_RATIOS)))
+    with pytest.raises(ValidationError) as exc:
+        CampaignBrief.model_validate(_brief(aspect_ratios=["3:2"]))
+    assert "placement spec table" in str(exc.value)
+
+    # and the AdCard rejects exactly the same set, from the same constant
+    with pytest.raises(ValidationError):
+        AdCard.model_validate({
+            "id": "ad_1", "campaign_id": "c", "thread_id": "t", "option_id": "o1",
+            "creative_type": "image", "placements": {}, "ratios": ["3:2"], "naming": "n"})
+
+
+def test_a_proof_point_outside_the_confirmed_claims_is_refused():
+    """A proof point IS a claim. It reaches the same rule as claims_used, through
+    the same helper — two copies of a compliance rule is one copy plus a bug."""
+    cid, _ = _filled("Brief claims")
+    context = campaign._context_of(cid)
+
+    ok = CampaignBrief.model_validate(_brief())
+    assert campaign._validate_brief(ok, context) is ok
+
+    bad = CampaignBrief.model_validate(_brief(proof_points=["3x faster than QuickBooks"]))
+    with pytest.raises(AgentValidationError) as exc:
+        campaign._validate_brief(bad, context)
+    assert "3x faster than QuickBooks" in str(exc.value)
+    assert "kill flag" in str(exc.value)
+
+
+def test_unconfirmed_claims_are_candidates_not_permissions_for_the_brief():
+    """The same trap the detail has: a saved-but-unconfirmed list would let the
+    extractor grant itself authority."""
+    cid, _ = _filled("Brief unconfirmed")
+    context = campaign._context_of(cid)
+    context.brand.claims_confirmed = False
+
+    brief = CampaignBrief.model_validate(_brief())
+    with pytest.raises(AgentValidationError):
+        campaign._validate_brief(brief, context)
+
+
+def test_the_brief_echoes_the_cards_and_cannot_re_decide_them():
+    cid, _ = _filled("Brief echo")
+    context = campaign._context_of(cid)
+
+    for field, value in (("objective", "awareness"), ("creative_type", "video")):
+        with pytest.raises(AgentValidationError) as exc:
+            campaign._validate_brief(CampaignBrief.model_validate(_brief(**{field: value})), context)
+        assert "does not re-decide" in str(exc.value) or "contradicts" in str(exc.value)
+
+    # a platform the card never named cannot appear on the brief
+    with pytest.raises(AgentValidationError) as exc:
+        campaign._validate_brief(
+            CampaignBrief.model_validate(_brief(platforms=["tiktok"])), context)
+    assert "the campaign card does not" in str(exc.value)
+
+    # …but a SUBSET is fine: the brief may narrow the card, never widen it
+    narrowed = campaign._validate_brief(
+        CampaignBrief.model_validate(_brief(platforms=["linkedin"])), context)
+    assert narrowed.platforms == ["linkedin"]
+
+
+def test_a_two_idea_message_warns_but_does_not_block():
+    """D2 is a judgment call. Blocking on a heuristic would make the brief harder
+    to produce than the ad — it surfaces on the card instead."""
+    cid, _ = _filled("Brief warn")
+    context = campaign._context_of(cid)
+
+    brief = campaign._validate_brief(
+        CampaignBrief.model_validate(
+            _brief(single_message="files GST in 60 seconds and saves 4 hours")), context)
+    assert any("D2" in w for w in brief.warnings)
+    assert brief.single_message == "files GST in 60 seconds and saves 4 hours"   # not rewritten
