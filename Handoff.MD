@@ -52,21 +52,16 @@ SHAPE; (c) `kill_flags` came back as objects → the output shape shows a bare s
 Haiku's chair went 3 attempts → 1; Sonnet needs none.
 ⚠️ **Sonnet is slow here** — the old chair alone took 477s. The single reviewer removes three
 of the four council calls, which is the main reason it exists.
-- ⚠️ Council output has **no UI surface at all** (Feedback/SeatReview are never emitted as
-  artifacts; CoverageChip renders only on legacy concept/plan/confidence_card). So doctrine §1's
-  "replace the coverage chip with an honest label" has no target, and a user-added stakeholder
-  seat produces a review nobody can see. Owner declined a council surface for now.
-- ⚠️ v3 silently drops the Handoff's stage-level **checkpoints** — and adds five stages, so the
-  "transient error discards a full paid rumination" exposure got worse, not better.
 
 ## CURRENT STATE
 - ✅ Shipped: v2 campaign flow verified END-TO-END on real models + real fal (Ad Card
   `ad_faa4f000b5` LIVE, credits reconciled exactly); pre-pivot app deleted from both repos
   (−4.8k lines); rumination ported to LangGraph; observability surface; 4 real-mode prompt
   bug classes fixed. See git log + Learning.MD.
-- ✅ **83 tests pass.** `tests/test_marketing.py` holds the acceptance floor — never weaken one.
+- ✅ **147 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
+  floor — never weaken one; re-point it only when an INVARIANT changed by owner decision.
 - ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
-  `MOCK_MEDIA=0`, real key in `.env`. Start: `bash run.sh` (api+rag+devrag), `npm run dev` (web).
+  real key in `.env`. Start: `bash run.sh` (api+rag+devrag), `npm run dev` (web).
 - ✅ Observability = its own nav tab `/observability` (NOT per-thread). Gated on
   `PLOTLINE_DEBUG_OBSERVABILITY=1` (already in `.env`) + `NODE_ENV !== production`.
 - ▶ Loop.MD status: offered (awaiting your answer)
@@ -78,30 +73,20 @@ of the four council calls, which is the main reason it exists.
 - 🔴 **P0-2 Render live, real keys, no auth** — anyone with the URL spends real money.
   RPN 224. Decide: suspend, add auth, or flip to mock. NOTE: flipping `MOCK_LLM=1` would
   ALSO open `/api/agent-runs` publicly (P1-3) — the gate couples two unrelated concerns.
-- 🔴 **CHECKPOINTS — the biggest reliability gap, owner-prioritised over stitching.**
-  A rumination is planner → 3 seats → chair (→ refine repeats the council). Intermediate
-  results live ONLY in memory, so one failure anywhere discards every completed node and
-  the user pays again from zero. Observed live 2026-08-25: planner 209s + seats 120/137/139s
-  all SUCCEEDED, then the chair's connection dropped and all four were binned. The
-  `AgentTransport` retry fixes one node; it does not stop a later failure destroying
-  earlier ones. v3 makes this worse by adding five stages. Fix = persist each stage's
-  output as it completes and resume from the last good one.
+- ✅ ~~CHECKPOINTS~~ — done. Every graph node checks for a checkpoint before running and
+  writes one after returning, so a node that raised leaves nothing and only a COMPLETE
+  result is restored. `retry` resumes; a new rumination clears stale rows.
 - 🟡 **The council has no UI surface at all.** `Feedback`/`SeatReview` are never emitted as
   artifacts (CoverageChip renders only on legacy concept/plan/confidence_card, which the v2
-  flow never produces). So doctrine §1's honest-label instruction has no target, and the
-  shipped stakeholder-seat feature produces reviews nobody can see. Backend complete; owner
-  declined the surface for now — small to add.
+  flow never produces). So doctrine §1's honest-label instruction has no target, and a
+  stakeholder seat produces a review nobody can see. Owner declined the surface — small to add.
 - 🟡 `MOCK_MEDIA=1` is set in `.env` from council testing — flip back before media work.
-- 🟡 `/studio/campaign` Step 2 disables the prompt bar, so the brief-first path only works
-  from the thread page. Same step, two affordances.
 - 🟡 Corpus is still the real limit: 25 chunks, 0 with a real URL. `kb/sources/*.yaml` →
-  ≥60 real-URL chunks. NOTE this now affects the PLANNER ONLY — the council is frozen.
-- 🧑 **DECISION NEEDED — video flow reshape.** Proposed from the gofynd reference (below);
-  items 1–3 reshape `CampaignDetail` + planner prompt = architecture-shaping, so it needs
-  your approval BEFORE code. Item 4 is additive/safe.
+  ≥60 real-URL chunks. NOTE this now affects the PLANNER ONLY — the reviewer is frozen.
 - 🤖 Addendum-03 leftovers: `brand_profile` storage+routes + **My Brand tab** (deliberately
-  NOT in nav until its page exists); `reference_media[]` (user reference > template);
-  campaign archive/rename/delete; My Campaigns is still a ROW LIST — §02 wants a folder GRID.
+  NOT in nav until its page exists — it now also needs to host the Canon library);
+  `reference_media[]` (user reference > template); campaign archive/rename/delete;
+  My Campaigns is still a ROW LIST — §02 wants a folder GRID.
 - 🤖 QA finding: `/studio/campaign` Step 2 disables the prompt bar, so the brief-first path
   only works from the thread page. Same step, two affordances.
 - 🤖 Dev DB is full of my QA campaigns ("Path A/B", "QA one image no claims", …). No delete
@@ -109,7 +94,12 @@ of the four council calls, which is the main reason it exists.
 - 🤖 Corpus is the real limit: 25 chunks, **0 with a real URL**. `kb/sources/*.yaml` → ≥60
   real-URL chunks is what turns this from a working pipeline into grounded expertise.
 
-## VIDEO FLOW — proposal (reference-only study of gofynd/pixelbin@marketing-studio-service)
+## VIDEO FLOW — RESOLVED by v3 (kept for the rationale)
+Items 1-3 (scenes/shots split, character plan, keyframe/motion split) landed as `ShotBoard`
++ `CanonSheet` + `KeyframeBoard`. Item 5 (checkpoints) is done. Item 4 (stitching) is the one
+explicit DEFERRAL — owner chose checkpoints over it. Original study below.
+
+### original proposal (reference-only study of gofynd/pixelbin@marketing-studio-service)
 Read for ARCHITECTURE ONLY; nothing copied, nothing of theirs lands here (their stack is
 Node/Remotion, ours Python/fal). Their pipeline: inputs → ad-vector → strategy → assets →
 scenes → shots → keyframes → video. Ours: options → templates → detail → generate → creative.
