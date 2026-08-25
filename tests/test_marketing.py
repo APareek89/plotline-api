@@ -1871,3 +1871,121 @@ def test_a_two_idea_message_warns_but_does_not_block():
             _brief(single_message="files GST in 60 seconds and saves 4 hours")), context)
     assert any("D2" in w for w in brief.warnings)
     assert brief.single_message == "files GST in 60 seconds and saves 4 hours"   # not rewritten
+
+
+# ================================================================================
+# v3 §4 — hook_rack. "Does a human talk like this, and does it physically fit?"
+# ================================================================================
+
+
+def _line(slot="hook", text="files GST in sixty seconds flat", emotion="dry, certain",
+          t_in=0.0, t_out=3.0, **over) -> dict:
+    base = {"slot": slot, "t_in": t_in, "t_out": t_out, "text": text, "emotion": emotion}
+    base.update(over)
+    return base
+
+
+def _rack(**over) -> dict:
+    base = {
+        "language": "en-IN",
+        "body": [_line(slot="beat_01", t_in=3.0, t_out=7.0,
+                       text="you open the app and the filing is already done",
+                       emotion="matter of fact")],
+        "hooks": [_line(slot="hook")],
+        "selected_hook_slot": "hook",
+    }
+    base.update(over)
+    return base
+
+
+def test_the_wps_lint_is_recomputed_server_side_and_blocks_a_rushed_line():
+    """W1 — pure arithmetic and the highest-ROI check in the product. A model
+    grading its own line has every incentive to pass it, so the server recomputes
+    exactly like it does for CCS."""
+    from app.schemas import HookRack
+    from app.validators import validate_hook_rack, wps_limits
+
+    # the model claims it passes; the arithmetic says otherwise
+    stuffed = HookRack.model_validate(_rack(hooks=[_line(
+        text="this is a very long opening line that simply cannot be spoken inside the "
+             "window it has been given no matter who reads it",
+        t_in=0.0, t_out=3.0, words=3, wps=1.0, wps_verdict="pass")]))
+    with pytest.raises(AgentValidationError) as exc:
+        validate_hook_rack(stuffed)
+    assert "lip-sync" in str(exc.value) and "proposed_fix" in str(exc.value)
+
+    # a `fail` line WITH a proposed fix is allowed through so the user can apply it
+    fixed = HookRack.model_validate(_rack(hooks=[_line(
+        text="this is a very long opening line that simply cannot be spoken inside the "
+             "window it has been given no matter who reads it",
+        t_in=0.0, t_out=3.0, proposed_fix="filing, already done")]))
+    ok = validate_hook_rack(fixed)
+    assert ok.hooks[0].wps_verdict == "fail" and ok.hooks[0].proposed_fix
+
+    # …and a comfortable line is graded pass, with the numbers the SERVER computed
+    calm = validate_hook_rack(HookRack.model_validate(_rack()))
+    assert calm.hooks[0].wps_verdict == "pass"
+    assert calm.hooks[0].words == 6 and calm.hooks[0].wps <= wps_limits("en-IN")[0]
+
+
+def test_a_line_with_no_real_emotion_is_rejected():
+    """W2 — without an explicit read the model carries the PREVIOUS line's
+    delivery into this one regardless of what it says."""
+    from app.schemas import HookRack
+    from app.validators import validate_hook_rack
+
+    for bad in ("", "normal", "  Good  ", "neutral"):
+        with pytest.raises(AgentValidationError) as exc:
+            validate_hook_rack(HookRack.model_validate(_rack(hooks=[_line(emotion=bad)])))
+        assert "carries the previous line's delivery" in str(exc.value)
+
+
+def test_a_non_english_script_must_declare_its_loanwords():
+    """W3 — forced translation is the tell that a local-language ad was machine
+    made."""
+    from app.schemas import HookRack
+    from app.validators import validate_hook_rack
+
+    with pytest.raises(AgentValidationError) as exc:
+        validate_hook_rack(HookRack.model_validate(_rack(language="hi-IN")))
+    assert "machine-made" in str(exc.value)
+
+    ok = validate_hook_rack(HookRack.model_validate(
+        _rack(language="hi-IN", loanwords_kept=["app", "GST"])))
+    assert ok.loanwords_kept == ["app", "GST"]
+
+
+def test_producing_hook_variants_leaves_the_body_byte_identical():
+    """The whole economics of variant testing: a hook swap re-renders ONE shot,
+    not the film. If the body drifts, every variant is a full re-render."""
+    from app.schemas import HookRack
+    from app.validators import validate_hook_rack
+
+    first = validate_hook_rack(HookRack.model_validate(_rack()))
+
+    more_hooks = HookRack.model_validate(_rack(
+        hooks=[_line(slot="hook"), _line(slot="hook_b", text="sixty seconds, then it is filed")],
+        selected_hook_slot="hook_b"))
+    assert validate_hook_rack(more_hooks, previous=first) is more_hooks   # body untouched
+
+    drifted = HookRack.model_validate(_rack(
+        body=[_line(slot="beat_01", t_in=3.0, t_out=7.0,
+                    text="the filing is done before you open the app",   # reworded
+                    emotion="matter of fact")],
+        hooks=[_line(slot="hook_b", text="sixty seconds, then it is filed")],
+        selected_hook_slot="hook_b"))
+    with pytest.raises(AgentValidationError) as exc:
+        validate_hook_rack(drifted, previous=first)
+    assert "body is LOCKED" in str(exc.value)
+
+
+def test_the_wps_thresholds_reach_the_prompt_from_the_same_constant():
+    """The R2 lexicon bug was one rule with two representations and nothing
+    keeping them in sync. The threshold table is GENERATED from WPS_LIMITS, so a
+    change that misses the prompt fails here rather than in a paid run."""
+    from app.validators import WPS_LIMITS, script_thresholds_text
+
+    text = script_thresholds_text()
+    for lang, (tight, fail) in WPS_LIMITS.items():
+        assert f"{lang}: tight above {tight}, FAIL above {fail}" in text
+    assert "any other language" in text

@@ -381,6 +381,119 @@ def validate_feedback(
 # ------------------------------------------------------------------ options --
 
 
+# ----------------------------------------------- v3 §4: the script lints (W) --
+# Mechanical, so they live here rather than in a prompt — and the prompt QUOTES
+# them from this constant (see script_thresholds_text), because the R2 lexicon
+# bug was one rule with two representations and nothing keeping them in sync.
+
+# W1 — words-per-second ceilings, (tight, fail), by BCP-47 primary subtag.
+# Speech-rate production constraints, not performance benchmarks: above `fail`
+# the line is physically rushed, truncates, and lip-sync collapses. Env-tunable
+# because a brand's read speed is a real variable.
+WPS_LIMITS: dict[str, tuple[float, float]] = {
+    "en": (2.8, 3.3),
+    "hi": (2.4, 2.9),
+    "ta": (2.2, 2.7),
+    "te": (2.2, 2.7),
+    "mr": (2.4, 2.9),
+    "bn": (2.4, 2.9),
+}
+WPS_DEFAULT: tuple[float, float] = (2.5, 3.0)
+
+# W2 — an emotion the model reaches for when it has not chosen one. Without an
+# explicit read the video model carries the previous neutral delivery into the
+# new line regardless of what the line says.
+GENERIC_EMOTIONS = {"normal", "good", "neutral", "fine", "ok", "okay", "standard",
+                    "natural", "regular", "default", "none", "n/a", "-"}
+
+
+def wps_limits(language: str) -> tuple[float, float]:
+    return WPS_LIMITS.get((language or "").split("-")[0].lower(), WPS_DEFAULT)
+
+
+def script_thresholds_text() -> str:
+    """The W1 table as prompt text, GENERATED from WPS_LIMITS.
+
+    Never hand-copied into the prompt. A test asserts the built prompt contains
+    what this returns, so a threshold change that misses the prompt fails in the
+    suite rather than in a paid run.
+    """
+    rows = [f"  {lang}: tight above {tight}, FAIL above {fail} words/second"
+            for lang, (tight, fail) in sorted(WPS_LIMITS.items())]
+    rows.append(f"  any other language: tight above {WPS_DEFAULT[0]}, "
+                f"FAIL above {WPS_DEFAULT[1]} words/second")
+    return "\n".join(rows)
+
+
+def validate_hook_rack(rack: "HookRack", previous: Optional["HookRack"] = None) -> "HookRack":
+    """W1 + W2 + W3, all free, all before any generation.
+
+    The verdicts are RECOMPUTED here rather than trusted: a model that grades its
+    own line has every incentive to pass it, and this is the highest-ROI check in
+    the product — over-stuffed dialogue otherwise surfaces after video is paid for.
+    """
+    errors: list[str] = []
+    tight_limit, fail_limit = wps_limits(rack.language)
+
+    for line in list(rack.body) + list(rack.hooks):
+        where = f"{rack.language} line {line.slot}"
+
+        # W1 — pure arithmetic, so the server does it
+        line.words = len(line.text.split())
+        line.wps = round(line.words / line.duration_s, 2) if line.duration_s else 0.0
+        if line.wps > fail_limit:
+            line.wps_verdict = "fail"
+            if not line.proposed_fix:
+                errors.append(
+                    f"{where}: {line.words} words in {line.duration_s:g}s is {line.wps} w/s, over "
+                    f"the {fail_limit} ceiling — this will be rushed, clipped, and lip-sync will "
+                    "drift. Propose a trimmed line in proposed_fix, or lengthen the window")
+        elif line.wps > tight_limit:
+            line.wps_verdict = "tight"
+        else:
+            line.wps_verdict = "pass"
+
+        # W2 — an unstated emotion is not a neutral one, it is the PREVIOUS one
+        emotion = (line.emotion or "").strip().lower()
+        if not emotion or emotion in GENERIC_EMOTIONS:
+            errors.append(
+                f"{where}: emotion {line.emotion!r} is empty or generic. Without an explicit read "
+                "the model carries the previous line's delivery into this one regardless of what "
+                "it says — name the actual emotion")
+
+    # W3 — for a non-English script, terms the audience says in English stay in
+    # English. Forced translation is the tell that an ad was machine-made.
+    if not rack.language.lower().startswith("en") and not rack.loanwords_kept:
+        errors.append(
+            f"{rack.language}: loanwords_kept is empty. List the terms you deliberately left in "
+            'English (or say why there are none) — translating "app", "online" or a product name '
+            "is how a local-language ad announces it was machine-made")
+
+    # ONE LOCKED BODY. A hook swap must re-render one shot, not the film.
+    if previous is not None:
+        before = [_canonical_line(x) for x in previous.body]
+        after = [_canonical_line(x) for x in rack.body]
+        if before != after:
+            errors.append(
+                "the body changed while producing hook variants — body is LOCKED and must come "
+                "back byte-identical, or every variant re-renders the whole film instead of the "
+                "hook shot")
+
+    rack.total_duration_s = round(
+        max((x.t_out for x in rack.body), default=0.0), 2)
+
+    if errors:
+        raise AgentValidationError(errors)
+    return rack
+
+
+def _canonical_line(line: "ScriptLine") -> str:
+    # compare what the WRITER chose, not what the server recomputed
+    return json.dumps({"slot": line.slot, "t_in": line.t_in, "t_out": line.t_out,
+                       "text": line.text, "emotion": line.emotion,
+                       "claim_refs": line.claim_refs}, sort_keys=True, separators=(",", ":"))
+
+
 # ------------------------------------------- v3: the frozen council doctrine --
 # The council judges from doctrine and retrieves nothing. Everything below makes
 # that structural rather than a prompt instruction — a prompt-only rule holds

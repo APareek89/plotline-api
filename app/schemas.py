@@ -729,6 +729,59 @@ class CampaignOptions(Strict):
     options: list[CampaignOption] = Field(min_length=2, max_length=3)
 
 
+class ScriptLine(Strict):
+    """One spoken or on-screen line. `words`, `wps` and `wps_verdict` are
+    RECOMPUTED server-side — the model never checks its own homework, same rule
+    as CCS."""
+
+    slot: str                  # "hook" | "beat_01" | "cta"
+    t_in: float = Field(ge=0)
+    t_out: float = Field(gt=0)
+    text: str                  # native script (Devanagari for hi, Tamil for ta…)
+    emotion: str               # REQUIRED — W2
+    words: int = 0
+    wps: float = 0.0
+    wps_verdict: Literal["pass", "tight", "fail"] = "pass"
+    proposed_fix: Optional[str] = None    # set when the verdict is `fail`
+    claim_refs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _window(self) -> "ScriptLine":
+        if self.t_out <= self.t_in:
+            raise ValueError(f"{self.slot}: t_out must be after t_in")
+        return self
+
+    @property
+    def duration_s(self) -> float:
+        return self.t_out - self.t_in
+
+
+class HookRack(Strict):
+    """v3 §4 — "does a human talk like this, and does it physically fit?"
+
+    ONE LOCKED BODY, MANY HOOKS. This is what makes variant testing affordable:
+    a hook swap re-renders one shot, not the film. The body must come back
+    byte-identical when hooks are regenerated.
+    """
+
+    language: str
+    body: list[ScriptLine] = Field(min_length=1)     # the LOCKED body
+    hooks: list[ScriptLine] = Field(min_length=1)    # 1..N openers against it
+    selected_hook_slot: str
+    loanwords_kept: list[str] = Field(default_factory=list)
+    total_duration_s: float = 0.0
+    version: int = 1
+
+    @model_validator(mode="after")
+    def _selection_exists(self) -> "HookRack":
+        slots = {h.slot for h in self.hooks}
+        if self.selected_hook_slot not in slots:
+            raise ValueError(
+                f"selected_hook_slot {self.selected_hook_slot!r} is not one of the hooks "
+                f"{sorted(slots)} — the board consumes the selected hook, so it has to exist")
+        return self
+
+
 class TemplateRef(Strict):
     """Selected template = style/composition reference injected into
     downstream prompts — constrains look, never copy. Skip = None upstream."""
