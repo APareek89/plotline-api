@@ -36,7 +36,9 @@ from pydantic import ValidationError
 
 from app.schemas import (GATEABLE_STAGES, KEYFRAME_CHECKS, POLICY_PRESETS, CanonPlan,
                          CanonSheet, HookRack, KeyframeBoard, ReviewPolicy, ShotBoard,
-                         REALISM_TEXTURE, StyleBlock, neutral_style_block, policy_from_preset)
+                         REALISM_TEXTURE, TAKE_FIXES, StyleBlock, TakeReject,
+                         VariantCell, VariantMatrix, neutral_style_block,
+                         policy_from_preset)
 from app.seats import SeatConfigError, SeatSpec
 from app.seats import resolve as resolve_seats
 from app.seats import slugs as seat_slugs
@@ -593,6 +595,17 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
         if event.startswith("use_as_reference_"):
             _use_as_reference(thread_id, event.removeprefix("use_as_reference_"))
             return
+        # v3 §8 — a CLASSIFIED reject. "reject_<cause>_<slot>" carries the
+        # diagnosis, so the system proposes the patch that matches the cause
+        # instead of re-rolling on "make it better", which is not an instruction.
+        if event.startswith("reject_"):
+            rest = event.removeprefix("reject_")
+            cause = next((c for c in TAKE_FIXES if rest.startswith(c)), None)
+            if cause:
+                slot = rest.removeprefix(cause).lstrip("_")
+                _reject_take(thread_id, slot, cause,
+                             extra if isinstance(extra, str) else None)
+                return
         if event.startswith("reroll_"):
             _spawn(thread_id, _reroll_turn, thread_id, event.removeprefix("reroll_"),
                    extra if isinstance(extra, str) else None)
@@ -2544,6 +2557,7 @@ def _assemble_turn(thread_id: str, campaign_id: str) -> None:
                     else f"{len(cards)} Ad Cards ready, sharing one variant group")
         _say(thread_id, headline, artifacts,
              question="Mark it live, or start the next creative for this campaign?")
+        _emit_variant_matrix(thread_id)
     except Exception as exc:
         _fail(thread_id, f"Ad Card assembly failed: {exc}", traceback.format_exc())
     finally:
@@ -3249,3 +3263,102 @@ def _render_canon_views(thread_id: str, sheets: list, campaign_id: str) -> list:
         store.save_canon_sheet(sheet.model_dump(mode="json"), campaign_id)
         out.append(sheet)
     return out
+
+
+def _reject_take(thread_id: str, slot: str, cause: str, detail: Optional[str]) -> None:
+    """v3 §8 — classify the reject, then propose the patch that matches it.
+
+    "Make it better" is not a repair instruction, so the five causes each carry
+    a distinct fix. And ONE VARIABLE PER RETRY: two simultaneous edits make the
+    next result uninterpretable, so a retry that changes the same variable as
+    the last one is refused rather than run.
+    """
+    ws = _ws(thread_id)
+    history = ws.setdefault("rejects", {}).setdefault(slot, [])
+    reject = TakeReject(cause=cause, detail=detail or f"{slot} rejected as {cause}",
+                        variable_changed=_VARIABLE_FOR_CAUSE[cause])
+
+    if history and history[-1]["variable_changed"] == reject.variable_changed:
+        _say(thread_id,
+             f"That would change {reject.variable_changed} again — the last retry already did.",
+             question="Change something else, or accept this take as it is?")
+        return
+
+    history.append(reject.model_dump(mode="json"))
+    store.log_generation(thread_id, None, "reject", prompt=reject.detail)
+    store.log_artifact_activity(
+        thread_id, "creative", "downgraded",
+        f"{slot}: {cause} → {reject.proposed_fix} (changing {reject.variable_changed})")
+    _say(thread_id,
+         f"Rejected {slot} as {cause.replace('_', ' ')}.",
+         [ArtifactEnvelope(
+             type="creative_set", id=f"reject_{slot}",
+             title=f"{slot} · {cause.replace('_', ' ')}",
+             payload={"slot": slot, "reject": reject.model_dump(mode="json"),
+                      "history": history},
+             actions=_actions((f"reroll_{slot}", "Apply fix and re-roll", "primary")))],
+         question=f"{reject.proposed_fix} — apply it?")
+
+
+# Each cause changes exactly ONE thing, and the name of that thing is what the
+# next retry is checked against.
+_VARIABLE_FOR_CAUSE = {
+    "wrong_reference": "reference",
+    "ambiguous_action": "action",
+    "too_many_actions": "beat",
+    "inconsistent_geometry": "product reference",
+    "unsuitable_model": "model route",
+}
+
+
+def _emit_variant_matrix(thread_id: str) -> None:
+    """v3 §11 — the REUSE MAP, once a variant set exists.
+
+    ModelConfirm already proposed the variants; what was missing is the number
+    that decides whether variant testing is affordable at all. A hook-axis
+    variant re-renders exactly the hook shot, and THAT RATIO is the business
+    case for having a shot board — so it has to be visible, not inferable.
+    """
+    ws = _ws(thread_id)
+    # Gate on what was actually GENERATED, not on what model_confirm proposed.
+    # The proposals survive on the workspace even when the user picks a single
+    # creative, so reading them here would show a reuse map for variants that
+    # do not exist. The matrix describes what IS.
+    produced = {i.get("variant_id") for i in ws.get("items") or [] if i.get("variant_id")}
+    if len(produced) < 2:
+        return   # a single control is not a matrix; saying so would be noise
+    specs = [s for s in (ws.get("variant_specs") or [])
+             if s.get("variant_id") in produced]
+    if len(specs) < 2:
+        return
+
+    board = ws.get("board") or {}
+    slots = [s["slot"] for s in board.get("shots", [])] or \
+            [s["slot"] for s in (ws.get("detail") or {}).get("shots", [])]
+    per_shot = (float(board.get("est_total_usd") or 0.0) / len(slots)) if slots else 0.0
+
+    cells = []
+    for spec in specs:
+        delta = str(spec.get("delta", ""))
+        axis = ("hook" if _V_HOOK in delta else
+                "cta" if _V_COPY in delta else "duration")
+        # The control re-renders nothing; a hook swap re-renders the hook shot.
+        rerendered = [] if _V_CONTROL in delta else slots[:1]
+        cells.append(VariantCell(
+            variant_id=spec.get("variant_id", "?"), axis=axis,
+            delta=delta, hypothesis=spec.get("hypothesis", ""),
+            shots_rerendered=rerendered,
+            shots_reused=max(0, len(slots) - len(rerendered)),
+            cost_usd=round(per_shot * len(rerendered), 4)))
+
+    matrix = VariantMatrix(
+        cells=cells,
+        # what the same set would cost rendered from scratch, versus derived
+        baseline_cost_usd=round(per_shot * len(slots) * len(cells), 4),
+        matrix_cost_usd=round(sum(c.cost_usd for c in cells), 4))
+
+    _say(thread_id,
+         "Variants derive from the board, so most shots are reused rather than re-rendered.",
+         [ArtifactEnvelope(
+             type="variant_matrix", id="variants", title="Variant matrix",
+             payload={"matrix": matrix.model_dump(mode="json")})])

@@ -2758,3 +2758,89 @@ def test_the_board_is_handed_the_claims_it_is_allowed_to_use(monkeypatch):
 
     assert seen, "the board agent never ran"
     assert seen["approved_claims"] == sorted(BRAND["approved_claims"])
+
+
+# ================================================================================
+# v3 §8 — the classified take reject, driven the way the UI drives it
+# ================================================================================
+
+
+def _generated(name: str) -> tuple[str, str]:
+    cid, tid = _ruminated(name)
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+    return cid, tid
+
+
+def test_a_reject_carries_its_cause_and_proposes_the_matching_fix():
+    """'Make it better' is not a repair instruction. Each of the five causes has
+    a distinct patch, and the reject event carries which one applies."""
+    from app.schemas import TAKE_FIXES
+
+    cid, tid = _generated("Reject cause")
+    slot = campaign._ws(tid)["items"][0]["slot"]
+
+    _act(tid, "creative", f"reject_too_many_actions_{slot}")
+    history = campaign._ws(tid)["rejects"][slot]
+    assert history and history[-1]["cause"] == "too_many_actions"
+    assert history[-1]["proposed_fix"] == TAKE_FIXES["too_many_actions"]
+
+    rows = [a["detail"] for a in store.get_artifact_activity(tid, "creative")
+            if a["event"] == "downgraded"]
+    assert any("too_many_actions" in d for d in rows)
+    # the fix is offered as an action the user can actually take
+    card = _artifacts(tid, "creative_set")[-1]
+    assert any(a["event"] == f"reroll_{slot}" for a in card["actions"])
+
+
+def test_two_retries_cannot_change_the_same_variable():
+    """Two simultaneous or repeated edits make the next result uninterpretable,
+    so a retry that moves the same variable again is refused, not run."""
+    cid, tid = _generated("One variable")
+    slot = campaign._ws(tid)["items"][0]["slot"]
+
+    _act(tid, "creative", f"reject_wrong_reference_{slot}")
+    before = len(campaign._ws(tid)["rejects"][slot])
+
+    _act(tid, "creative", f"reject_wrong_reference_{slot}")   # same variable again
+    assert len(campaign._ws(tid)["rejects"][slot]) == before, "the repeat was recorded"
+    assert "already did" in _envelopes(tid)[-1]["text"]
+
+    # …but a DIFFERENT cause moves a different variable and is accepted
+    _act(tid, "creative", f"reject_unsuitable_model_{slot}")
+    assert len(campaign._ws(tid)["rejects"][slot]) == before + 1
+
+
+def test_the_variant_matrix_shows_what_was_reused_not_re_rendered():
+    """The ratio between deriving variants from the board and re-rendering them
+    from scratch IS the business case for having a board, so it is shown rather
+    than left to be inferred."""
+    cid, tid = _ruminated("Variant matrix")
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+    _act(tid, "detail", "generate_creative")
+    _text(tid, "2 variants")
+    _act(tid, "creative", "accept_all")
+    _act(tid, "qc", "deliver")
+
+    cards = _artifacts(tid, "variant_matrix")
+    assert cards, "no variant matrix after a variant set was delivered"
+    m = cards[-1]["payload"]["matrix"]
+    assert len(m["cells"]) >= 2
+    assert m["matrix_cost_usd"] < m["baseline_cost_usd"], "reuse is not visible"
+    control = [c for c in m["cells"] if "control" in c["delta"]]
+    assert control and control[0]["shots_rerendered"] == [], "the control re-rendered something"
+
+
+def test_a_single_creative_gets_no_variant_matrix():
+    """One control is not a matrix — saying so would be noise."""
+    cid, tid = _ruminated("No matrix")
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+    _act(tid, "creative", "accept_all")
+    _act(tid, "qc", "deliver")
+    assert _artifacts(tid, "variant_matrix") == []
