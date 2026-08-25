@@ -10,6 +10,7 @@ council, real store.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -2844,3 +2845,39 @@ def test_a_single_creative_gets_no_variant_matrix():
     _act(tid, "creative", "accept_all")
     _act(tid, "qc", "deliver")
     assert _artifacts(tid, "variant_matrix") == []
+
+
+def test_every_artifact_the_server_emits_has_a_renderer_registered():
+    """Found in the browser, not by a test: campaign_brief was in the renderer's
+    switch but NOT in CAMPAIGN_ARTIFACT_TYPES, the allowlist that decides which
+    artifacts reach that renderer at all. It fell through to the legacy card and
+    drew a placeholder with NO ACTION ROW — a dead end at a gate, in a flow that
+    passed every API test.
+
+    Two lists that must agree is the same drift shape as the R2 lexicon and the
+    W1 table. This one crosses a language boundary, so the guard lives here and
+    reads the TypeScript.
+    """
+    web = Path(__file__).resolve().parents[2] / "plotline-web"
+    source = (web / "components" / "campaign-artifacts.tsx").read_text()
+
+    # split on "= [" not "]": the declaration is `: ArtifactType[] = [`, and the
+    # first "]" belongs to the TYPE, not to the list.
+    block = source.split("export const CAMPAIGN_ARTIFACT_TYPES")[1].split("= [", 1)[1]
+    block = block.split("\n];", 1)[0]
+    listed = set(re.findall(r'"([a-z_]+)"', block))
+    switched = set(re.findall(r'case "([a-z_]+)":', source))
+
+    missing = switched - listed
+    assert not missing, (
+        f"{sorted(missing)} have a renderer but are not in CAMPAIGN_ARTIFACT_TYPES, "
+        "so they will never reach it — they render as a placeholder with no actions")
+
+    # …and every v3 type the SERVER can emit is actually handled
+    from app.schemas import ArtifactType
+    import typing
+    v3 = {"campaign_brief", "hook_rack", "canon_sheet", "keyframe_board",
+          "qc_report", "variant_matrix"}
+    assert v3 <= set(typing.get_args(ArtifactType)), "the server lost an artifact type"
+    assert v3 <= switched, f"no renderer for {sorted(v3 - switched)}"
+    assert v3 <= listed, f"not routed to the campaign renderer: {sorted(v3 - listed)}"
