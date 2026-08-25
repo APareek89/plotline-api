@@ -34,7 +34,9 @@ from app.agents import campaign_mock
 from app.agents.council import SEATS, run_council, run_seat
 from pydantic import ValidationError
 
-from app.schemas import GATEABLE_STAGES, POLICY_PRESETS, ReviewPolicy, policy_from_preset
+from app.schemas import (GATEABLE_STAGES, KEYFRAME_CHECKS, POLICY_PRESETS, CanonPlan,
+                         CanonSheet, HookRack, KeyframeBoard, ReviewPolicy, ShotBoard,
+                         REALISM_TEXTURE, StyleBlock, neutral_style_block, policy_from_preset)
 from app.seats import SeatConfigError, SeatSpec
 from app.seats import resolve as resolve_seats
 from app.seats import slugs as seat_slugs
@@ -84,8 +86,14 @@ from app.validators import (
     AgentValidationError,
     _RECEIPT_CUES,
     resolve_or_fail,
+    build_qc_report,
+    script_thresholds_text,
+    validate_canon_sheet,
     validate_council,
     validate_feedback,
+    validate_hook_rack,
+    validate_keyframe_board,
+    validate_shot_board,
 )
 
 logger = logging.getLogger("plotline.campaign")
@@ -446,6 +454,63 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
                      question=str(exc))
             return
 
+    # ---- v3 gates. Each approval advances per the review policy; `regenerate`
+    # re-runs the same turn. The handlers own the artifact; this only routes.
+    if stage == "brief":
+        if event == "approve_brief":
+            store.log_artifact_activity(thread_id, "brief", "approved", "")
+            store.set_thread_stage(thread_id, advance_from(campaign_id, "brief"))
+            _spawn(thread_id, _options_turn, campaign_id, thread_id)
+            return
+        if event == "regenerate_brief":
+            _spawn(thread_id, _brief_turn, thread_id, campaign_id)
+            return
+
+    if stage == "script":
+        if event == "approve_script":
+            store.log_artifact_activity(thread_id, "script", "approved", "")
+            store.set_thread_stage(thread_id, advance_from(campaign_id, "script"))
+            _spawn(thread_id, _board_turn, thread_id, campaign_id)
+            return
+        if event == "regenerate_script":
+            _spawn(thread_id, _script_turn, thread_id, campaign_id)
+            return
+
+    if stage == "detail" and event in ("approve_board", "regenerate_board"):
+        if event == "regenerate_board":
+            _spawn(thread_id, _board_turn, thread_id, campaign_id)
+            return
+        store.log_artifact_activity(thread_id, "board", "approved", "")
+        store.set_thread_stage(thread_id, advance_from(campaign_id, "detail"))
+        _spawn(thread_id, _canon_turn, thread_id, campaign_id)
+        return
+
+    if stage == "canon":
+        if event in ("approve_canon", "skip_canon"):
+            store.log_artifact_activity(
+                thread_id, "canon", "approved" if event == "approve_canon" else "skipped",
+                "" if event == "approve_canon"
+                else "skipped by the user — expect identity drift after roughly three shots")
+            store.set_thread_stage(thread_id, advance_from(campaign_id, "canon"))
+            _spawn(thread_id, _keyframes_turn, thread_id, campaign_id)
+            return
+
+    if stage == "keyframes":
+        if event == "approve_keyframes":
+            ws["keyframes"] = _approve_all_keyframes(ws.get("keyframes") or {})
+            store.log_artifact_activity(thread_id, "keyframes", "approved",
+                                        f"{len(ws['keyframes'].get('frames', []))} frames")
+            store.set_thread_stage(thread_id, advance_from(campaign_id, "keyframes"))
+            _spawn(thread_id, _confirm_turn, thread_id, campaign_id)
+            return
+        if event == "regenerate_keyframes":
+            _spawn(thread_id, _keyframes_turn, thread_id, campaign_id)
+            return
+
+    if stage == "qc" and event == "deliver":
+        _spawn(thread_id, _assemble_turn, thread_id, campaign_id)
+        return
+
     # ---- step 3: options
     if stage == "options":
         if event == "approve":
@@ -491,7 +556,7 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
         ws["template"] = picked  # Skip → None → NO style constraint downstream
         store.log_artifact_activity(thread_id, "templates", "approved",
                                     picked.id if picked else "skipped — no style reference")
-        _spawn(thread_id, _detail_turn, thread_id, campaign_id)
+        _spawn(thread_id, _after_templates, thread_id, campaign_id)
         return
 
     # ---- steps 5-6: detail + refine
@@ -539,7 +604,7 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
         if event == "accept_all":
             for item in ws["items"]:
                 ws["accepted"].add(item["slot"])
-            _spawn(thread_id, _assemble_turn, thread_id, campaign_id)
+            _spawn(thread_id, _qc_turn, thread_id, campaign_id)
             return
 
     # ---- delivered
@@ -927,7 +992,11 @@ def begin_rumination(campaign_id: str) -> None:
     thread_id = _campaign_thread_id(campaign_id)
     if not thread_id:
         raise ValueError("this campaign has no thread to ruminate in")
-    _spawn(thread_id, _options_turn, campaign_id, thread_id, None, None)
+    # v3: the brief comes FIRST. It is free, it locks the format constraints
+    # everything downstream inherits, and options written before the single
+    # message exists are options written against a moving target.
+    store.set_thread_stage(thread_id, "brief")
+    _spawn(thread_id, _brief_turn, thread_id, campaign_id)
 
 
 def _options_turn(campaign_id: str, thread_id: str, note: Optional[str] = None,
@@ -1561,7 +1630,7 @@ def _templates_turn(thread_id: str, campaign_id: str) -> None:
                   "No templates in the library yet — continuing without a style reference."),
                  [_escalation("Template manifest unreadable", problem,
                               artifact_id="templates")] if problem else None)
-            _detail_turn(thread_id, campaign_id)
+            _after_templates(thread_id, campaign_id)
             return
         picks = [(f"pick_{t['id']}", (t.get("label") or t["id"]), "secondary") for t in library]
         _say(
@@ -2682,3 +2751,448 @@ def _partial_fail(thread_id: str, exc: MediaError, done: list[dict[str, Any]]) -
     store.log_artifact_activity(
         thread_id, "creative", "downgraded",
         f"partial render: {len(done)} rendered (${spent:.2f} charged), stopped on {slot} — {exc}"[:500])
+
+
+# =============================================================================
+# v3 stage turns. Each one: produce the artifact, validate it server-side, emit
+# it, record it, then advance per the review policy. `auto` skips only the WAIT —
+# the artifact is produced, emitted and audited either way.
+# =============================================================================
+
+
+def _stage_done(thread_id: str, campaign_id: str, stage: str, *,
+                creative_type: str = "image") -> str:
+    """Record the stage and move on. Returns the stage now in force."""
+    nxt = advance_from(campaign_id, stage, creative_type=creative_type)
+    store.set_thread_stage(thread_id, stage if _pauses_at(campaign_id, stage) else nxt)
+    return stage if _pauses_at(campaign_id, stage) else nxt
+
+
+def _brief_turn(thread_id: str, campaign_id: str) -> None:
+    """v3 §1 — free, and it locks the format constraints everything inherits."""
+    try:
+        _working[thread_id] = "writing the campaign brief"
+        ws = _ws(thread_id)
+        context = _context_of(campaign_id)
+        brief, _log = run_agent(
+            agent="campaign_brief", prompt_name="campaign_brief",
+            model=config.PLANNER_MODEL,
+            user_payload={"context": context.model_dump(mode="json")},
+            schema=CampaignBrief, dispatcher=None, use_tools=False,
+            validate=lambda b: _validate_brief(b, context),
+            mock_fn=campaign_mock.mock_campaign_brief)
+        ws["brief"] = brief.model_dump(mode="json")
+        _say(thread_id,
+             "Here's the brief. The one line in bold is what they should remember.",
+             [ArtifactEnvelope(
+                 type="campaign_brief", id="brief",
+                 title=f"Campaign brief · v{brief.version}",
+                 payload={"brief": ws["brief"]},
+                 actions=_actions(("approve_brief", "Approve brief", "primary"),
+                                  ("regenerate_brief", "Regenerate", "secondary")))],
+             question="Approve this, or tell me what to change?")
+        store.log_artifact_activity(thread_id, "brief", "proposed",
+                                    f"v{brief.version} · {brief.single_message[:80]}")
+        _stage_done(thread_id, campaign_id, "brief", creative_type=brief.creative_type)
+        if not _pauses_at(campaign_id, "brief"):
+            _spawn(thread_id, _options_turn, campaign_id, thread_id)
+    except AgentHardFail as exc:
+        _fail(thread_id, "The brief kept failing validation — most likely a proof point "
+                         "that isn't in the confirmed claims.", str(exc))
+    except Exception as exc:
+        _fail(thread_id, f"Campaign brief failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _script_turn(thread_id: str, campaign_id: str) -> None:
+    """v3 §4 — the w/s lint runs here, before anything has been paid for."""
+    try:
+        _working[thread_id] = "writing the script"
+        ws = _ws(thread_id)
+        brief = ws.get("brief") or {}
+        rack, _log = run_agent(
+            agent="hook_rack", prompt_name="hook_rack", model=config.PLANNER_MODEL,
+            user_payload={"brief": brief, "option": ws.get("approved_option_json"),
+                          "hooks_wanted": _policy_of(campaign_id).hooks_count},
+            schema=HookRack, dispatcher=None, use_tools=False,
+            # The W1 table is INJECTED from the constant the check reads. Never
+            # hand-copied — that is the R2 lexicon bug's exact shape.
+            prompt_replacements={"wps_table": script_thresholds_text()},
+            validate=validate_hook_rack,
+            mock_fn=campaign_mock.mock_hook_rack)
+        ws["hook_rack"] = rack.model_dump(mode="json")
+        failing = [x.slot for x in list(rack.body) + list(rack.hooks) if x.wps_verdict == "fail"]
+        _say(thread_id,
+             f"Script is in — {len(rack.hooks)} hook(s) against a locked body."
+             + (f" {len(failing)} line(s) need a trim." if failing else ""),
+             [ArtifactEnvelope(
+                 type="hook_rack", id="hook_rack",
+                 title=f"Script · {rack.language}",
+                 payload={"rack": ws["hook_rack"]},
+                 actions=_actions(("approve_script", "Approve script", "primary"),
+                                  ("regenerate_script", "Regenerate", "secondary")))],
+             question="Pick a hook and approve, or tell me what to change?")
+        store.log_artifact_activity(thread_id, "script", "proposed",
+                                    f"{rack.language} · {len(rack.hooks)} hooks · "
+                                    f"{len(failing)} over the w/s ceiling")
+        _stage_done(thread_id, campaign_id, "script",
+                    creative_type=brief.get("creative_type", "image"))
+        if not _pauses_at(campaign_id, "script"):
+            _spawn(thread_id, _board_turn, thread_id, campaign_id)
+    except AgentHardFail as exc:
+        _fail(thread_id, "The script kept failing its lints — a line that cannot be said "
+                         "in its window, or a missing emotion.", str(exc))
+    except Exception as exc:
+        _fail(thread_id, f"Script failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _board_turn(thread_id: str, campaign_id: str) -> None:
+    """v3 §5 — THE LAST FREE GATE. Everything after it derives from this."""
+    try:
+        _working[thread_id] = "building the shot board"
+        ws = _ws(thread_id)
+        brief = ws.get("brief") or {}
+        style = ws.get("style_block") or neutral_style_block().model_dump(mode="json")
+        ws["style_block"] = style
+        board, _log = run_agent(
+            agent="shot_board", prompt_name="shot_board", model=config.PLANNER_MODEL,
+            user_payload={"brief": brief, "option": ws.get("approved_option_json"),
+                          "hook_rack": ws.get("hook_rack"),
+                          "style_block_id": style.get("id"),
+                          "available_routes": sorted(config.MEDIA_MODELS)},
+            schema=ShotBoard, dispatcher=None, use_tools=False,
+            validate=lambda b: _validate_board(b, campaign_id, style),
+            mock_fn=campaign_mock.mock_shot_board)
+        ws["board"] = board.model_dump(mode="json")
+        # The board is the SOURCE OF TRUTH; `detail` is its projection into the
+        # shape the generate path already speaks. Projected, never authored
+        # twice — everything downstream reads one artifact, and a board edit
+        # cannot leave a stale detail behind.
+        ws["detail"] = _detail_from_board(board, ws.get("hook_rack"))
+        _say(thread_id,
+             f"The board is the last free gate — {len(board.shots)} shot(s), "
+             f"{board.est_total_usd:.2f} USD after this.",
+             [ArtifactEnvelope(
+                 type="campaign_detail", id="board",
+                 title=f"Shot board · v{board.version}",
+                 # `board` is the truth the card renders. `detail` is its
+                 # server-computed projection, on the wire so anything still
+                 # speaking the pre-v3 shape keeps working — consistent by
+                 # construction, because it is derived rather than authored.
+                 payload={"board": ws["board"], "detail": ws["detail"],
+                          "style_block": style},
+                 actions=_actions(("approve_board", "Approve board", "primary"),
+                                  ("regenerate_board", "Regenerate", "secondary")))],
+             question="Approve the board, or name a row to change?")
+        store.log_artifact_activity(thread_id, "board", "proposed",
+                                    f"v{board.version} · {len(board.shots)} shots · "
+                                    f"${board.est_total_usd:.2f}")
+        _stage_done(thread_id, campaign_id, "detail",
+                    creative_type=board.creative_type)
+        if not _pauses_at(campaign_id, "detail"):
+            _spawn(thread_id, _canon_turn, thread_id, campaign_id)
+    except AgentHardFail as exc:
+        _fail(thread_id, "The shot board kept failing its lints.", str(exc))
+    except Exception as exc:
+        _fail(thread_id, f"Shot board failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _validate_board(board: ShotBoard, campaign_id: str, style: dict[str, Any]) -> ShotBoard:
+    """Server-side: claims, costs, the style-block injection, then the lints."""
+    context = _context_of(campaign_id)
+    unmapped = _unmapped_claims(board.claims_used, context)
+    if unmapped:
+        raise AgentValidationError([
+            f"claims_used {unmapped} are NOT in the confirmed approved_claims — an unmapped "
+            "claim is a kill flag, not a stretch"])
+
+    # The style block is injected HERE, verbatim, not by the model. A model that
+    # paraphrases the style is a model that breaks consistency between shots.
+    prefix = StyleBlock.model_validate(style).as_prompt()
+    for shot in board.shots:
+        if not shot.keyframe_prompt.startswith(prefix):
+            shot.keyframe_prompt = f"{prefix} · {shot.keyframe_prompt}"
+        shot.est_cost_usd = _shot_cost(shot)
+    board.style_block_id = style.get("id")
+    return validate_shot_board(board)
+
+
+def _shot_cost(shot: Any) -> float:
+    """Priced from config, never from the model."""
+    if shot.model_route == "video":
+        return round(config.MEDIA_COST_USD["video_per_s"] * shot.duration_s, 4)
+    return float(config.MEDIA_COST_USD.get(shot.model_route, 0.0))
+
+
+def _canon_turn(thread_id: str, campaign_id: str) -> None:
+    """v3 §6 — the sheets the board actually references, and nothing else."""
+    try:
+        _working[thread_id] = "planning the canon sheets"
+        ws = _ws(thread_id)
+        board = ws.get("board") or {}
+        if "canon" in skipped_stages(campaign_id):
+            # A costed, RECORDED choice — never a silent default.
+            store.log_artifact_activity(
+                thread_id, "canon", "skipped",
+                "skipped by settings — expect identity drift after roughly three shots")
+            _say(thread_id, "Skipping canon sheets, as configured. "
+                            "Expect identity drift after roughly three shots.")
+            _spawn(thread_id, _keyframes_turn, thread_id, campaign_id)
+            return
+
+        plan, _log = run_agent(
+            agent="canon_plan", prompt_name="canon_plan", model=config.PLANNER_MODEL,
+            user_payload={"board": board, "context": _context_of(campaign_id).model_dump(mode="json")},
+            schema=CanonPlan, dispatcher=None, use_tools=False,
+            validate=lambda p: _validate_canon_plan(p, board),
+            mock_fn=campaign_mock.mock_canon_plan)
+        ws["canon"] = [s.model_dump(mode="json") for s in plan.sheets]
+        _say(thread_id,
+             f"{len(plan.sheets)} canon sheet(s) — reusable across every future campaign.",
+             [ArtifactEnvelope(
+                 type="canon_sheet", id="canon", title="Canon sheets",
+                 payload={"sheets": ws["canon"]},
+                 actions=_actions(("approve_canon", "Approve canon", "primary"),
+                                  ("skip_canon", "Skip sheets", "secondary")))],
+             question="Approve these sheets, or skip them and accept the drift?")
+        store.log_artifact_activity(thread_id, "canon", "proposed",
+                                    ", ".join(s.id for s in plan.sheets) or "none needed")
+        _stage_done(thread_id, campaign_id, "canon",
+                    creative_type=board.get("creative_type", "image"))
+        if not _pauses_at(campaign_id, "canon"):
+            _spawn(thread_id, _keyframes_turn, thread_id, campaign_id)
+    except AgentHardFail as exc:
+        _fail(thread_id, "The canon plan kept failing validation.", str(exc))
+    except Exception as exc:
+        _fail(thread_id, f"Canon planning failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _validate_canon_plan(plan: "CanonPlan", board: dict[str, Any]) -> "CanonPlan":
+    """Every board reference resolves, and nothing unused is planned. Canon is
+    expensive and reusable — an unused sheet spends money on nothing."""
+    wanted: set[str] = set()
+    for shot in board.get("shots", []):
+        for key in ("cast_refs", "product_refs", "env_refs"):
+            wanted.update(shot.get(key) or [])
+    planned = {s.id for s in plan.sheets}
+    errors: list[str] = []
+    missing = sorted(wanted - planned)
+    if missing:
+        errors.append(f"the board references {missing} but no sheet is planned for them")
+    extra = sorted(planned - wanted)
+    if extra:
+        errors.append(f"sheets {extra} are planned but the board never references them — "
+                      "canon is expensive and reusable, so an unused sheet spends money on nothing")
+    if errors:
+        raise AgentValidationError(errors)
+    for sheet in plan.sheets:
+        # Plan time: the spec is checkable, the views do not exist yet.
+        validate_canon_sheet(sheet, require_coverage=False)
+    return plan
+
+
+def _keyframes_turn(thread_id: str, campaign_id: str) -> None:
+    """v3 §7 — THE HARD GATE. Stills are generated and must be approved before
+    any motion is paid for."""
+    try:
+        _working[thread_id] = "rendering keyframes"
+        ws = _ws(thread_id)
+        board = ws.get("board") or {}
+        shots = board.get("shots", [])
+        policy = _policy_of(campaign_id)
+
+        ratio = (ws.get("brief") or {}).get("aspect_ratios", ["9:16"])[0]
+        frames: list[dict[str, Any]] = []
+        for shot in shots:
+            asset = _render_keyframe(thread_id, shot, ratio)
+            frames.append({
+                "shot_slot": shot["slot"], "asset_id": asset["asset_id"],
+                "picked_from": policy.keyframes_per_shot,
+                "refs_used": (shot.get("cast_refs") or []) + (shot.get("product_refs") or [])
+                             + (shot.get("env_refs") or []),
+                # Unwired detectors report `na`, never `pass` — a check nobody
+                # ran must not render as a check that succeeded.
+                "checks": {c: "na" for c in KEYFRAME_CHECKS},
+                "repairs": [], "approved": False, "cost_usd": asset["cost"],
+            })
+        board_obj = KeyframeBoard.model_validate({"frames": frames})
+        validate_keyframe_board(board_obj, board_slots=[s["slot"] for s in shots])
+        ws["keyframes"] = board_obj.model_dump(mode="json")
+
+        _say(thread_id,
+             f"{len(frames)} keyframe(s) — nothing animates until every one is approved.",
+             [ArtifactEnvelope(
+                 type="keyframe_board", id="keyframes",
+                 title=f"Keyframes · 0/{len(frames)} approved",
+                 payload={"board": ws["keyframes"]},
+                 actions=_actions(("approve_keyframes", "Approve all", "primary"),
+                                  ("regenerate_keyframes", "Re-render", "secondary")))],
+             question="Approve each frame, or tell me which one is wrong?")
+        store.log_artifact_activity(thread_id, "keyframes", "proposed",
+                                    f"{len(frames)} frames · ${board_obj.total_cost_usd:.2f}")
+        _stage_done(thread_id, campaign_id, "keyframes",
+                    creative_type=board.get("creative_type", "image"))
+    except MediaError as exc:
+        _fail(thread_id, f"Keyframe rendering failed: {exc}", traceback.format_exc())
+    except Exception as exc:
+        _fail(thread_id, f"Keyframes failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _render_keyframe(thread_id: str, shot: dict[str, Any], ratio: str) -> dict[str, Any]:
+    """One still per shot. A keyframe is always an IMAGE, whatever animates it
+    later — routing a video shot to the video model here would pay for motion at
+    the gate whose whole purpose is to avoid paying for motion."""
+    tier = "final" if shot.get("model_route") != "image_pro" else "pro"
+    frame = generate("image", shot["keyframe_prompt"], ratio=ratio, tier=tier)
+    asset_id = store.add_asset(
+        thread_id, f"keyframe_{shot['slot']}", frame.get("kind", "image"), frame["path"],
+        {"model": frame["model"], "prompt": shot["keyframe_prompt"], "ratio": ratio,
+         "shot_slot": shot["slot"], "refs": shot.get("product_refs") or []},
+        frame["cost"])
+    store.log_generation(thread_id, asset_id, "generate", prompt=shot["keyframe_prompt"],
+                         model=frame["model"], seed=str(frame.get("seed")), cost=frame["cost"])
+    return {"asset_id": asset_id, "cost": frame["cost"]}
+
+
+def _qc_turn(thread_id: str, campaign_id: str) -> None:
+    """v3 §9 — three tiers. Blocking findings hold delivery whatever the gate says."""
+    try:
+        _working[thread_id] = "running QC"
+        ws = _ws(thread_id)
+        context = _context_of(campaign_id)
+        brief = ws.get("brief") or {}
+        board = ws.get("board") or {}
+        report = build_qc_report(
+            findings=[],
+            automated={
+                # Honest `skip`: these detectors are not wired yet, and rendering
+                # an unrun check as `pass` would be a lie the report inherits.
+                "identity_drift": "skip", "hand_anomalies": "skip",
+                "label_ocr": "skip", "lip_sync": "skip", "loudness": "skip",
+                "duration_and_ratio": "pass",
+            },
+            rights_ledger=list(context.brand.rights_ledger) if context.brand else [],
+            final_copy=" ".join(filter(None, [board.get("copy_primary"), board.get("cta")])),
+            context=context,
+            locales=list(brief.get("languages") or []),
+            voice_sheets=[CanonSheet.model_validate(s) for s in (ws.get("canon") or [])
+                          if s.get("kind") == "voice"])
+        ws["qc"] = report.model_dump(mode="json")
+        blocking = [f for f in report.findings if f.tier == "blocking"]
+        _say(thread_id,
+             f"QC {report.verdict}." + (f" {len(blocking)} blocking finding(s)." if blocking else ""),
+             [ArtifactEnvelope(
+                 type="qc_report", id="qc",
+                 title=f"QC · {report.verdict}",
+                 payload={"report": ws["qc"]},
+                 actions=_actions(("deliver", "Deliver", "primary"))
+                         if report.verdict == "cleared" else [])],
+             question=None if report.verdict == "cleared"
+                      else "Delivery is held until the blocking findings clear.")
+        store.log_artifact_activity(thread_id, "qc", "proposed",
+                                    f"{report.verdict} · {len(blocking)} blocking")
+        _stage_done(thread_id, campaign_id, "qc",
+                    creative_type=board.get("creative_type", "image"))
+    except Exception as exc:
+        _fail(thread_id, f"QC failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _approve_all_keyframes(board: dict[str, Any]) -> dict[str, Any]:
+    """User approval marks every frame. all_approved is DERIVED by the schema —
+    this sets the frames, and the model recomputes the flag that actually gates
+    paid video."""
+    frames = [{**f, "approved": True} for f in board.get("frames", [])]
+    return KeyframeBoard.model_validate({**board, "frames": frames}).model_dump(mode="json")
+
+
+def _style_block_from_template(template: Optional[TemplateRef]) -> StyleBlock:
+    """Turn the picked template into the string that is actually injected.
+
+    A template's `style_descriptors` are a loose list nothing downstream could
+    enforce. The style block is where they become a named, versioned string
+    prefixed verbatim onto every visual prompt — which is the only reason
+    picking a template changes what is rendered. Skip yields the neutral block,
+    never an absent one.
+    """
+    if template is None:
+        return neutral_style_block()
+    descriptors = [d for d in (template.style_descriptors or []) if d.strip()]
+    if not descriptors:
+        block = neutral_style_block(f"sb_{template.id}")
+        return block.model_copy(update={"derived_from": template.id})
+    return StyleBlock(
+        id=f"sb_{template.id}",
+        grade=descriptors[0],
+        light=descriptors[1] if len(descriptors) > 1 else "soft key, no hard shadow",
+        lens=descriptors[2] if len(descriptors) > 2 else "50mm equivalent, mid aperture",
+        texture=REALISM_TEXTURE["natural"],
+        motion="locked off",
+        negatives=["text overlay", "watermark"],
+        realism="natural",
+        derived_from=template.id,
+    )
+
+
+def _after_templates(thread_id: str, campaign_id: str) -> None:
+    """Templates land, then the script — but only for creative that is SPOKEN.
+
+    A still has no words-per-second problem, so routing an image campaign
+    through the hook rack would be a gate that protects nothing and costs a turn.
+    """
+    ws = _ws(thread_id)
+    template = ws.get("template")
+    ws["style_block"] = _style_block_from_template(template).model_dump(mode="json")
+    creative_type = (ws.get("brief") or {}).get("creative_type", "image")
+    if creative_type == "video" and "script" not in skipped_stages(campaign_id):
+        _script_turn(thread_id, campaign_id)
+    else:
+        _board_turn(thread_id, campaign_id)
+
+
+def _detail_from_board(board: ShotBoard, rack: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Project the shot board into the legacy CampaignDetail shape.
+
+    The generate path speaks `visual_prompt` / `vo_or_copy`; the board speaks
+    `keyframe_prompt` / `motion_prompt` / `dialogue_ref`. This translates ONE
+    WAY, at the point the board is written, so there is exactly one authored
+    artifact. Writing both by hand would be two sources of truth, and the second
+    one is always the stale one.
+    """
+    lines: dict[str, str] = {}
+    if rack:
+        for line in list(rack.get("body") or []) + list(rack.get("hooks") or []):
+            lines[line["slot"]] = line["text"]
+
+    shots = []
+    for index, shot in enumerate(board.shots):
+        # Video shots carry the SPOKEN line their dialogue_ref names. A still has
+        # no dialogue — its "copy" is what appears on the frame, which the board
+        # holds once as copy_primary. Dropping it here would silently remove the
+        # copy-angle variant, because that axis keys off this field.
+        if board.creative_type == "video":
+            copy = lines.get(shot.dialogue_ref or "", "") or None
+        else:
+            copy = board.copy_primary if index == 0 else None
+        shots.append({
+            "slot": shot.slot,
+            "duration_s": shot.duration_s if board.creative_type == "video" else None,
+            "visual_prompt": shot.keyframe_prompt,
+            "vo_or_copy": copy,
+        })
+    return {
+        "creative_type": board.creative_type, "shots": shots,
+        "copy_primary": board.copy_primary, "cta": board.cta,
+        "claims_used": list(board.claims_used), "style_ref": None,
+        "version": board.version, "changes": list(board.changes),
+    }

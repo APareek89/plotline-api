@@ -193,3 +193,107 @@ def mock_seat(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher], sea
     kill = f"unsubstantiated_claim: {unmapped}" if unmapped else None
     return {"seat": seat, "element_scores": base, "kill_recommendation": kill,
             "policy_check_required": False, "policy_notes": [], "fixes": []}
+
+
+# ------------------------------------------------- v3 stage mocks ------------
+# Deterministic stand-ins that go through the SAME schema + server validators the
+# real agents do. A mock that could not pass its own gate would prove nothing.
+
+
+def mock_campaign_brief(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -> dict:
+    ctx = payload["context"]
+    camp = ctx.get("campaign") or {}
+    brand = ctx.get("brand") or {}
+    product = ctx.get("product") or {}
+    claims = list(brand.get("approved_claims") or []) if brand.get("claims_confirmed") else []
+    ratio = "9:16" if camp.get("creative_type") == "video" else "4:5"
+    return {
+        "objective": camp.get("objective", "conversions"),
+        "audience": camp.get("target_audience", ""),
+        "platforms": list(camp.get("platforms") or []),
+        "creative_type": camp.get("creative_type", "image"),
+        "target_metric": None,
+        "audience_current_belief": f"they assume every option in this category is the same",
+        "single_message": (claims[0] if claims else product.get("name", "the product"))[:160],
+        "brand_role": f"{product.get('name', 'the product')} does the work on screen",
+        "offer_cta": "Start now",
+        "aspect_ratios": [ratio],
+        "duration_s": 6.0 if camp.get("creative_type") == "video" else None,
+        "languages": ["en-IN"],
+        "multi_format_policy": "safe_area",
+        "mandatories": [], "guardrails": list(brand.get("banned_words") or []),
+        "budget_credits": None,
+        "proof_points": claims[:1],
+    }
+
+
+def mock_hook_rack(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -> dict:
+    brief = payload.get("brief") or {}
+    message = brief.get("single_message") or "the product does the work"
+    line = " ".join(message.split()[:6]) or "watch this"
+    return {
+        "language": (brief.get("languages") or ["en-IN"])[0],
+        "body": [{"slot": "beat_01", "t_in": 2.5, "t_out": 6.0, "text": line,
+                  "emotion": "matter of fact", "words": 0, "wps": 0,
+                  "wps_verdict": "pass", "proposed_fix": None, "claim_refs": []}],
+        "hooks": [{"slot": "hook", "t_in": 0.0, "t_out": 2.5, "text": line,
+                   "emotion": "dry, certain", "words": 0, "wps": 0,
+                   "wps_verdict": "pass", "proposed_fix": None, "claim_refs": []}],
+        "selected_hook_slot": "hook", "loanwords_kept": [], "total_duration_s": 0,
+    }
+
+
+def mock_shot_board(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -> dict:
+    brief = payload.get("brief") or {}
+    ctype = brief.get("creative_type", "image")
+    claims = list(brief.get("proof_points") or [])
+    route = "video" if ctype == "video" else "image_final"
+    def shot(slot: str, beat: str, dialogue: Optional[str], camera: str) -> dict:
+        return {
+            "slot": slot, "duration_s": 3.0, "beat": beat, "dialogue_ref": dialogue,
+            "action": "slow lift", "camera": camera, "shot_size": "MCU",
+            "emotion": "quiet interest",
+            "cast_refs": [], "product_refs": ["@product"], "env_refs": [],
+            "keyframe_prompt": f"{beat}, label legible",
+            "motion_prompt": "gentle push in" if ctype == "video" else "",
+            "model_route": route,
+            "route_reason": "legible on-pack text" if ctype == "image" else "dialogue to camera",
+            "slots_used": 0, "est_cost_usd": 0.08,
+        }
+
+    # A video board carries TWO shots: one-shot video makes the variant counts
+    # untestable, and a spot with a hook and no payoff is not a spot.
+    shots = [shot("shot_01", "the product is held to the light",
+                  "hook" if ctype == "video" else None, "push_in")]
+    if ctype == "video":
+        shots.append(shot("shot_02", "the result, close", "beat_01", "static"))
+
+    return {
+        "creative_type": ctype,
+        "shots": shots,
+        "copy_primary": brief.get("single_message", "") or "the product does the work",
+        "cta": brief.get("offer_cta", "Start now"),
+        "claims_used": claims, "style_block_id": payload.get("style_block_id"),
+        "est_total_usd": 0, "version": 1, "changes": [],
+    }
+
+
+def mock_canon_plan(payload: dict[str, Any], dispatcher: Optional[ToolDispatcher]) -> dict:
+    board = payload.get("board") or {}
+    wanted: list[str] = []
+    for shot in board.get("shots", []):
+        for key in ("cast_refs", "product_refs", "env_refs"):
+            for ref in shot.get(key) or []:
+                if ref not in wanted:
+                    wanted.append(ref)
+    kind_of = {"cast_refs": "character", "product_refs": "product", "env_refs": "environment"}
+    sheets = []
+    for ref in wanted:
+        kind = next((kind_of[k] for shot in board.get("shots", [])
+                     for k in kind_of if ref in (shot.get(k) or [])), "product")
+        sheets.append({"id": ref, "kind": kind, "label": ref.lstrip("@"),
+                       "brief": f"canon for {ref}", "asset_ids": [], "coverage": {},
+                       "locks": ["proportions", "label text"] if kind == "product" else ["wardrobe"],
+                       "slot_cost": 1, "risk_notes": [], "rights": "fictional",
+                       "consent_ref": None, "native_review": {}, "version": 1})
+    return {"sheets": sheets}

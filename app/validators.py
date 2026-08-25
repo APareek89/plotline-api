@@ -654,15 +654,22 @@ def _claims_in(lowered_copy: str, approved: set[str]) -> list[str]:
 # ------------------------------------------------ v3 §6: canon sheet checks --
 
 
-def validate_canon_sheet(sheet: "CanonSheet", *, languages: Optional[list[str]] = None):
+def validate_canon_sheet(sheet: "CanonSheet", *, languages: Optional[list[str]] = None,
+                         require_coverage: bool = True):
     """Coverage, geometry risk, rights, and the blocking native-speaker review.
 
-    Skipping a sheet is legal — practitioners genuinely do it under time
-    pressure. The failure is doing it INVISIBLY, so that is a costed choice made
-    elsewhere; what this refuses is a sheet that CLAIMS to be complete and is not.
+    `require_coverage=False` is for PLAN time, when the sheet has been specified
+    but its views have not been rendered yet — judging coverage there would fail
+    every sheet for not yet being the thing it is about to become. Rights and
+    geometry risk are properties of the SPEC and are checked either way.
+
+    Skipping a sheet entirely is legal; practitioners do it under time pressure.
+    The failure is doing it INVISIBLY, so that is a costed choice made elsewhere.
+    What this refuses is a sheet that CLAIMS to be complete and is not.
     """
     errors: list[str] = []
-    missing = [v for v in sheet.required_views() if not sheet.coverage.get(v)]
+    missing = ([v for v in sheet.required_views() if not sheet.coverage.get(v)]
+               if require_coverage else [])
 
     if sheet.kind == "voice":
         # W: audition on the real line, and a non-English locale needs a human

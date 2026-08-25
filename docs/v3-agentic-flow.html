@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plotline v3 — agentic flow &amp; stages</title>
+<style>
+  :root{
+    --bg:#0B0E14; --panel:#11151F; --tile:#161B28; --line:#232A3A;
+    --ink:#E6EAF2; --ink2:#98A2B8; --ink3:#6B7488;
+    --blue:#4353FF; --blue-t:#A3AEFF;
+    --free:#3FB950; --cheap:#D29922; --spend:#F85149;
+    --agent:#8B5CF6; --gate:#4353FF;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Inter,sans-serif;padding:28px}
+  h1{font-size:22px;margin:0 0 4px} h2{font-size:15px;margin:34px 0 10px;letter-spacing:.02em}
+  .sub{color:var(--ink2);margin:0 0 22px;max-width:78ch}
+  .wrap{max-width:1180px;margin:0 auto}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 24px;padding:12px 14px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .k{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2)}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .rail{display:flex;flex-direction:column;gap:0}
+  .stage{display:grid;grid-template-columns:150px 1fr;gap:14px;
+    padding:13px 0;border-top:1px solid var(--line)}
+  .stage:first-child{border-top:none}
+  .sname{font-weight:700;font-size:13px}
+  .sname .id{display:block;font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:var(--ink3);letter-spacing:.08em;text-transform:uppercase;margin-top:2px}
+  .cost{display:inline-block;font:600 10px ui-monospace,Menlo,monospace;
+    padding:1px 6px;border-radius:4px;margin-top:6px}
+  .c-free{background:rgba(63,185,80,.13);color:var(--free)}
+  .c-cheap{background:rgba(210,153,34,.13);color:var(--cheap)}
+  .c-spend{background:rgba(248,81,73,.13);color:var(--spend)}
+  .body{min-width:0}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:7px}
+  .chip{font:600 10.5px ui-monospace,Menlo,monospace;padding:2px 7px;border-radius:5px;
+    border:1px solid var(--line);background:var(--tile);color:var(--ink2)}
+  .chip.agent{border-color:rgba(139,92,246,.45);color:#C4B5FD;background:rgba(139,92,246,.10)}
+  .chip.fn{border-color:var(--line);color:var(--ink2)}
+  .chip.gate{border-color:rgba(67,83,255,.5);color:var(--blue-t);background:rgba(67,83,255,.10)}
+  .chip.hard{border-color:rgba(248,81,73,.5);color:#FFA198;background:rgba(248,81,73,.10)}
+  .chip.art{border-color:rgba(63,185,80,.35);color:#7EE787;background:rgba(63,185,80,.08)}
+  .desc{color:var(--ink2);font-size:12.5px;margin:0 0 6px}
+  .checks{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}
+  .checks li{font-size:12px;color:var(--ink2);padding-left:15px;position:relative}
+  .checks li:before{content:"›";position:absolute;left:3px;color:var(--blue-t);font-weight:700}
+  .checks b{color:var(--ink);font-weight:600}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}.stage{grid-template-columns:1fr}}
+  .flowbox{border:1px solid var(--line);background:var(--tile);border-radius:8px;
+    padding:9px 11px;font-size:12.5px}
+  .flowbox .t{font-weight:700;font-size:12px;margin-bottom:2px}
+  .arrow{text-align:center;color:var(--ink3);font-size:15px;line-height:1;margin:5px 0}
+  .par{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .note{font-size:12px;color:var(--ink3);margin-top:8px;font-style:italic}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--ink3);font:600 10.5px ui-monospace,Menlo,monospace;
+    letter-spacing:.06em;text-transform:uppercase}
+  td code{font:600 11.5px ui-monospace,Menlo,monospace;color:var(--blue-t)}
+  .warn{border-left:3px solid var(--cheap);padding-left:12px;color:var(--ink2);font-size:12.5px}
+  .status{display:inline-block;font:700 9.5px ui-monospace,Menlo,monospace;padding:2px 6px;
+    border-radius:4px;letter-spacing:.05em}
+  .st-done{background:rgba(63,185,80,.14);color:var(--free)}
+  .st-todo{background:rgba(248,81,73,.14);color:var(--spend)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Plotline v3 — the marketing studio pipeline</h1>
+<p class="sub">
+  User context in, finished creative out. The organising principle is the <b>cost ladder</b>:
+  text is effectively free, images are cheap, video dominates — so every expensive commitment
+  gets a cheap, rejectable artifact in front of it, and no gate artifact costs more than about
+  5% of the stage it protects.
+</p>
+
+<div class="legend">
+  <span class="k"><i class="dot" style="background:#8B5CF6"></i>AGENT — an LLM call</span>
+  <span class="k"><i class="dot" style="background:#232A3A;border:1px solid #3a4256"></i>FUNCTION — deterministic server code</span>
+  <span class="k"><i class="dot" style="background:var(--gate)"></i>GATE — flow stops for you</span>
+  <span class="k"><i class="dot" style="background:var(--free)"></i>free</span>
+  <span class="k"><i class="dot" style="background:var(--cheap)"></i>cheap (images)</span>
+  <span class="k"><i class="dot" style="background:var(--spend)"></i>real spend (video)</span>
+</div>
+
+<h2>The rail — 14 stages</h2>
+<div class="panel rail">
+
+  <div class="stage">
+    <div><div class="sname">Name<span class="id">name</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row"><span class="chip fn">POST /api/campaigns</span></div>
+      <p class="desc">The blank landing's only block. Creates the campaign and its thread.</p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Paths<span class="id">paths</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row"><span class="chip fn">two path cards</span></div>
+      <p class="desc">Structured (three cards) or conversational (tell me in your own words).
+        Typing a real brief here <b>starts</b> the conversational path with that message —
+        it is never refused for not being a path keyword.</p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Context<span class="id">cards</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row">
+        <span class="chip agent">AGENT campaign_intake</span>
+        <span class="chip fn">brand_extract (system pipeline)</span>
+        <span class="chip art">ProductBlock · CampaignBlock · BrandBlock</span>
+      </div>
+      <p class="desc">Both paths write the <b>identical</b> CampaignContext — path b is
+        elicitation UX, not a second data model. Uploads travel as structured ids and are
+        applied server-side, so a model that ignores them cannot lose your file.</p>
+      <ul class="checks">
+        <li><b>claims_confirmed</b> — one tap. Confirming <b>grants</b> permission to make
+          claims; it does not gate the start. An unconfirmed list is candidates, not permissions.</li>
+        <li><b>rights ledger</b> lives here, not at QC — discovering at the end that the music
+          is uncleared means the ad is finished and unshippable.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Brief<span class="id">brief</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row">
+        <span class="chip gate">GATE</span><span class="chip art">campaign_brief</span>
+      </div>
+      <p class="desc">“Are we making the right ad?” — and it locks the format constraints
+        everything downstream inherits. Derived from the three cards, so no new typing.</p>
+      <ul class="checks">
+        <li><b>The one thing they remember</b> renders largest — if you read one line, that's it.</li>
+        <li><b>proof_points ⊆ confirmed claims</b>, or blocked naming the claim.</li>
+        <li><b>aspect_ratios</b> validate against the same spec table the Ad Card enforces.</li>
+        <li>Two ideas joined by “and” <b>warns</b>, never blocks — a heuristic must not make the
+          brief harder to produce than the ad.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Options<span class="id">options</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row">
+        <span class="chip agent">AGENT campaign_planner</span>
+        <span class="chip agent">AGENT marketing_expert</span>
+        <span class="chip gate">GATE</span>
+        <span class="chip art">campaign_option ×2–3</span>
+      </div>
+      <p class="desc">The rumination. The planner drafts with retrieval; the Marketing Expert
+        judges from frozen doctrine and sends fixes back for one refine pass. See the sub-graph below.</p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Style<span class="id">templates</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row">
+        <span class="chip gate">GATE</span><span class="chip art">template_picker</span>
+        <span class="chip art">style_block</span><span class="chip">skippable</span>
+      </div>
+      <p class="desc">A named, versioned string injected <b>verbatim</b> into every visual prompt —
+        the cheapest consistency mechanism there is. Skip yields a <b>neutral default block</b>,
+        never an absent one.</p>
+      <ul class="checks">
+        <li><b>Realism dial</b> (editorial / natural / documentary) — counter-intuitive and
+          load-bearing: faces read as credible <i>because</i> of pores and asymmetry.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Script<span class="id">script</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row"><span class="chip gate">GATE</span><span class="chip art">hook_rack</span></div>
+      <p class="desc">One <b>locked body</b>, many hooks. That structure is what makes variant
+        testing affordable — a hook swap re-renders one shot, not the film.</p>
+      <ul class="checks">
+        <li><b>W1 words-per-second</b> — pure arithmetic, recomputed server-side. Over the
+          per-language ceiling the line is rushed, clipped, and lip-sync collapses.</li>
+        <li><b>W2 emotion required</b> — without an explicit read the model carries the
+          <i>previous</i> line's delivery into this one.</li>
+        <li><b>W3 loanwords</b> — forced translation is the tell that an ad was machine-made.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Shot board<span class="id">detail</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row"><span class="chip gate">GATE</span><span class="chip art">shot board</span>
+        <span class="chip">the last free gate</span></div>
+      <p class="desc">Approve the film before it exists — and see the full cost of everything
+        after it. <b>The board, not the MP4, is the source of truth.</b></p>
+      <ul class="checks">
+        <li><b>B1 one beat per clip</b> — a two-action beat is auto-split and the split is recorded.</li>
+        <li><b>B2 runtime budget</b> — cast size is an <i>output</i> of duration. Stops a
+          twenty-second film with four protagonists.</li>
+        <li><b>B3 reference slots</b> — forces drop-or-split and <b>never truncates</b>; a
+          silently dropped product ref is how label drift enters a campaign.</li>
+        <li><b>B4 motion complexity</b> — one short clip holds one camera move.</li>
+        <li>Model ids come from config, never from the model. <b>route_reason</b> is visible.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Canon<span class="id">canon</span></div><span class="cost c-cheap">cheap · reusable</span></div>
+    <div class="body">
+      <div class="row"><span class="chip gate">GATE</span><span class="chip art">canon_sheet ×4 kinds</span>
+        <span class="chip">skippable</span></div>
+      <p class="desc">Cast, product, environment, voice — workspace-global library entities.
+        <b>The retention mechanic:</b> campaign two is cheaper because the canon already exists.</p>
+      <ul class="checks">
+        <li><b>Geometry risk</b> — product accuracy is harder than face consistency, and
+          packaging text is the hardest part. risk_notes force extra ¾ views.</li>
+        <li><b>Voice</b> auditions on the real final line, never a demo reel. A non-English
+          locale needs a <b>blocking</b> native-speaker sign-off.</li>
+        <li>Skipping is a <b>costed, recorded</b> choice — expect identity drift after a few shots.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Keyframes<span class="id">keyframes</span></div><span class="cost c-cheap">cheap</span></div>
+    <div class="body">
+      <div class="row"><span class="chip hard">HARD GATE — never skippable</span>
+        <span class="chip art">keyframe_board</span></div>
+      <p class="desc">Lock the film as stills. Costs roughly a fiftieth of the motion it
+        protects. <b>No video is generated until every frame is approved.</b> For an image
+        campaign the keyframes <i>are</i> the deliverable.</p>
+      <ul class="checks">
+        <li>Six checks per frame: face · hands · product geometry · label legibility ·
+          composition · safe area.</li>
+        <li><b>Region repair</b>, not full regeneration — regenerating discards everything
+          already correct.</li>
+        <li>Any prompt enhancer is <b>forbidden</b> from touching canon refs, claims or the
+          style block.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Cost confirm<span class="id">generate</span></div><span class="cost c-spend">real spend</span></div>
+    <div class="body">
+      <div class="row"><span class="chip hard">COST GATE — not configurable</span>
+        <span class="chip art">model_confirm</span></div>
+      <p class="desc">Cost is shown <b>before</b> it is spent, every time, plus an explicit user
+        event. Single-vs-variants is always asked. No setting removes either — they are not
+        gateable stages, and naming one in the policy is an error rather than a silent no-op.</p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Creative<span class="id">creative</span></div><span class="cost c-spend">real spend</span></div>
+    <div class="body">
+      <div class="row"><span class="chip gate">GATE</span><span class="chip art">creative_set</span>
+        <span class="chip art">TakeReject</span></div>
+      <p class="desc">Per-asset accept / re-roll. Rejects are <b>classified</b> — “make it
+        better” is not a repair instruction, so each of the five causes proposes its own patch.</p>
+      <ul class="checks">
+        <li><b>One variable per retry</b> — two simultaneous edits make the next result
+          uninterpretable.</li>
+        <li>Review the whole clip, not frame one: frame-chained transitions go artificial mid-move.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">QC<span class="id">qc</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row"><span class="chip hard">never skippable</span><span class="chip art">qc_report</span></div>
+      <p class="desc">Three tiers, because a flat pass/fail list either blocks a dated campaign
+        over a continuity slip or gets ignored for crying wolf.</p>
+      <ul class="checks">
+        <li><b>Always blocking:</b> uncleared rights · a claim not in the confirmed list ·
+          a banned word · a missing locale sign-off. Claims are re-checked <b>at the end</b>,
+          because copy drifts during production.</li>
+        <li>An <b>accepted</b> defect needs a written rationale — “ship it anyway” must be
+          auditable, not a shrug.</li>
+        <li>An unwired detector reports <b>skip</b>, never pass.</li>
+        <li>Platform policy is surfaced as “needs a check against &lt;platform&gt;'s current
+          rules” — an instruction to a human, never a verdict.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div><div class="sname">Deliver<span class="id">done</span></div><span class="cost c-free">free</span></div>
+    <div class="body">
+      <div class="row"><span class="chip art">ad_card</span><span class="chip art">variant_matrix</span></div>
+      <p class="desc">Per-placement copy, ratios, naming string, export bundle. The variant
+        matrix shows the <b>reuse map</b> — a hook-axis variant re-renders exactly the hook
+        shot, and that ratio is the business case for the shot board.</p>
+    </div>
+  </div>
+
+</div>
+
+<h2>Inside the rumination — <code>app/graph.py</code></h2>
+<div class="grid2">
+  <div class="panel">
+    <div class="flowbox"><div class="t">AGENT campaign_planner</div>
+      drafts 2–3 options <b>with retrieval</b>. The corpus informs the draft.</div>
+    <div class="arrow">↓</div>
+    <div class="flowbox"><div class="t">optional stakeholder seats (parallel)</div>
+      A client's own reviewer. None by default — then this row does not exist.</div>
+    <div class="arrow">↓</div>
+    <div class="flowbox" style="border-color:rgba(139,92,246,.45)">
+      <div class="t">AGENT marketing_expert</div>
+      Judges from <b>frozen doctrine</b>, no retrieval. Carries all three lenses —
+      performance, brand, platform — and emits the Feedback directly.</div>
+    <div class="arrow">↓ flagged?</div>
+    <div class="flowbox"><div class="t">refine — exactly one pass</div>
+      The cap lives in graph <i>state</i>, not an <code>if</code>, so no future edit can
+      make it a loop.</div>
+    <p class="note">Every node checkpoints on success, so a failure never discards work that
+      already succeeded and was paid for.</p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Why one reviewer</h2>
+    <p class="desc">Three blind seats plus a chair were four LLM calls whose combined product
+      was a single Feedback object — each seat judged one lens and the chair's whole job was to
+      merge them back together. On the production model that was most of a ~15 minute
+      rumination; the chair alone took 477s.</p>
+    <p class="desc">The Marketing Expert emits that Feedback directly, so the consolidation
+      step is <b>removed</b> rather than made faster.</p>
+    <h2>What the reviewer must refuse</h2>
+    <ul class="checks">
+      <li><b>Angle fatigue</b> — saturation is a count over a corpus and it has none, so the
+        lens always declares insufficient data.</li>
+      <li><b>Platform ad policy</b> — it never states what a rule says, only what a human must
+        check. An invented rule is the worst thing this product can emit.</li>
+      <li><b>Numbers</b> — every judgment is a direction, never a magnitude. Quoted text is
+        exempt, because quoting an offending claim is the job.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Settings — how deep the pipeline runs</h2>
+<div class="panel">
+  <p class="desc" style="margin-top:0">A gate mode controls whether the flow <b>pauses</b>.
+    It never controls whether the artifact is <b>produced</b> — downstream stages consume
+    upstream artifacts, and the audit trail stays complete however fast you move.</p>
+  <table>
+    <tr><th>Mode</th><th>Behaviour</th><th>Where it is legal</th></tr>
+    <tr><td><code>review</code></td><td>Produced, emitted, <b>flow blocks</b> for you. The default everywhere.</td><td>every gateable stage</td></tr>
+    <tr><td><code>auto</code></td><td>Produced, emitted, audited — flow continues. Reviewable after the fact.</td><td>every gateable stage except the hard gates</td></tr>
+    <tr><td><code>skip</code></td><td>The <b>work is not done</b>, and the trade-off is stated.</td><td><b>only</b> templates and canon</td></tr>
+  </table>
+  <p class="note">Presets: <b>Full craft</b> (all review) · <b>Fast</b> (brief/templates/script/canon auto)
+    · <b>Volume</b> (all auto except keyframes and QC; 2 takes, 3 variants).</p>
+</div>
+
+<h2>Build status</h2>
+<div class="panel">
+  <table>
+    <tr><th>Layer</th><th>State</th><th>Notes</th></tr>
+    <tr><td>Schemas, validators, lints, gates</td><td><span class="status st-done">DONE</span></td><td>all ten build-order steps, 147 tests</td></tr>
+    <tr><td>Stage machine + settings</td><td><span class="status st-done">DONE</span></td><td>ordering, skip-vs-auto, presets, API</td></tr>
+    <tr><td>Stage checkpoints</td><td><span class="status st-done">DONE</span></td><td>resume instead of re-pay</td></tr>
+    <tr><td>Council / reviewer</td><td><span class="status st-done">DONE</span></td><td>verified on real sonnet-4-6</td></tr>
+    <tr><td>Turn handlers for the 5 new stages</td><td><span class="status st-todo">IN PROGRESS</span></td><td>nothing produces the new artifacts at runtime yet</td></tr>
+    <tr><td>Prompts for the 5 new agents</td><td><span class="status st-todo">IN PROGRESS</span></td><td>W1 table must be injected, never hand-copied</td></tr>
+    <tr><td>Web renderers (7 artifact types)</td><td><span class="status st-todo">IN PROGRESS</span></td><td>plus the My Brand / Canon library page</td></tr>
+  </table>
+  <p class="warn" style="margin-top:12px">Media generation cannot be QA'd right now — the fal
+    balance is low. Everything up to and including the keyframe gate is verifiable without
+    spending on media; the generate and creative stages are checked for <b>wiring</b> only.</p>
+</div>
+
+</div>
+</body>
+</html>

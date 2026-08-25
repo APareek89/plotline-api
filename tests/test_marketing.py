@@ -143,10 +143,32 @@ def _filled(campaign_id: str, creative_type: str = "image") -> tuple[str, str]:
     return cid, tid
 
 
+def _approve(thread_id: str, artifact_id: str, event: str) -> None:
+    campaign.handle_event(UserEvent(
+        thread_id=thread_id, type="action",
+        action={"artifact_id": artifact_id, "event": event}))
+
+
+def _pass_script(thread_id: str) -> None:
+    """Walk the script gate if the flow is sitting at it.
+
+    v3 puts the hook rack between the option and the board for SPOKEN creative.
+    Image campaigns never stop here, so this is a no-op for them — the helper
+    exists so a test can say "get me to the board" without caring which."""
+    if store.get_thread(thread_id)["stage"] == "script":
+        _approve(thread_id, "hook_rack", "approve_script")
+
+
 def _ruminated(name: str, creative_type: str = "image") -> tuple[str, str]:
-    """…through step 3: options on the thread, awaiting an approval."""
+    """…through step 3: options on the thread, awaiting an approval.
+
+    v3 inserted the BRIEF between the cards and the options, so this walks that
+    gate. It is a real gate the user passes too — the helper approves it rather
+    than bypassing it, so everything downstream is reached the way a person
+    reaches it."""
     cid, tid = _filled(name, creative_type)
     campaign.begin_rumination(cid)
+    _approve(tid, "brief", "approve_brief")
     return cid, tid
 
 
@@ -333,13 +355,18 @@ def test_unmapped_claim_never_reaches_the_campaign_detail(monkeypatch):
             context, None)
     assert "3x faster than QuickBooks" in str(exc.value) and "kill flag" in str(exc.value)
 
-    def unmapped_detail(payload, dispatcher):
-        return {**detail_of(payload, dispatcher), "claims_used": ["3x faster than QuickBooks"]}
+    # …and through the live path. v3 upgraded the detail into the SHOT BOARD, so
+    # the claim now has to be refused there — same rule, same helper, new artifact.
+    board_of = campaign_mock.mock_shot_board
 
-    monkeypatch.setattr(campaign_mock, "mock_campaign_detail", unmapped_detail)
+    def unmapped_board(payload, dispatcher):
+        return {**board_of(payload, dispatcher), "claims_used": ["3x faster than QuickBooks"]}
+
+    monkeypatch.setattr(campaign_mock, "mock_shot_board", unmapped_board)
     _act(tid, "o1", "approve")
-    assert _artifacts(tid, "campaign_detail") == []     # no detail, no generation path
-    assert _artifacts(tid, "escalation")[-1]["title"].startswith("The campaign detail kept failing")
+    _pass_script(tid)
+    assert _artifacts(tid, "campaign_detail") == []     # no board, no generation path
+    assert _artifacts(tid, "escalation")[-1]["title"].startswith("The shot board kept failing")
     assert store.list_assets(tid) == []
 
 
@@ -351,6 +378,7 @@ def test_skip_on_templates_leaves_no_style_constraint(template_library):
 
     cid, tid = _ruminated("Skipped")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     picker = _artifacts(tid, "template_picker")[-1]
     assert picker["payload"]["skip_allowed"] is True
     assert {a["event"] for a in picker["actions"]} == {"pick_t1", "skip"}
@@ -369,12 +397,18 @@ def test_skip_on_templates_leaves_no_style_constraint(template_library):
     assert all(store.get_asset(i["asset_id"])["params"]["style_ref"] is None
                for i in campaign._ws(tid)["items"])
 
-    # …and the same flow WITH a template proves the descriptors do travel when picked
+    # …and the same flow WITH a template proves the descriptors do travel when
+    # picked. v3 changed the MECHANISM, not the invariant: TemplateRef's loose
+    # descriptor list is now compiled into a style_block whose string is
+    # prefixed verbatim onto every visual prompt. That is the only reason
+    # picking a template changes what gets rendered.
     cid2, tid2 = _ruminated("Styled")
     _act(tid2, "o1", "approve")
+    _pass_script(tid2)
     _act(tid2, "templates", "pick_t1")
-    styled = _artifacts(tid2, "campaign_detail")[-1]["payload"]["detail"]
-    assert styled["style_ref"]["id"] == "t1"
+    card = _artifacts(tid2, "campaign_detail")[-1]["payload"]
+    styled = card["detail"]
+    assert card["style_block"]["derived_from"] == "t1"
     _act(tid2, "detail", "generate_creative")
     _act(tid2, "confirm", "generate_single")
     styled_prompts = [store.get_asset(i["asset_id"])["params"]["prompt"]
@@ -475,6 +509,7 @@ def test_settings_icon_is_disabled_and_hides_no_live_capability():
 def test_model_confirm_names_the_fixed_stack_whatever_the_user_types():
     cid, tid = _ruminated("Fixed stack", creative_type="video")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
 
     _text(tid, "use fal-ai/flux-pro instead of veo")   # there is no such lever
     assert _envelopes(tid)[-1]["text"] == "Didn't catch a campaign command."
@@ -495,6 +530,7 @@ def test_model_confirm_names_the_fixed_stack_whatever_the_user_types():
 def test_every_generated_asset_lands_in_the_creative_set_with_params_and_cost():
     cid, tid = _ruminated("Creative tab", creative_type="video")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
     _act(tid, "confirm", "generate_single")
 
@@ -524,6 +560,7 @@ def test_every_generated_asset_lands_in_the_creative_set_with_params_and_cost():
 def test_a_rerolled_asset_surfaces_too_and_the_audit_trail_survives():
     cid, tid = _ruminated("Re-roll", creative_type="image")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
     _act(tid, "confirm", "generate_single")
     slot = campaign._ws(tid)["items"][0]["slot"]
@@ -549,6 +586,7 @@ def test_no_generation_without_a_model_confirm_and_an_explicit_event():
     # a 1-shot image detail correctly offers fewer (see the sibling test).
     cid, tid = _ruminated("Gate", creative_type="video")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     assert store.get_thread(tid)["stage"] == "detail"
 
     _act(tid, "confirm", "generate_single")            # jumping the gate
@@ -574,6 +612,7 @@ def test_no_generation_without_a_model_confirm_and_an_explicit_event():
 def test_a_variant_set_is_never_generated_without_an_explicit_count():
     cid, tid = _ruminated("Count")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
 
     _act(tid, "confirm", "generate_variants_0")         # button with no count
@@ -591,6 +630,7 @@ def test_a_variant_set_is_never_generated_without_an_explicit_count():
 def test_variants_carry_distinct_deltas_and_share_one_variant_group_id():
     cid, tid = _ruminated("Variants", creative_type="video")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
 
     specs = _artifacts(tid, "model_confirm")[-1]["payload"]["confirm"]["variants_proposed"]
@@ -610,6 +650,7 @@ def test_variants_carry_distinct_deltas_and_share_one_variant_group_id():
     assert rendered["B"] != rendered["A"] and rendered["C"] != rendered["A"]
 
     _act(tid, "creative", "accept_all")
+    _act(tid, "qc", "deliver")          # v3: QC gates delivery
     cards = store.list_ad_cards(cid)
     assert {c["variant_id"] for c in cards} == {"A", "B", "C"}
     assert len({c["variant_group_id"] for c in cards}) == 1
@@ -620,6 +661,7 @@ def test_variants_carry_distinct_deltas_and_share_one_variant_group_id():
 def test_single_shot_variants_are_not_identical_renders():
     cid, tid = _ruminated("Single shot", creative_type="image")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
     assert len(campaign._ws(tid)["detail"]["shots"]) == 1
     _act(tid, "confirm", "generate_variants_2")
@@ -637,9 +679,11 @@ def test_single_shot_variants_are_not_identical_renders():
 def test_ad_card_fails_on_a_missing_or_off_spec_ratio():
     cid, tid = _ruminated("Ad Card")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
     _act(tid, "confirm", "generate_single")
     _act(tid, "creative", "accept_all")
+    _act(tid, "qc", "deliver")          # v3: QC gates delivery
 
     card = store.list_ad_cards(cid)[0]
     assert AdCard.model_validate(card)
@@ -673,10 +717,12 @@ def test_ad_card_credits_account_for_every_paid_render(monkeypatch):
 
     cid, tid = _ruminated("Card cost", creative_type="video")
     _act(tid, "o1", "approve")
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
     quoted = _artifacts(tid, "model_confirm")[-1]["payload"]["cost_single"]
     _act(tid, "confirm", "generate_single")
     _act(tid, "creative", "accept_all")
+    _act(tid, "qc", "deliver")          # v3: QC gates delivery
 
     card = store.list_ad_cards(cid)[0]
     assert store.campaign_spend(cid) == pytest.approx(quoted)      # we spent the quote
@@ -691,10 +737,16 @@ def test_campaign_lifecycle_lands_in_the_store():
     cid, tid = _filled("Lifecycle")
     assert store.get_campaign_status(cid) == "draft"
 
+    # v3: the brief sits between the cards and the options, so the campaign is
+    # not "planned" until the options actually land behind it.
     campaign.begin_rumination(cid)
+    assert store.get_campaign_status(cid) == "draft"
+    _approve(tid, "brief", "approve_brief")
     assert store.get_campaign_status(cid) == "planned"
 
     _act(tid, "o1", "approve")
+
+    _pass_script(tid)
     _act(tid, "detail", "generate_creative")
     assert store.get_campaign_status(cid) == "planned"      # confirming spends nothing
 
@@ -702,6 +754,7 @@ def test_campaign_lifecycle_lands_in_the_store():
     assert store.get_campaign_status(cid) == "in_production"
 
     _act(tid, "creative", "accept_all")
+    _act(tid, "qc", "deliver")          # v3: QC gates delivery
     assert store.get_campaign_status(cid) == "ready"
 
     card = store.list_ad_cards(cid)[0]
@@ -2561,3 +2614,108 @@ def test_skipping_both_skippable_stages_still_reaches_the_gates_that_matter():
     # …and the two gates that can never be skipped are still on the path
     assert campaign.advance_from(cid, "keyframes") == "generate"
     assert campaign.advance_from(cid, "creative") == "qc"
+
+
+# ================================================================================
+# v3 end-to-end — the pipeline as a user walks it
+# ================================================================================
+
+
+def test_the_brief_gate_comes_before_any_option_is_written():
+    """Options written before the single message exists are options written
+    against a moving target — so the brief is the first thing the flow does."""
+    cid, tid = _filled("Brief first")
+    campaign.begin_rumination(cid)
+
+    assert store.get_thread(tid)["stage"] == "brief"
+    assert _artifacts(tid, "campaign_brief"), "no brief was produced"
+    assert _artifacts(tid, "campaign_option") == [], "options ran before the brief was approved"
+
+    _approve(tid, "brief", "approve_brief")
+    assert _artifacts(tid, "campaign_option"), "approving the brief did not start the options"
+
+
+def test_the_picked_template_actually_reaches_every_visual_prompt(template_library):
+    """The style block exists so a template CHANGES WHAT IS RENDERED. Before v3
+    the descriptors were a loose list nothing downstream enforced."""
+    cid, tid = _ruminated("Style travels")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "pick_t1")
+
+    card = _artifacts(tid, "campaign_detail")[-1]["payload"]
+    block = card["style_block"]
+    assert block["derived_from"] == "t1"
+
+    from app.schemas import StyleBlock
+    injected = StyleBlock.model_validate(block).as_prompt()
+    for shot in card["board"]["shots"]:
+        assert shot["keyframe_prompt"].startswith(injected), \
+            "the style block was not prefixed onto this shot"
+
+
+def test_a_video_campaign_walks_script_board_canon_keyframes_in_order():
+    """The cost ladder in practice: three free gates, then the cheap stills, and
+    only then anything that costs motion."""
+    cid, tid = _ruminated("Video ladder", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+
+    assert _artifacts(tid, "hook_rack"), "no script for a video campaign"
+    assert store.get_thread(tid)["stage"] == "script"
+    _approve(tid, "hook_rack", "approve_script")
+
+    assert _artifacts(tid, "campaign_detail"), "no shot board"
+    assert store.get_thread(tid)["stage"] == "detail"
+    _approve(tid, "board", "approve_board")
+
+    assert _artifacts(tid, "canon_sheet"), "no canon sheets"
+    _approve(tid, "canon", "approve_canon")
+
+    frames = _artifacts(tid, "keyframe_board")
+    assert frames, "no keyframes — the hard gate never ran"
+    assert frames[-1]["payload"]["board"]["all_approved"] is False
+
+
+def test_an_image_campaign_skips_the_script_it_has_no_use_for():
+    """A still has no words-per-second problem. A gate that protects nothing is
+    a gate that costs a turn."""
+    cid, tid = _ruminated("Image no script")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+
+    assert _artifacts(tid, "hook_rack") == []
+    assert _artifacts(tid, "campaign_detail"), "the board should follow templates directly"
+
+
+def test_skipping_canon_is_recorded_with_what_it_costs():
+    """Practitioners genuinely skip sheets under time pressure. The failure is
+    doing it invisibly, so the trade is stated and written to the audit trail."""
+    cid, tid = _ruminated("Skip canon", creative_type="video")
+    store.update_campaign_settings(cid, {"review_policy": {"gates": {"canon": "skip"}}})
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+    _approve(tid, "hook_rack", "approve_script")
+    _approve(tid, "board", "approve_board")
+
+    assert _artifacts(tid, "canon_sheet") == []
+    rows = [a for a in store.get_artifact_activity(tid, "canon") if a["event"] == "skipped"]
+    assert rows and "identity drift" in rows[0]["detail"]
+    assert _artifacts(tid, "keyframe_board"), "skipping canon should go straight to keyframes"
+
+
+def test_qc_stands_between_the_creative_and_the_ad_card():
+    cid, tid = _ruminated("QC gate")
+    _act(tid, "o1", "approve")
+    _act(tid, "detail", "generate_creative")
+    _act(tid, "confirm", "generate_single")
+    _act(tid, "creative", "accept_all")
+
+    assert store.get_thread(tid)["stage"] == "qc"
+    assert store.list_ad_cards(cid) == [], "the Ad Card was assembled before QC cleared"
+    report = _artifacts(tid, "qc_report")[-1]["payload"]["report"]
+    assert report["verdict"] == "cleared"
+    # unwired detectors are honest about it
+    assert report["automated"]["lip_sync"] == "skip"
+
+    _act(tid, "qc", "deliver")
+    assert store.list_ad_cards(cid), "deliver did not assemble the Ad Card"

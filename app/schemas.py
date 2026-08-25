@@ -787,6 +787,12 @@ class CanonSheet(Strict):
         return all(self.coverage.get(v) for v in self.required_views())
 
 
+class CanonPlan(Strict):
+    """What the canon agent returns: the sheets this board needs, and no others."""
+
+    sheets: list[CanonSheet] = Field(default_factory=list)
+
+
 class ScriptLine(Strict):
     """One spoken or on-screen line. `words`, `wps` and `wps_verdict` are
     RECOMPUTED server-side — the model never checks its own homework, same rule
