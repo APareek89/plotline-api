@@ -53,6 +53,20 @@ def _init(conn: sqlite3.Connection) -> None:
             updated_at REAL
         );
 
+        -- Stage-level checkpoints. A rumination is a chain of expensive LLM
+        -- calls whose intermediate results used to live only in memory, so ONE
+        -- failure anywhere discarded every node that had already succeeded and
+        -- been paid for. Observed live: planner 209s plus three reviews at
+        -- 120-139s all succeeded, then the last node's connection dropped and
+        -- all four were binned.
+        CREATE TABLE IF NOT EXISTS run_checkpoints (
+            thread_id TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (thread_id, stage)
+        );
+
         CREATE TABLE IF NOT EXISTS series_plan (
             series_id TEXT PRIMARY KEY,
             version INTEGER NOT NULL DEFAULT 1,
@@ -287,6 +301,43 @@ def list_series() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+# ------------------------------------------------- run checkpoints (v3) --
+
+
+def save_checkpoint(thread_id: str, stage: str, data: dict[str, Any]) -> None:
+    with _lock:
+        get_conn().execute(
+            "INSERT INTO run_checkpoints (thread_id, stage, data, created_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(thread_id, stage) DO UPDATE SET data = excluded.data, "
+            "created_at = excluded.created_at",
+            (thread_id, stage, json.dumps(data, default=str), _now()),
+        )
+        get_conn().commit()
+
+
+def load_checkpoint(thread_id: str, stage: str) -> Optional[dict[str, Any]]:
+    with _lock:
+        row = get_conn().execute(
+            "SELECT data FROM run_checkpoints WHERE thread_id = ? AND stage = ?",
+            (thread_id, stage),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["data"])
+    except (TypeError, ValueError):
+        return None
+
+
+def clear_checkpoints(thread_id: str) -> None:
+    """Called when a NEW rumination starts. A checkpoint from a previous run is
+    stale by definition — resuming into it would silently serve the user the
+    campaign they already rejected."""
+    with _lock:
+        get_conn().execute("DELETE FROM run_checkpoints WHERE thread_id = ?", (thread_id,))
+        get_conn().commit()
 
 
 # -------------------------------------------------- campaign settings (v3) --

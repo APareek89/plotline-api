@@ -36,7 +36,7 @@ import operator
 from typing import Annotated, Any, Callable, Optional
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field  # noqa: F401  (BaseModel used by _encode)
 
 from app.agents.council import SEATS
 from app.schemas import (
@@ -105,6 +105,46 @@ class RuminationDeps(BaseModel):
     objective_family: Callable[[Any], Any]
     seat_runner: Optional[Callable[..., SeatReview]] = None
     on_step: Optional[Callable[[str], None]] = None
+    # Stage checkpoints. Injected like everything else so this module never
+    # reaches into the store, and so the tests can drive resume with a dict.
+    load_checkpoint: Optional[Callable[[str], Optional[dict]]] = None
+    save_checkpoint: Optional[Callable[[str, dict], None]] = None
+
+
+# What each checkpointed node returns, so a restored dict becomes the same
+# objects the live node would have produced. Anything not listed is carried
+# through as-is (lists of ids, booleans).
+_CHECKPOINT_TYPES: dict[str, Any] = {
+    "options": CampaignOptions,
+    "plan": Plan,
+    "feedback": Feedback,
+    "seat_reviews": SeatReview,      # list-of
+}
+
+
+def _encode(update: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in update.items():
+        if isinstance(value, BaseModel):
+            out[key] = value.model_dump(mode="json")
+        elif isinstance(value, list) and value and isinstance(value[0], BaseModel):
+            out[key] = [v.model_dump(mode="json") for v in value]
+        else:
+            out[key] = value
+    return out
+
+
+def _decode(update: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in update.items():
+        model = _CHECKPOINT_TYPES.get(key)
+        if model is None or value is None:
+            out[key] = value
+        elif key == "seat_reviews":
+            out[key] = [model.model_validate(v) for v in value]
+        else:
+            out[key] = model.model_validate(value)
+    return out
 
 
 def build_rumination_graph(deps: RuminationDeps, seats: Optional[list[str]] = None):
@@ -120,6 +160,28 @@ def build_rumination_graph(deps: RuminationDeps, seats: Optional[list[str]] = No
     def _step(label: str) -> None:
         if deps.on_step:
             deps.on_step(label)
+
+    def _checkpointed(stage: str, fn):
+        """Run a node, or serve the result it already produced.
+
+        THE POINT: every node in this graph is minutes of paid work, and before
+        this a single failure anywhere discarded all of it. A node that has
+        already succeeded is never paid for twice — and because the save happens
+        AFTER the node returns, only a genuinely complete result is ever restored.
+        """
+        def wrapped(state: RuminationState) -> dict[str, Any]:
+            if deps.load_checkpoint:
+                saved = deps.load_checkpoint(stage)
+                if saved is not None:
+                    _step(f"resuming — {stage} already done")
+                    return _decode(saved)
+            update = fn(state)
+            if deps.save_checkpoint:
+                deps.save_checkpoint(stage, _encode(update))
+            return update
+
+        wrapped.__name__ = getattr(fn, "__name__", stage)
+        return wrapped
 
     # ------------------------------------------------------------------ plan
     def plan_options(state: RuminationState) -> dict[str, Any]:
@@ -233,11 +295,11 @@ def build_rumination_graph(deps: RuminationDeps, seats: Optional[list[str]] = No
         return END
 
     graph = StateGraph(RuminationState)
-    graph.add_node("plan_options", plan_options)
+    graph.add_node("plan_options", _checkpointed("plan_options", plan_options))
     for seat in roster:
-        graph.add_node(f"seat_{seat}", _seat_node(seat))
-    graph.add_node("review", review)
-    graph.add_node("refine", refine)
+        graph.add_node(f"seat_{seat}", _checkpointed(f"seat_{seat}", _seat_node(seat)))
+    graph.add_node("review", _checkpointed("review", review))
+    graph.add_node("refine", _checkpointed("refine", refine))
 
     graph.add_edge(START, "plan_options")
     if roster:

@@ -2402,3 +2402,104 @@ def test_the_variant_matrix_shows_the_reuse_that_makes_testing_affordable():
     assert set(LOCALISATION_LIMITS) == {"dub", "revoice", "recast"}
     assert "lip-sync drift" in LOCALISATION_LIMITS["dub"]
     assert "full board re-render" in LOCALISATION_LIMITS["recast"]
+
+
+# ================================================================================
+# Stage checkpoints — a failure must not discard work that already succeeded
+# ================================================================================
+
+
+def test_a_completed_stage_is_never_paid_for_twice():
+    """The reliability gap the owner prioritised over stitching. Observed live:
+    the planner and three reviews all succeeded, then the last node's connection
+    dropped and all four were discarded because intermediate results lived only
+    in memory."""
+    from app.graph import RuminationDeps, RuminationState, build_rumination_graph
+    from app.schemas import Cadence, CampaignOptions, SeriesLevel
+
+    saved: dict[str, dict] = {}
+    calls = {"plan": 0, "review": 0}
+    options = CampaignOptions(options=[
+        CampaignOption(option_id="o1", name_line="n", description="d", storyline="s",
+                       objective_echo="conversions", why_it_fits="w"),
+        CampaignOption(option_id="o2", name_line="n2", description="d", storyline="s",
+                       objective_echo="conversions", why_it_fits="w")])
+
+    def run_options(*a, **k):
+        calls["plan"] += 1
+        return options
+
+    def run_council(*a, **k):
+        calls["review"] += 1
+        raise RuntimeError("connection dropped mid-stream")
+
+    def deps() -> RuminationDeps:
+        return RuminationDeps(
+            run_options=run_options, run_council=run_council,
+            build_plan=lambda ctx, opt, sh: Plan(
+                series=SeriesLevel(objective="conversions", north_star_metric="conversions",
+                                   cadence=Cadence(type="one_time", concept_count=2)),
+                concepts=[]),
+            flagged_ids=lambda *a, **k: set(), merge_feedback=lambda a, b: a,
+            objective_family=lambda o: o, seat_runner=lambda **k: (None, set()),
+            load_checkpoint=saved.get,
+            save_checkpoint=lambda stage, data: saved.__setitem__(stage, data))
+
+    cid, tid = _filled("Checkpoint")
+    context = campaign._context_of(cid)
+    shadow = campaign._shadow_context(context)
+    state = RuminationState(context=context, shadow=shadow)
+
+    # first attempt: the planner succeeds, the review dies
+    with pytest.raises(RuntimeError):
+        build_rumination_graph(deps()).invoke(state)
+    assert calls == {"plan": 1, "review": 1}
+    assert "plan_options" in saved, "the successful planner was not checkpointed"
+
+    # retry: the planner is SERVED FROM ITS CHECKPOINT, not re-run
+    with pytest.raises(RuntimeError):
+        build_rumination_graph(deps()).invoke(state)
+    assert calls["plan"] == 1, "the planner was paid for twice"
+    assert calls["review"] == 2, "the failed node did not re-run"
+
+    # and what came back is the same object, not a husk
+    restored = campaign.CampaignOptions.model_validate(saved["plan_options"]["options"])
+    assert [o.option_id for o in restored.options] == ["o1", "o2"]
+
+
+def test_only_a_complete_result_is_ever_restored():
+    """The save happens AFTER the node returns, so a node that raised leaves no
+    checkpoint — a half-finished stage can never be resumed into."""
+    from app.graph import RuminationDeps, RuminationState, build_rumination_graph
+
+    saved: dict[str, dict] = {}
+    cid, _ = _filled("Half stage")
+    context = campaign._context_of(cid)
+
+    graph = build_rumination_graph(RuminationDeps(
+        run_options=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("died mid-plan")),
+        run_council=lambda *a, **k: (None, []), build_plan=lambda *a, **k: None,
+        flagged_ids=lambda *a, **k: set(), merge_feedback=lambda a, b: a,
+        objective_family=lambda o: o, seat_runner=lambda **k: (None, set()),
+        load_checkpoint=saved.get,
+        save_checkpoint=lambda stage, data: saved.__setitem__(stage, data)))
+
+    with pytest.raises(RuntimeError):
+        graph.invoke(RuminationState(context=context, shadow=campaign._shadow_context(context)))
+    assert saved == {}, "a stage that raised left a checkpoint behind"
+
+
+def test_a_new_rumination_clears_stale_checkpoints():
+    """A checkpoint from a previous run is stale by definition — resuming into
+    one would serve the user the campaign they already rejected."""
+    cid, tid = _ruminated("Stale")
+    store.save_checkpoint(tid, "plan_options", {"options": {"options": []}})
+    assert store.load_checkpoint(tid, "plan_options") is not None
+
+    store.clear_checkpoints(tid)
+    assert store.load_checkpoint(tid, "plan_options") is None
+
+    # a fresh rumination clears them itself
+    store.save_checkpoint(tid, "review", {"feedback": None})
+    campaign._options_turn(cid, tid)
+    assert store.load_checkpoint(tid, "review") is None

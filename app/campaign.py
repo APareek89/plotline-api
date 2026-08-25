@@ -389,6 +389,10 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
     if event == "retry":
         job = ws.get("retry")
         if job:
+            # Resume rather than restart. Every stage that already succeeded is
+            # served from its checkpoint, so a retry after a transient failure
+            # costs the remaining work, not the whole run again.
+            ws["resuming"] = True
             _spawn(thread_id, job[0], *job[1])
             return
         _say(thread_id, "Nothing to retry on this thread yet.")
@@ -924,6 +928,14 @@ def _options_turn(campaign_id: str, thread_id: str, note: Optional[str] = None,
         family = objective_family(shadow.objective)
         retrieved: set[str] = set()
 
+        # A checkpoint from a PREVIOUS rumination on this thread is stale by
+        # definition — resuming into it would serve the user the campaign they
+        # already rejected. A retry after a failure re-enters through `retry`
+        # and keeps its checkpoints, which is the whole point.
+        if not ws.get("resuming"):
+            store.clear_checkpoints(thread_id)
+        ws["resuming"] = False
+
         _working[thread_id] = "retrieving evidence"
         rag.ensure_ready()  # dependency-unavailable surfaces BEFORE any agent call
         niche_assets = _niche_asset_count(shadow)
@@ -1262,6 +1274,14 @@ def _rumination_graph(roster: tuple[str, ...]):
                 # at the top of every turn.
                 on_step=lambda label: _working.__setitem__(
                     current_thread.get() or "", label),
+                # Read the thread from the contextvar for the same reason
+                # on_step does: the graph is cached for the process lifetime, so
+                # a captured thread_id would checkpoint every campaign into the
+                # first one's row — which would serve user B user A's campaign.
+                load_checkpoint=lambda stage: store.load_checkpoint(
+                    current_thread.get() or "", stage),
+                save_checkpoint=lambda stage, data: store.save_checkpoint(
+                    current_thread.get() or "", stage, data),
             ),
             seats=list(roster),
         )
