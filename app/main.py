@@ -16,9 +16,10 @@ from typing import Any, Literal, Optional
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app import brand_extract, campaign, config, store, threadkit
+from app import seats as seats_mod
 from app.agents.runner import AgentHardFail
 from app.rag_client import RagUnavailable, rag
 from app.schemas import CreatorContext, UserEvent
@@ -387,6 +388,83 @@ def start_campaign(campaign_id: str) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"ok": True}
+
+
+@app.get("/api/campaigns/{campaign_id}/settings")
+def get_campaign_settings(campaign_id: str) -> dict[str, Any]:
+    """Review policy + council roster for one campaign.
+
+    Always answers, even for a campaign that has never been configured — the
+    defaults ARE the product's behaviour, so an absent row is a full answer
+    rather than a missing one.
+    """
+    _campaign_or_404(campaign_id)
+    policy = campaign._policy_of(campaign_id)
+    stored = store.get_campaign_settings(campaign_id)
+    return {
+        "review_policy": policy.model_dump(mode="json"),
+        "seats": stored.get("seats") or [],
+        "gateable_stages": campaign.GATEABLE_STAGES,
+        "presets": sorted(campaign.POLICY_PRESETS),
+        "available_seats": sorted(seats_mod.available()),
+    }
+
+
+@app.patch("/api/campaigns/{campaign_id}/settings")
+def patch_campaign_settings(campaign_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Merge-patch. Sending one setting never clears the others.
+
+    Validation happens HERE, on write, so a bad gate combination or an unknown
+    seat is refused while the user is looking at it — rather than degrading
+    silently in the middle of a paid run.
+    """
+    _campaign_or_404(campaign_id)
+    patch: dict[str, Any] = {}
+
+    if "preset" in body:
+        try:
+            patch["review_policy"] = campaign.policy_from_preset(
+                body["preset"]).model_dump(mode="json")
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    if "review_policy" in body:
+        # merge onto what is already there, so PATCHing one count keeps the gates
+        current = campaign._policy_of(campaign_id).model_dump(mode="json")
+        incoming = body["review_policy"] or {}
+        merged = {**current, **incoming}
+        if "gates" in incoming:
+            merged["gates"] = {**current["gates"], **(incoming["gates"] or {})}
+        try:
+            patch["review_policy"] = campaign.ReviewPolicy.model_validate(
+                merged).model_dump(mode="json")
+        except ValidationError as exc:
+            raise HTTPException(422, _first_error(exc)) from exc
+
+    if "seats" in body:
+        wanted = body["seats"] or []
+        if not isinstance(wanted, list):
+            raise HTTPException(422, "seats must be a list of seat slugs")
+        try:
+            seats_mod.resolve(wanted)
+        except seats_mod.SeatConfigError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        patch["seats"] = wanted
+
+    if not patch:
+        raise HTTPException(422, "nothing to update — send preset, review_policy or seats")
+
+    store.update_campaign_settings(campaign_id, patch)
+    return get_campaign_settings(campaign_id)
+
+
+def _first_error(exc: ValidationError) -> str:
+    """A pydantic error dump is unreadable in a toast. Surface the message the
+    hard-rule validators were written to say."""
+    for err in exc.errors():
+        msg = err.get("msg", "")
+        return msg.removeprefix("Value error, ")
+    return str(exc)
 
 
 @app.get("/api/templates")

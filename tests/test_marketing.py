@@ -1652,3 +1652,121 @@ def test_an_api_status_error_is_not_retried_as_a_blip(monkeypatch):
             model="test-model", user_payload={}, schema=Feedback,
             preludes=["council/doctrine"], dispatcher=None, use_tools=False)
     assert calls["n"] == 1, "a non-transient error was retried"
+
+
+# ================================================================================
+# v3 §4 — the settings model. A gate mode decides whether the flow PAUSES; it
+# never decides whether the artifact is PRODUCED.
+# ================================================================================
+
+
+def test_the_default_policy_reproduces_todays_behaviour():
+    from app.schemas import GATEABLE_STAGES, ReviewPolicy
+
+    policy = ReviewPolicy()
+    assert all(policy.mode(s) == "review" for s in GATEABLE_STAGES)
+    assert all(policy.pauses_at(s) for s in GATEABLE_STAGES)
+    # every media count starts at 1 — nothing multiplies spend by default
+    assert (policy.keyframes_per_shot, policy.takes_per_shot,
+            policy.variants, policy.voice_candidates) == (1, 1, 1, 1)
+    # a stage nobody can gate is always a pause: absent config can never mean
+    # an absent gate
+    assert policy.mode("generate") == "review" and policy.pauses_at("generate")
+
+
+def test_a_cost_gate_cannot_be_configured_away():
+    """§4.3 rule 1. model_confirm and the single-vs-variants question always
+    precede generation. `generate` is not in GATEABLE_STAGES, and naming it is
+    an ERROR rather than a silent no-op — a settings screen that appears to
+    accept it would be lying."""
+    from app.schemas import ReviewPolicy
+
+    with pytest.raises(ValidationError) as exc:
+        ReviewPolicy(gates={"generate": "auto"})
+    assert "not gateable" in str(exc.value)
+
+
+def test_qc_and_keyframes_can_never_be_skipped():
+    """§4.3 rules 3 and 4. `auto` means 'do not stop for me to read it'; it never
+    means 'do not check'. Animating an unapproved frame is the mistake the whole
+    cost ladder exists to prevent."""
+    from app.schemas import ReviewPolicy
+
+    for stage in ("qc", "keyframes"):
+        with pytest.raises(ValidationError) as exc:
+            ReviewPolicy(gates={stage: "skip"})
+        assert "cannot be skipped" in str(exc.value)
+        # …but auto is legal for both: produced and audited, just not waited on
+        assert ReviewPolicy(gates={stage: "auto"}).mode(stage) == "auto"
+
+
+def test_skip_is_legal_only_where_the_trade_is_surfaced():
+    """§4.3 rule 5. skip means the WORK is not done, so it is confined to the two
+    stages that state what is being given up."""
+    from app.schemas import SKIPPABLE_STAGES, ReviewPolicy
+
+    assert SKIPPABLE_STAGES == {"templates", "canon"}
+    for stage in SKIPPABLE_STAGES:
+        assert ReviewPolicy(gates={stage: "skip"}).mode(stage) == "skip"
+    for stage in ("brief", "options", "script", "detail", "creative"):
+        with pytest.raises(ValidationError):
+            ReviewPolicy(gates={stage: "skip"})
+
+
+def test_the_presets_are_the_same_model_not_a_second_one():
+    from app.schemas import POLICY_PRESETS, ReviewPolicy, policy_from_preset
+
+    assert set(POLICY_PRESETS) == {"full_craft", "fast", "volume"}
+    assert policy_from_preset("full_craft") == ReviewPolicy()          # the default
+    fast = policy_from_preset("fast")
+    assert fast.mode("brief") == "auto" and fast.mode("keyframes") == "review"
+    volume = policy_from_preset("volume")
+    assert volume.mode("keyframes") == "review" and volume.mode("qc") == "review"
+    assert volume.takes_per_shot == 2 and volume.variants == 3
+    with pytest.raises(ValueError):
+        policy_from_preset("nope")
+
+
+def test_settings_round_trip_over_http_and_merge_rather_than_clobber():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app)
+    cid, _ = _filled("Settings")
+
+    got = client.get(f"/api/campaigns/{cid}/settings").json()
+    assert got["review_policy"]["gates"]["qc"] == "review"
+    assert got["seats"] == [] and "full_craft" in got["presets"]
+
+    # a preset writes the same ReviewPolicy
+    got = client.patch(f"/api/campaigns/{cid}/settings", json={"preset": "volume"}).json()
+    assert got["review_policy"]["takes_per_shot"] == 2
+
+    # patching ONE count leaves the preset's gates alone
+    got = client.patch(f"/api/campaigns/{cid}/settings",
+                       json={"review_policy": {"variants": 2}}).json()
+    assert got["review_policy"]["variants"] == 2
+    assert got["review_policy"]["takes_per_shot"] == 2
+    assert got["review_policy"]["gates"]["brief"] == "auto"   # still the volume preset
+
+    # and the hard rules are enforced on WRITE, while the user is looking at it
+    bad = client.patch(f"/api/campaigns/{cid}/settings",
+                       json={"review_policy": {"gates": {"qc": "skip"}}})
+    assert bad.status_code == 422 and "cannot be skipped" in bad.json()["detail"]
+    bad = client.patch(f"/api/campaigns/{cid}/settings", json={"seats": ["ghost"]})
+    assert bad.status_code == 422 and "no prompt at" in bad.json()["detail"]
+
+    # the refused writes changed nothing
+    assert client.get(f"/api/campaigns/{cid}/settings").json()["review_policy"]["gates"]["qc"] == "review"
+
+
+def test_a_campaign_reads_its_own_policy_and_a_corrupt_one_fails_safe():
+    cid, _ = _filled("Policy read")
+    assert campaign._pauses_at(cid, "detail") is True
+
+    store.update_campaign_settings(cid, {"review_policy": {"gates": {"detail": "auto"}}})
+    assert campaign._pauses_at(cid, "detail") is False
+    assert campaign._pauses_at(cid, "qc") is True            # untouched gates stay
+
+    # an unreadable blob must not become a MORE permissive setting
+    store.update_campaign_settings(cid, {"review_policy": {"gates": {"detail": "banana"}}})
+    assert campaign._pauses_at(cid, "detail") is True

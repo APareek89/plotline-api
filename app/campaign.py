@@ -32,6 +32,9 @@ from app import ccs as ccs_mod
 from app import config, store
 from app.agents import campaign_mock
 from app.agents.council import SEATS, run_council, run_seat
+from pydantic import ValidationError
+
+from app.schemas import GATEABLE_STAGES, POLICY_PRESETS, ReviewPolicy, policy_from_preset
 from app.seats import SeatConfigError, SeatSpec
 from app.seats import resolve as resolve_seats
 from app.seats import slugs as seat_slugs
@@ -1141,6 +1144,33 @@ def _shadow_plan(context: CampaignContext, options: CampaignOptions, shadow: Cre
         concepts=concepts,
         changes=[],
     )
+
+
+def _policy_of(campaign_id: str) -> ReviewPolicy:
+    """This campaign's review policy. Never raises: a corrupt or outdated blob
+    falls back to the defaults, and the defaults ARE today's behaviour — every
+    gate `review`, every media count 1. An unreadable setting must not silently
+    become a MORE permissive one."""
+    raw = store.get_campaign_settings(campaign_id).get("review_policy")
+    if not raw:
+        return ReviewPolicy()
+    try:
+        return ReviewPolicy.model_validate(raw)
+    except ValidationError as exc:
+        logger.warning("campaign %s: unreadable review_policy (%s) — using defaults",
+                       campaign_id, exc)
+        return ReviewPolicy()
+
+
+def _pauses_at(campaign_id: str, stage: str) -> bool:
+    """Does the flow STOP here for the user?
+
+    The one semantic that keeps this safe: a gate mode never decides whether the
+    artifact is produced, only whether we wait. Downstream stages consume
+    upstream artifacts and the audit trail has to stay complete however fast the
+    user wants to move.
+    """
+    return _policy_of(campaign_id).pauses_at(stage)
 
 
 def _campaign_seats(campaign_id: str) -> list[SeatSpec]:
