@@ -35,6 +35,7 @@ from app.schemas import (
     UserEvent,
     objective_family,
 )
+from app import validators as validators_mod
 from app.validators import AgentValidationError, validate_feedback
 
 SETTINGS_TOOLTIP = "Model selection coming — using recommended models"
@@ -2110,3 +2111,107 @@ def test_the_board_shows_its_lints_even_when_everything_passes():
     board = validate_shot_board(ShotBoard.model_validate(_board()))
     for name in ("beats", "runtime", "slots", "motion"):
         assert getattr(board.lints, name).status == "pass"
+
+
+# ================================================================================
+# v3 §3 and §6 — style_block and canon_sheet
+# ================================================================================
+
+
+def test_skip_on_templates_yields_a_neutral_block_never_an_absent_one():
+    """Every campaign HAS a style block; only its source varies. A downstream
+    prompt that has to ask 'is there a style?' has two code paths and the second
+    one is always the untested one."""
+    from app.schemas import neutral_style_block
+
+    block = neutral_style_block()
+    assert block.derived_from is None            # Skip was chosen
+    assert block.as_prompt()                      # …but there is still a string to inject
+    for field in ("grade:", "light:", "lens:", "texture:", "motion:"):
+        assert field in block.as_prompt()
+
+
+def test_the_realism_dial_maps_to_texture_the_user_never_has_to_type():
+    """Counter-intuitive and load-bearing: faces read as credible BECAUSE of
+    pores and asymmetry. Prompts asking for flawless skin produce the synthetic
+    look people recognise instantly."""
+    from app.schemas import REALISM_TEXTURE, StyleBlock
+
+    doc = StyleBlock(id="sb_doc", grade="g", light="l", lens="x",
+                     texture=REALISM_TEXTURE["documentary"], motion="m", realism="documentary")
+    assert "no beauty smoothing" in doc.as_prompt()
+    assert "pores" in REALISM_TEXTURE["documentary"]
+    assert set(REALISM_TEXTURE) == {"editorial", "natural", "documentary"}
+
+
+def test_the_style_block_is_injected_verbatim_and_is_visible():
+    """An agency tool shows the literal text that will reach the model."""
+    from app.schemas import StyleBlock
+
+    block = StyleBlock(id="sb1", grade="warm amber", light="low window key",
+                       lens="85mm shallow", texture="fine grain", motion="locked off",
+                       negatives=["watermark", "text overlay"])
+    rendered = block.as_prompt()
+    assert "warm amber" in rendered and "avoid: watermark, text overlay" in rendered
+
+
+def test_a_canon_sheet_knows_what_complete_means_per_kind():
+    from app.schemas import CANON_COVERAGE, CanonSheet
+
+    char = CanonSheet(id="@priya", kind="character", label="Priya", brief="presenter",
+                      coverage={v: True for v in CANON_COVERAGE["character"]})
+    assert char.complete and len(char.required_views()) == 7
+
+    thin = CanonSheet(id="@priya2", kind="character", label="P", brief="b",
+                      coverage={"front": True})
+    assert not thin.complete
+    with pytest.raises(AgentValidationError) as exc:
+        validators_mod.validate_canon_sheet(thin)
+    assert "coverage incomplete" in str(exc.value)
+
+
+def test_a_product_whose_geometry_mutates_needs_extra_three_quarter_views():
+    """Product accuracy is harder than face consistency and packaging text is the
+    hardest part of it. risk_notes names the features that mutate."""
+    from app.schemas import CANON_COVERAGE, CanonSheet
+
+    plain = CanonSheet(id="@bottle", kind="product", label="Tamra", brief="copper bottle",
+                       coverage={v: True for v in CANON_COVERAGE["product"]})
+    assert plain.complete
+    assert validators_mod.validate_canon_sheet(plain) is plain
+
+    risky = CanonSheet(id="@bottle2", kind="product", label="Tamra", brief="copper bottle",
+                       risk_notes=["threaded lid", "engraved mark"],
+                       coverage={v: True for v in CANON_COVERAGE["product"]})
+    assert not risky.complete           # the same coverage is no longer enough
+    assert len(risky.required_views()) > len(CANON_COVERAGE["product"])
+
+
+def test_a_real_likeness_without_consent_cannot_be_used():
+    from app.schemas import CANON_COVERAGE, CanonSheet
+
+    sheet = CanonSheet(id="@real", kind="character", label="a real person",
+                       brief="uploaded likeness", asset_ids=["up_1"], rights="unverified",
+                       coverage={v: True for v in CANON_COVERAGE["character"]})
+    with pytest.raises(AgentValidationError) as exc:
+        validators_mod.validate_canon_sheet(sheet)
+    assert "Record consent" in str(exc.value)
+
+    sheet.rights = "consented"
+    assert validators_mod.validate_canon_sheet(sheet) is sheet
+
+
+def test_a_non_english_voice_needs_a_native_speaker_sign_off():
+    """Blocking, per locale. Synthetic fluency is not evidence of correctness and
+    a non-speaker cannot catch the failure."""
+    from app.schemas import CanonSheet
+
+    voice = CanonSheet(id="@vo", kind="voice", label="warm female", brief="pitch/pace")
+    assert validators_mod.validate_canon_sheet(voice, languages=["en-IN"]) is voice
+
+    with pytest.raises(AgentValidationError) as exc:
+        validators_mod.validate_canon_sheet(voice, languages=["en-IN", "hi-IN"])
+    assert "native-speaker sign-off for hi-IN" in str(exc.value)
+
+    voice.native_review = {"hi-IN": "Rhea K"}
+    assert validators_mod.validate_canon_sheet(voice, languages=["en-IN", "hi-IN"]) is voice

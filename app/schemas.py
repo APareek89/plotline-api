@@ -729,6 +729,58 @@ class CampaignOptions(Strict):
     options: list[CampaignOption] = Field(min_length=2, max_length=3)
 
 
+CanonKind = Literal["character", "product", "environment", "voice"]
+RightsStatus = Literal["owned", "consented", "fictional", "unverified"]
+
+# Required coverage per kind. In ONE place because the sheet card's coverage
+# meter, the validator and the generation plan all have to agree on "complete".
+CANON_COVERAGE: dict[str, tuple[str, ...]] = {
+    "character": ("front", "three_quarter_l", "three_quarter_r", "profile_l",
+                  "profile_r", "full_front", "full_rear"),
+    "product": ("front", "rear", "left", "right", "top", "base"),
+    "environment": ("establishing", "angle_a", "angle_b", "angle_c"),
+    "voice": (),          # auditioned, not viewed
+}
+# A product whose geometry mutates needs extra three-quarter views before it can
+# be trusted in a shot.
+PRODUCT_RISK_VIEWS = ("three_quarter_fl", "three_quarter_fr", "three_quarter_rl")
+
+
+class CanonSheet(Strict):
+    """v3 §6 — "is this the right cast, and is this actually our product?"
+
+    A first-class, workspace-global library entity (owner decision 2026-08-25),
+    not a modal inside one thread. This is the retention mechanic: campaign two
+    is far cheaper than campaign one BECAUSE the canon already exists.
+    """
+
+    id: str                     # "@priya", "@tamra-classic"
+    kind: CanonKind
+    label: str
+    brief: str                  # casting / product / location / voice descriptor
+    asset_ids: list[str] = Field(default_factory=list)
+    coverage: dict[str, bool] = Field(default_factory=dict)
+    locks: list[str] = Field(default_factory=list)
+    slot_cost: int = Field(default=1, ge=1)     # how many B3 reference slots it eats
+    risk_notes: list[str] = Field(default_factory=list)
+    rights: RightsStatus = "unverified"
+    consent_ref: Optional[str] = None
+    # voice only — a blocking field per non-English locale. Synthetic fluency is
+    # not evidence of correctness and a non-speaker cannot catch the failure.
+    native_review: dict[str, Optional[str]] = Field(default_factory=dict)
+    version: int = 1
+
+    def required_views(self) -> tuple[str, ...]:
+        base = CANON_COVERAGE[self.kind]
+        if self.kind == "product" and self.risk_notes:
+            return base + PRODUCT_RISK_VIEWS
+        return base
+
+    @property
+    def complete(self) -> bool:
+        return all(self.coverage.get(v) for v in self.required_views())
+
+
 class ScriptLine(Strict):
     """One spoken or on-screen line. `words`, `wps` and `wps_verdict` are
     RECOMPUTED server-side — the model never checks its own homework, same rule
@@ -796,6 +848,73 @@ class DetailShot(Strict):
     duration_s: Optional[float] = None
     visual_prompt: str
     vo_or_copy: Optional[str] = None
+
+
+Realism = Literal["editorial", "natural", "documentary"]
+
+# The realism dial is LOAD-BEARING and counter-intuitive. Faces read as credible
+# BECAUSE of pores, asymmetry and ordinary imperfection; prompts asking for
+# flawless skin and idealised symmetry produce the synthetic look people
+# recognise instantly. Shipped as a three-position control, never as a phrase the
+# user has to know to type.
+REALISM_TEXTURE = {
+    "editorial": "clean retouch, controlled highlight rolloff, fine even grain",
+    "natural": "true skin texture, light unretouched grain, natural asymmetry",
+    "documentary": ("visible skin pores, natural asymmetry, no beauty smoothing, "
+                    "no retouching, available-light grain"),
+}
+
+
+class StyleBlock(Strict):
+    """v3 §3 — "does the world look right?"
+
+    `TemplateRef.style_descriptors` was a loose list. What downstream prompts
+    need is a NAMED, VERSIONED, VERBATIM string injected into every visual prompt
+    in the campaign — the cheapest consistency mechanism available.
+    """
+
+    id: str
+    grade: str                  # colour behaviour
+    light: str                  # source, direction, quality, time of day
+    lens: str                   # focal length, aperture, depth, distortion
+    texture: str                # grain + the realism dial
+    motion: str                 # handheld drift vs locked-off
+    negatives: list[str] = Field(default_factory=list)
+    realism: Realism = "natural"
+    derived_from: Optional[str] = None    # TemplateRef.id, or None when Skip was chosen
+    version: int = 1
+
+    def as_prompt(self) -> str:
+        """Verbatim injection, prepended to every visual_prompt in the campaign.
+
+        The user can see this exact string on the card. This is an agency tool
+        and that transparency is a selling point, not a debug affordance.
+        """
+        parts = [f"grade: {self.grade}", f"light: {self.light}", f"lens: {self.lens}",
+                 f"texture: {self.texture}", f"motion: {self.motion}"]
+        if self.negatives:
+            parts.append("avoid: " + ", ".join(self.negatives))
+        return " · ".join(parts)
+
+
+def neutral_style_block(block_id: str = "sb_neutral") -> StyleBlock:
+    """Skip on templates yields a NEUTRAL DEFAULT block — never an absent one.
+
+    Every campaign has a style block; only its source varies. A downstream prompt
+    that has to ask "is there a style?" is a prompt with two code paths, and the
+    second one is always the untested one.
+    """
+    return StyleBlock(
+        id=block_id,
+        grade="neutral colour, no strong cast",
+        light="soft even key, no hard shadow",
+        lens="50mm equivalent, mid aperture, no distortion",
+        texture=REALISM_TEXTURE["natural"],
+        motion="locked off",
+        negatives=["text overlay", "watermark", "logo"],
+        realism="natural",
+        derived_from=None,
+    )
 
 
 CameraMove = Literal["static", "push_in", "pull_out", "pan", "tilt",

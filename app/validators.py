@@ -12,6 +12,7 @@ from typing import Iterable, Optional
 from app import ccs as ccs_mod
 from app.rag_client import RoutingRag
 from app.schemas import (
+    CANON_COVERAGE,
     BoardLints,
     Concept,
     CreatorContext,
@@ -494,6 +495,51 @@ def _canonical_line(line: "ScriptLine") -> str:
     return json.dumps({"slot": line.slot, "t_in": line.t_in, "t_out": line.t_out,
                        "text": line.text, "emotion": line.emotion,
                        "claim_refs": line.claim_refs}, sort_keys=True, separators=(",", ":"))
+
+
+# ------------------------------------------------ v3 §6: canon sheet checks --
+
+
+def validate_canon_sheet(sheet: "CanonSheet", *, languages: Optional[list[str]] = None):
+    """Coverage, geometry risk, rights, and the blocking native-speaker review.
+
+    Skipping a sheet is legal — practitioners genuinely do it under time
+    pressure. The failure is doing it INVISIBLY, so that is a costed choice made
+    elsewhere; what this refuses is a sheet that CLAIMS to be complete and is not.
+    """
+    errors: list[str] = []
+    missing = [v for v in sheet.required_views() if not sheet.coverage.get(v)]
+
+    if sheet.kind == "voice":
+        # W: audition on the real line, and a non-English locale needs a human
+        for locale in (languages or []):
+            if locale.split("-")[0].lower() == "en":
+                continue
+            if not (sheet.native_review or {}).get(locale):
+                errors.append(
+                    f"{sheet.id}: no native-speaker sign-off for {locale}. Synthetic fluency is "
+                    "not evidence of correctness and a non-speaker cannot catch the failure — "
+                    "this blocks delivery, not planning")
+    elif missing:
+        errors.append(
+            f"{sheet.id}: coverage incomplete — missing {missing}. "
+            f"{len(sheet.required_views()) - len(missing)}/{len(sheet.required_views())} views")
+
+    if sheet.kind == "product" and sheet.risk_notes and len(sheet.required_views()) <= len(
+            CANON_COVERAGE["product"]):
+        errors.append(
+            f"{sheet.id}: risk_notes are set but no extra three-quarter views are required — "
+            "a product whose geometry mutates needs them before it can be trusted in a shot")
+
+    # A real likeness with no consent record is a kill flag at review, not a note.
+    if sheet.kind == "character" and sheet.rights == "unverified" and sheet.asset_ids:
+        errors.append(
+            f"{sheet.id}: a character sheet with uploaded assets and rights='unverified' cannot be "
+            "used. Record consent, or mark it 'fictional' if no real person is depicted")
+
+    if errors:
+        raise AgentValidationError(errors)
+    return sheet
 
 
 # --------------------------------------------- v3 §5: the four board lints --
