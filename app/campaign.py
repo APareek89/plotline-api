@@ -90,15 +90,28 @@ from app.validators import (
 
 logger = logging.getLogger("plotline.campaign")
 
+# THE SINGLE SOURCE OF STAGE TRUTH. The dispatcher and _resume both read this;
+# stage literals are never scattered.
+#
+# v3 inserts five gates into the cost ladder. The ordering is not arbitrary: the
+# BOARD names which canon the campaign needs, so the board precedes canon; canon
+# COMPOSES into keyframes, so canon precedes keyframes; and keyframes GATE motion,
+# so nothing animates first. `detail` keeps its stage id — its artifact is
+# upgraded in place into the shot board rather than being replaced.
 CAMPAIGN_STAGES = [
     "name",       # step 0 — the blank landing's only block (owned by POST /api/campaigns)
     "paths",      # step 1 — two path cards
     "cards",      # step 2 — three detail cards (path a) / elicitation (path b)
+    "brief",      # v3 — "are we making the right ad?"; locks the format constraints
     "options",    # step 3 — rumination output, 2-3 campaign options
-    "templates",  # step 4 — optional style reference
-    "detail",     # steps 5+6 — campaign detail + refine loop
+    "templates",  # step 4 — optional style reference (+ the style block)
+    "script",     # v3 — hook rack; the w/s lint runs before anything is paid for
+    "detail",     # steps 5+6 — the shot board + refine loop. THE LAST FREE GATE
+    "canon",      # v3 — cast/product/environment/voice sheets
+    "keyframes",  # v3 — the HARD gate: no motion without approved stills
     "generate",   # step 7 — model-confirm, single vs variants
     "creative",   # step 8 — generated set, per-asset accept/re-roll
+    "qc",         # v3 — three-tier report; blocking findings hold delivery
     "done",       # Ad Card assembled
 ]
 
@@ -1173,6 +1186,44 @@ def _policy_of(campaign_id: str) -> ReviewPolicy:
         logger.warning("campaign %s: unreadable review_policy (%s) — using defaults",
                        campaign_id, exc)
         return ReviewPolicy()
+
+
+def next_stage(stage: str, *, creative_type: str = "image") -> str:
+    """The stage that follows this one. Reads CAMPAIGN_STAGES so a reordering
+    happens in one place.
+
+    For an image campaign the keyframes ARE the deliverable, so `keyframes`
+    terminates the creative path rather than handing off to motion.
+    """
+    if stage not in CAMPAIGN_STAGES:
+        raise ValueError(f"unknown stage {stage!r}")
+    idx = CAMPAIGN_STAGES.index(stage)
+    if idx + 1 >= len(CAMPAIGN_STAGES):
+        return "done"
+    return CAMPAIGN_STAGES[idx + 1]
+
+
+def skipped_stages(campaign_id: str) -> set[str]:
+    """Stages whose WORK the campaign has opted out of. Only ever templates or
+    canon — the schema refuses the rest — and both surface what is traded."""
+    policy = _policy_of(campaign_id)
+    return {s for s in GATEABLE_STAGES if policy.mode(s) == "skip"}
+
+
+def advance_from(campaign_id: str, stage: str, *, creative_type: str = "image") -> str:
+    """Where the flow goes next, honouring the review policy.
+
+    `skip` removes the WORK, so the stage is stepped over entirely. `auto` does
+    NOT: the artifact is still produced, emitted and audited — the flow simply
+    does not wait. That distinction is the whole safety property of the settings
+    model, so it lives here rather than in each stage's handler where it would
+    be re-decided nine times.
+    """
+    skipped = skipped_stages(campaign_id)
+    nxt = next_stage(stage, creative_type=creative_type)
+    while nxt in skipped:
+        nxt = next_stage(nxt, creative_type=creative_type)
+    return nxt
 
 
 def _pauses_at(campaign_id: str, stage: str) -> bool:

@@ -2503,3 +2503,61 @@ def test_a_new_rumination_clears_stale_checkpoints():
     store.save_checkpoint(tid, "review", {"feedback": None})
     campaign._options_turn(cid, tid)
     assert store.load_checkpoint(tid, "review") is None
+
+
+# ================================================================================
+# v3 §3 pipeline — the five inserted gates, and what the settings do to them
+# ================================================================================
+
+
+def test_the_v3_stages_are_inserted_in_cost_ladder_order():
+    """Not arbitrary: the BOARD names which canon the campaign needs, canon
+    COMPOSES into keyframes, and keyframes GATE motion. detail keeps its stage id
+    because its artifact is upgraded in place, not replaced."""
+    stages = campaign.CAMPAIGN_STAGES
+    for new in ("brief", "script", "canon", "keyframes", "qc"):
+        assert new in stages, f"{new} is not a stage"
+
+    def before(a, b):
+        return stages.index(a) < stages.index(b)
+
+    assert before("cards", "brief") and before("brief", "options")
+    assert before("templates", "script") and before("script", "detail")
+    assert before("detail", "canon"), "the board names the canon it needs"
+    assert before("canon", "keyframes"), "canon composes into keyframes"
+    assert before("keyframes", "generate"), "nothing animates before the stills are locked"
+    assert before("creative", "qc") and stages[-1] == "done"
+
+
+def test_skip_steps_over_the_work_but_auto_never_does():
+    """The safety property of the whole settings model: `skip` removes the WORK,
+    `auto` removes only the PAUSE. Downstream stages consume upstream artifacts
+    and the audit trail has to stay complete however fast the user moves."""
+    cid, _ = _filled("Advance")
+
+    # default: nothing is skipped
+    assert campaign.advance_from(cid, "templates") == "script"
+    assert campaign.advance_from(cid, "detail") == "canon"
+
+    # skip canon → the flow steps over it entirely
+    store.update_campaign_settings(cid, {"review_policy": {"gates": {"canon": "skip"}}})
+    assert campaign.skipped_stages(cid) == {"canon"}
+    assert campaign.advance_from(cid, "detail") == "keyframes"
+
+    # auto on canon → the stage is STILL VISITED; only the pause is gone
+    store.update_campaign_settings(cid, {"review_policy": {"gates": {"canon": "auto"}}})
+    assert campaign.skipped_stages(cid) == set()
+    assert campaign.advance_from(cid, "detail") == "canon"
+    assert campaign._pauses_at(cid, "canon") is False
+
+
+def test_skipping_both_skippable_stages_still_reaches_the_gates_that_matter():
+    cid, _ = _filled("Skip both")
+    store.update_campaign_settings(cid, {"review_policy": {
+        "gates": {"templates": "skip", "canon": "skip"}}})
+
+    assert campaign.advance_from(cid, "options") == "script"    # stepped over templates
+    assert campaign.advance_from(cid, "detail") == "keyframes"  # stepped over canon
+    # …and the two gates that can never be skipped are still on the path
+    assert campaign.advance_from(cid, "keyframes") == "generate"
+    assert campaign.advance_from(cid, "creative") == "qc"
