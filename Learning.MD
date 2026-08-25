@@ -277,3 +277,40 @@ the cheap half; the structural half is still open.
 distinguish "bad answer" from "no answer". Check what the loop's `except` clause does NOT
 name — anything unlisted escapes past the persistence that makes the failure diagnosable,
 so the most expensive failures become the least visible ones.
+
+## 2026-08-25 — A gate with a renderer nobody routed to
+
+**Symptom.** Every v3 acceptance test passed and two API-driven QA runs passed,
+but in the browser the campaign brief drew a dashed placeholder with the type
+name and NO BUTTONS. The flow dead-ended at the first new gate.
+
+**Why-chain.**
+1. Why no fields? `CampaignBriefCard` never rendered.
+2. Why not? The thread page routes an artifact to the campaign renderer only if
+   `isCampaignArtifact(type)` is true; otherwise it falls to the legacy card.
+3. Why was it false? `CAMPAIGN_ARTIFACT_TYPES` — a SECOND list, separate from
+   the switch — did not contain the new types.
+4. Why did nothing catch it? Every test drove the API. The renderer, the switch
+   and the allowlist all live in TypeScript, and the suite is Python; the two
+   lists that had to agree were never compared by anything.
+5. **Deepest why: `design`** — one fact ("this type is a campaign artifact") had
+   two representations in the same file, and adding a case to the switch looked
+   complete because the switch is where a reader goes to add a renderer.
+
+**Action (aimed at why-5).** A guard in the Python suite that READS the
+TypeScript: every `case` in the switch must appear in the allowlist, and every
+v3 type the server can emit must appear in both. Verified it bites by removing
+one entry and watching it fail with that entry named.
+
+**Preventive action for the class.** This is the third instance of the same
+species — the R2 lexicon (prompt vs validator), the W1 table and B3 slot caps
+(prompt vs config), and now the renderer allowlist (switch vs list). When one
+fact has two representations, something has to compare them, and the comparison
+belongs wherever the test suite actually runs even if that crosses a language
+boundary. "Both files are in the repo" is not a check.
+
+**Second lesson.** Two green API QA runs and 155 passing tests did not notice a
+dead end at the FIRST gate a user reaches. An API test proves the server can
+produce an artifact; it says nothing about whether the artifact is reachable.
+Any flow with a UI needs at least one pass driven through the UI — the same
+lesson as "the tests call save_block(), they never type", one layer up.

@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `d6e2347` (plotline-api) · `a6bb767` (plotline-web)
+last-synced: `1ac4b5e` (plotline-api) · `7f82919` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -22,7 +22,7 @@ Owner decisions 2026-08-25: RAG removed from the **council only** (planner keeps
 sheets **workspace-global** · stakeholder seats ship, but **the council is now ONE Marketing
 Expert** (later owner decision, see below) · final stitch **deferred, checkpoints instead**.
 
-**✅ Shipped (155 tests green; floor was 83).** All ten build-order steps:
+**✅ Shipped (160 tests green; floor was 83).** All ten build-order steps:
 council doctrine v3.1.0 + one reviewer · `ReviewPolicy`/settings API/presets ·
 `campaign_brief` · `hook_rack` + W1-W3 · `ShotBoard` + B1-B4 · `style_block` ·
 `canon_sheet` ×4 · `keyframe_board` + hard gate · `qc_report` + rights ledger ·
@@ -39,18 +39,25 @@ templates(+style block) → **script** (video only) → **board** → **canon** 
   ARITHMETIC not just the ceiling) and `ref_slots_text()` (B3). NEVER hand-copy either.
 - The board is the source of truth; `detail` is its one-way server projection.
 
+### ✅ THE UI IS BUILT. Walked in the browser end to end.
+All six new artifact types render with working actions; **My Brand** ships with the canon
+library grid and its nav entry. Verified live: the brief card draws its full definition list
+with `single_message` largest, and clicking Approve advances the stage to options.
+⚠️ **Two lists must agree** — `CAMPAIGN_ARTIFACT_TYPES` (routing) and the switch (rendering)
+in `campaign-artifacts.tsx`. A type in the switch but not the list NEVER reaches the switch
+and draws a placeholder with no buttons. A Python test reads the TypeScript and guards it.
+
 ### 🔴 WHAT IS STILL MISSING
-1. **No web renderers.** `campaign-artifacts.tsx` renders 0 of the 7 new `ArtifactType`s,
-   so the new gates are API-only. §12 rules + layouts are in `docs/v3-ARTIFACT-SPEC.md`.
-   Flow diagram for orientation: `docs/v3-agentic-flow.html`.
-2. **No My Brand tab / canon library page** (deliberately absent from nav until it exists;
-   canon sheets are workspace-global by owner decision, so it needs its own storage).
-3. **Canon views are planned, never rendered.** `_canon_turn` plans the sheets; nothing
-   generates their coverage images yet, so `validate_canon_sheet(require_coverage=True)`
-   has no caller in the live flow.
-4. **fal untested** — balance is low, so `MOCK_MEDIA=1` throughout. The generate/creative
-   stages are verified for WIRING only; no real image or video has been rendered under v3.
-5. Take taxonomy + variant_matrix exist as contracts with no reject UI behind them.
+1. **fal untested** — balance is low, so `MOCK_MEDIA=1` throughout. Generate/creative/
+   keyframes/canon are verified for WIRING only; no real image or video under v3.
+2. **The reject UI is server-side only.** `reject_<cause>_<slot>` works and is tested, but
+   `CreativeSetCard` does not yet offer the five causes as buttons — a user can only re-roll.
+3. **Canon views use the draft tier and a generic per-view prompt.** Good enough to prove
+   coverage; a real sheet wants the sheet's own brief + locks in each view prompt.
+4. **Style block has no editable card.** It rides on the board card as a read-only block;
+   §3 asks for six editable rows and a copy action.
+5. `keyframes` renders one frame per shot regardless of `keyframes_per_shot` — the setting
+   is stored and shown but not yet consumed by the renderer loop.
 
 ### 📌 Prompt lessons from the paid runs — do not undo these
 Three retry causes fixed by prompt, never by weakening a check: (a) the reviewer invented
@@ -67,7 +74,7 @@ of the four council calls, which is the main reason it exists.
   `ad_faa4f000b5` LIVE, credits reconciled exactly); pre-pivot app deleted from both repos
   (−4.8k lines); rumination ported to LangGraph; observability surface; 4 real-mode prompt
   bug classes fixed. See git log + Learning.MD.
-- ✅ **155 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
+- ✅ **160 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
   floor — never weaken one; re-point it only when an INVARIANT changed by owner decision.
 - ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
   real key in `.env`. Start: `bash run.sh` (api+rag+devrag), `npm run dev` (web).
@@ -85,7 +92,7 @@ of the four council calls, which is the main reason it exists.
 - ✅ ~~CHECKPOINTS~~ — done. Every graph node checks for a checkpoint before running and
   writes one after returning, so a node that raised leaves nothing and only a COMPLETE
   result is restored. `retry` resumes; a new rumination clears stale rows.
-- 🟡 **The council has no UI surface at all.** `Feedback`/`SeatReview` are never emitted as
+- 🟡 **The reviewer has no UI surface.** `Feedback`/`SeatReview` are never emitted as
   artifacts (CoverageChip renders only on legacy concept/plan/confidence_card, which the v2
   flow never produces). So doctrine §1's honest-label instruction has no target, and a
   stakeholder seat produces a review nobody can see. Owner declined the surface — small to add.
