@@ -275,23 +275,22 @@ def save_block(campaign_id: str, block: str, data: dict[str, Any]) -> dict[str, 
 
 
 def cards_done(context: Any) -> dict[str, bool]:
-    """Step 2 ✓ state. Brand is NOT done until the claims list is confirmed —
-    the confirmed list is the claims source of truth, so an unconfirmed brand
-    card is an unfinished brand card."""
+    """Step 2 ✓ state.
+
+    Confirming claims is NOT required to finish the Brand card. It used to be,
+    which meant a brand with nothing quotable could never start a campaign. The
+    compliance invariant does not need the gate: an unconfirmed brand simply has
+    an EMPTY approved_claims list, so every persuasion claim is unmapped and
+    _validate_detail rejects it / the council kill-flags it. Confirming claims
+    GRANTS permission to make them; it is not a toll on getting started."""
     ctx = _as_dict(context)
     done = {block: bool(ctx.get(block)) for block in _BLOCKS}
-    brand = ctx.get("brand") or {}
-    done["brand"] = bool(brand) and bool(brand.get("claims_confirmed"))
     return done
 
 
 def missing_blocks(context: Any) -> list[str]:
     ctx = _as_dict(context)
-    missing = [b for b in _BLOCKS if not ctx.get(b)]
-    brand = ctx.get("brand") or {}
-    if brand and not brand.get("claims_confirmed"):
-        missing.append("brand.claims_confirmed (one-tap confirm the claims list)")
-    return missing
+    return [b for b in _BLOCKS if not ctx.get(b)]
 
 
 def templates() -> list[dict[str, Any]]:
@@ -764,17 +763,14 @@ def _next_field(context: CampaignContext) -> Optional[str]:
         return "campaign"
     if context.brand is None:
         return "brand"
-    if not context.brand.claims_confirmed:
-        return "brand.claims_confirmed"
     return None
 
 
 def _next_question(context: CampaignContext) -> Optional[str]:
     return {
-        "product": "What's the product — name, one-line description, and 3-8 images for the consistency pack?",
+        "product": "What's the product — name, one-line description, and at least one image for the consistency pack (up to 8)?",
         "campaign": "What's the objective (awareness, traffic or conversions), who's it for, and which platforms?",
         "brand": "What's the brand URL? I'll pull palette, font, logo and tagline for you to confirm.",
-        "brand.claims_confirmed": "Confirm the claims list in the Brand card — that confirmed list is what I'm allowed to say.",
         None: "Start the rumination?",
     }[_next_field(context)]
 
@@ -1321,7 +1317,12 @@ def _validate_detail(detail: CampaignDetail, context: CampaignContext,
     campaign_block = context.campaign
     assert brand is not None and campaign_block is not None
 
-    approved = set(brand.approved_claims)
+    # CONFIRMED is the operative word. A saved-but-unconfirmed list is a set of
+    # CANDIDATES, not permissions — treating it as approved would let the
+    # extractor grant itself authority. This used to be implicit (the campaign
+    # could not start unconfirmed); now that confirming is optional it has to be
+    # explicit, or dropping the gate would silently approve every candidate.
+    approved = set(brand.approved_claims) if brand.claims_confirmed else set()
     unmapped = [c for c in detail.claims_used if c not in approved]
     if unmapped:
         errors.append(

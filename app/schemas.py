@@ -483,7 +483,10 @@ CreativeType = Literal["video", "image"]
 class ProductBlock(Strict):
     name: str
     description: str
-    image_upload_ids: list[str] = Field(default_factory=list, max_length=8)  # 3-8 → product pack / consistency lock
+    # ONE image is enough to lock product consistency; more is better, not
+    # required. The old copy asked for 3-8 and the UI enforced it, which blocked
+    # anyone launching with a single pack shot.
+    image_upload_ids: list[str] = Field(default_factory=list, max_length=8)  # 1-8 → product pack / consistency lock
 
 
 class CampaignBlock(Strict):

@@ -191,8 +191,11 @@ def test_path_b_fills_the_identical_campaign_context(monkeypatch):
 
     # ≤1 question per turn, and progress chips track the same three blocks
     progress = _artifacts(tid, "intake_progress")
+    # No "brand.claims_confirmed" step: confirming claims GRANTS permission to
+    # make them, it is not a toll on getting started. An unconfirmed brand just
+    # has an empty approved list, so any claim used is unmapped and kill-flagged.
     assert [p["payload"]["next_field"] for p in progress[1:]] == [
-        "product", "campaign", "brand", "brand.claims_confirmed", None]
+        "product", "campaign", "brand", None, None]
     for envelope in _envelopes(tid):
         AgentMessage.model_validate(envelope)
 
@@ -247,13 +250,25 @@ def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves
     assert "saves 4 hours a month" in " ".join(candidates["approved_claims"])
     assert store.get_series(cid)["context"]["brand"] is None  # candidates aren't saved either
 
-    # unconfirmed claims block the whole rumination, by name
+    # Unconfirmed claims no longer block the rumination — but they are also not
+    # APPROVED, so they buy the campaign nothing. The list stays unusable until
+    # the user confirms it; that is where the compliance line sits now.
     campaign.save_block(cid, "campaign", CAMPAIGN)
-    campaign.save_block(cid, "brand", {"url": "https://ledger.example",
-                                       "approved_claims": candidates["approved_claims"]})
-    with pytest.raises(HTTPException) as exc:
-        main.start_campaign(cid)
-    assert exc.value.status_code == 422 and "claims_confirmed" in exc.value.detail
+    unconfirmed = campaign.save_block(cid, "brand", {"url": "https://ledger.example",
+                                                     "approved_claims": candidates["approved_claims"]})
+    assert campaign.missing_blocks(unconfirmed) == []
+    assert unconfirmed["brand"]["claims_confirmed"] is False
+    context = CampaignContext.model_validate(unconfirmed)
+    detail = CampaignDetail(
+        creative_type="image",
+        shots=[{"slot": "slide_01", "duration_s": None,
+                "visual_prompt": "a split screen of the product", "vo_or_copy": "see it"}],
+        copy_primary="c", cta="Shop",
+        claims_used=[candidates["approved_claims"][0]],   # an UNCONFIRMED claim
+        style_ref=None, version=1, changes=[])
+    with pytest.raises(AgentValidationError) as verr:
+        campaign._validate_detail(detail, context, None)
+    assert "NOT in the confirmed approved_claims" in str(verr.value)
 
     # the user edits what the extractor proposed, then confirms — their edit wins
     saved = campaign.save_block(cid, "brand", {
@@ -720,10 +735,11 @@ def test_council_seats_score_blind_and_the_chair_returns_the_v1_feedback(monkeyp
     monkeypatch.setattr(campaign_mock, "mock_seat", spy)
     cid, tid = _ruminated("Council")
 
-    # ORDER IS NO LONGER ASSERTED, ON PURPOSE. The seats are fanned out as three
-    # concurrent nodes in the rumination graph, so completion order is not
-    # deterministic — asserting it would pin an artifact of the old for-loop.
-    # What must hold is that ALL THREE ran and none shared a retrieval slice.
+    # The seats EXECUTE concurrently, so the order they finish in is not fixed —
+    # that is why this asserts the set. Determinism is restored where it matters:
+    # the chair node sorts to the canonical SEATS order before the chair sees
+    # them (see test_the_chair_always_sees_seats_in_canonical_order), so the same
+    # input yields the same chair input regardless of who answered first.
     assert sorted(s["seat"] for s in seen[:3]) == ["brand", "performance", "platform"]
     assert len(dispatchers) == len(set(id(d) for d in dispatchers))   # a fresh slice each
     for record in seen:
@@ -1049,3 +1065,72 @@ def test_refine_cannot_run_twice_even_if_options_stay_flagged():
     state = final if isinstance(final, RuminationState) else RuminationState(**final)
     assert calls["refine"] == 1          # exactly one refine, never two
     assert state.refine_done is True
+
+
+def test_the_chair_always_sees_seats_in_canonical_order(monkeypatch):
+    """The seats EXECUTE concurrently, so they finish in whatever order the
+    model answers (92s/175s/119s on the last real run). The chair is an LLM and
+    LLMs are order-sensitive, so an unsorted join would make the same input
+    produce different rumination run-to-run. The chair node sorts to the
+    canonical SEATS order — parallel speed, deterministic input."""
+    from app.agents import council as council_mod
+
+    seen: list[list[str]] = []
+    real = council_mod.run_council
+
+    def spy(payload, plan, *a, seat_reviews=None, **k):
+        if seat_reviews:
+            seen.append([r.seat for r in seat_reviews])
+        return real(payload, plan, *a, seat_reviews=seat_reviews, **k)
+
+    monkeypatch.setattr(campaign, "run_council", spy)
+    _ruminated("Canonical order")
+
+    assert seen, "the chair never received pre-computed seat reviews"
+    for order in seen:
+        assert order == council_mod.SEATS, f"chair saw {order}, not {council_mod.SEATS}"
+
+
+def test_one_product_image_is_enough_and_claims_do_not_block_the_start():
+    """Two gates relaxed on purpose. A single pack shot locks consistency, and
+    confirming claims GRANTS permission to make them rather than tolling the
+    start. Neither relaxation may touch what the campaign is allowed to SAY."""
+    campaign_id = campaign.start_campaign("One image, no claims")["campaign_id"]
+    campaign.save_block(campaign_id, "product", {
+        "name": "Solo", "description": "one shot is plenty", "image_upload_ids": ["up_1"]})
+    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    campaign.save_block(campaign_id, "brand", {
+        "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
+        "approved_claims": [], "banned_words": [], "claims_confirmed": False})
+
+    record = main.get_campaign(campaign_id)
+    assert record["cards_done"] == {"product": True, "campaign": True, "brand": True}
+    assert campaign.missing_blocks(record["context"]) == []      # startable
+    assert main.start_campaign(campaign_id) == {"ok": True}
+
+
+def test_an_unconfirmed_claims_list_is_candidates_not_permissions():
+    """The floor the relaxation stands on. Dropping the start gate must NOT let
+    a saved-but-unconfirmed list act as approved — otherwise the extractor would
+    be granting itself authority."""
+    campaign_id = campaign.start_campaign("Candidates only")["campaign_id"]
+    campaign.save_block(campaign_id, "product", PRODUCT)
+    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    saved = campaign.save_block(campaign_id, "brand", {
+        "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
+        "approved_claims": ["Cuts glare by 40%"], "banned_words": [],
+        "claims_confirmed": False})
+    assert saved["brand"]["approved_claims"] == ["Cuts glare by 40%"]
+    assert saved["brand"]["claims_confirmed"] is False
+
+    context = CampaignContext.model_validate(saved)
+    detail = CampaignDetail(
+        creative_type=context.campaign.creative_type,
+        shots=[{"slot": "slide_01", "duration_s": None,
+                "visual_prompt": "a split screen of the product", "vo_or_copy": "see it"}],
+        copy_primary="c", cta="Shop",
+        claims_used=["Cuts glare by 40%"],          # present, but NOT confirmed
+        style_ref=None, version=1, changes=[])
+    with pytest.raises(AgentValidationError) as exc:
+        campaign._validate_detail(detail, context, None)
+    assert "NOT in the confirmed approved_claims" in str(exc.value)

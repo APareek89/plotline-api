@@ -83,6 +83,9 @@ class RuminationState(BaseModel):
     feedback: Annotated[Optional[Feedback], _keep_last] = None
     flagged: Annotated[list[str], _keep_last] = Field(default_factory=list)
 
+    # ---- the canonical order the chair actually saw (audit + determinism check)
+    seat_order: Annotated[list[str], _keep_last] = Field(default_factory=list)
+
     # ---- the one-pass cap, as state rather than as an `if`
     refine_done: Annotated[bool, _keep_last] = False
 
@@ -163,16 +166,27 @@ def build_rumination_graph(deps: RuminationDeps):
     def chair(state: RuminationState) -> dict[str, Any]:
         _step("council review")
         assert state.options is not None and state.plan is not None
+        # DETERMINISM AT THE JOIN. The seats run concurrently, so they land in
+        # the reducer in completion order — i.e. in whatever order the model
+        # happened to answer (92s/175s/119s on the last real run). The chair is
+        # an LLM and LLMs are order-sensitive, so feeding it a different seat
+        # order run-to-run makes the whole rumination irreproducible for the
+        # same input. Sorting to the canonical SEATS order here keeps the
+        # parallel speed-up AND restores a deterministic input to the chair.
+        ordered = sorted(
+            state.seat_reviews,
+            key=lambda r: SEATS.index(r.seat) if r.seat in SEATS else len(SEATS),
+        )
         feedback, reviews = deps.run_council(
             state.context, state.shadow, state.options, state.plan,
             set(state.retrieved), state.niche_assets,
-            seat_reviews=state.seat_reviews or None,
+            seat_reviews=ordered or None,
         )
         family = deps.objective_family(state.shadow.objective)
         flagged = sorted(deps.flagged_ids(family, feedback))
         extra = [r for r in reviews if r not in state.seat_reviews]
         return {"feedback": feedback, "flagged": flagged,
-                "seat_reviews": extra}
+                "seat_reviews": extra, "seat_order": [r.seat for r in ordered]}
 
     # ----------------------------------------------------------------- refine
     def refine(state: RuminationState) -> dict[str, Any]:
