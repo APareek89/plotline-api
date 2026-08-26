@@ -91,4 +91,13 @@ echo ""
 echo "logs: /tmp/plotline-{api,rag,devrag}.log"
 status
 echo ""
-echo "The web app is a separate repo: cd ../plotline-web && npm run dev   (:3100)"
+# This script does NOT start the web server — it only reports it. Saying "run
+# npm run dev" while web is already UP sends the reader straight into an
+# EADDRINUSE they then have to interpret. Say which of the two situations they
+# are actually in.
+if lsof -ti :3100 >/dev/null 2>&1; then
+  echo "The web app is ALREADY running → http://localhost:3100"
+  echo "(so 'npm run dev' will exit with EADDRINUSE — that means 'already up', not broken)"
+else
+  echo "The web app is a separate repo: cd ../plotline-web && npm run dev   (:3100)"
+fi
