@@ -2375,7 +2375,7 @@ def _render_slot(thread_id: str, context: CampaignContext, ws: dict[str, Any],
     _working[thread_id] = f"animating {slot}"
     try:
         clip = generate("video", motion, ratio=ratio, duration_s=float(shot.get("duration_s") or 4.0),
-                        image_url=frame.get("url"))
+                        image_urls=[frame["url"]] if frame.get("url") else [])
     except MediaError:
         # The keyframe is already paid for. Keep it as a real (still) item so the
         # spend stays visible and a resume re-animates it instead of re-buying it.
@@ -2566,7 +2566,7 @@ def _reroll_turn(thread_id: str, slot: str, note: Optional[str]) -> None:
             ws["prompts"][slot] = motion
             clip = generate("video", motion, ratio=item["ratio"],
                             duration_s=float(source.get("duration_s") or 4.0),
-                            image_url=frame.get("url"))
+                            image_urls=[frame["url"]] if frame.get("url") else [])
             asset_id = store.add_asset(thread_id, slot, clip.get("kind", "video"), clip["path"],
                                        {**_params(context, ws, motion, clip, item["ratio"],
                                                   item["variant_id"], source["slot"]),

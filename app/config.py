@@ -172,6 +172,32 @@ MEDIA_REF_SLOTS = {
 }
 MEDIA_REF_SLOTS_DEFAULT = int(os.environ.get("PLOTLINE_REF_SLOTS_DEFAULT", "2"))
 
+
+def media_key(kind: str, tier: str = "final") -> str:
+    """The ONE key a (kind, tier) pair resolves to.
+
+    MEDIA_MODELS, PIXELBIN_MODELS, MEDIA_COST_USD and MEDIA_REF_SLOTS are all
+    keyed this way, and until now the mapping was written out by hand in three
+    of the four call sites. Four tables that have to agree, kept in step by
+    copy-paste, is three chances to drift — and the drift that matters here is
+    silent: an unknown key falls back to a default that reads like a decision.
+    """
+    if kind != "image":
+        return kind  # "video" | "audio"
+    return {"draft": "image_draft", "pro": "image_pro"}.get(tier, "image_final")
+
+
+def ref_slots(kind: str, tier: str = "final") -> int:
+    """How many reference images ONE call to this model can carry (v3 §5, B3).
+
+    The board's B3 lint polices shots against these numbers, so the client has
+    to send against the same numbers or the lint is enforcing a capacity nobody
+    honours — which is exactly the state this function was written to end. A
+    missing key falls back to the conservative default, never to "unlimited":
+    over-sending is a 400 at spend time, under-sending is a visible drop.
+    """
+    return MEDIA_REF_SLOTS.get(media_key(kind, tier), MEDIA_REF_SLOTS_DEFAULT)
+
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 DB_PATH = DATA_DIR / "plotline.db"

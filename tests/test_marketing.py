@@ -3291,8 +3291,11 @@ def test_a_paid_render_whose_download_fails_is_still_recorded(monkeypatch, tmp_p
 
     monkeypatch.setattr(config, "MOCK_MEDIA", False)
     monkeypatch.setattr(media, "_provider_order", lambda kind: ["fal"])
+    # (url, model, dropped_refs) — the third element arrived with plural
+    # references; this stub mirrors the real signature so an arity change
+    # fails here loudly rather than somewhere downstream.
     monkeypatch.setattr(media, "_generate_fal",
-                        lambda *a, **k: ("https://cdn.example/x.png", "fal:test-model"))
+                        lambda *a, **k: ("https://cdn.example/x.png", "fal:test-model", []))
 
     attempts = {"n": 0}
     def always_fails(url, dest):
@@ -3501,3 +3504,127 @@ def test_intake_stops_asking_after_two_questions_and_decides(monkeypatch):
     assert any(a["payload"].get("assumptions")
                for a in last.get("artifacts", []) if a["type"] == "intake_progress"), (
         "the intake card does not carry the assumptions")
+
+
+# --- Stage 1 · plural references ---------------------------------------------
+# config.MEDIA_REF_SLOTS has declared 2-6 reference slots per model since v3,
+# and the board's B3 lint has been policing shots against those numbers — while
+# media.generate() accepted exactly ONE url. The lint was enforcing a capacity
+# the client could not use. These pin the capacity end to end.
+
+
+def test_a_render_sends_the_references_the_model_declares_and_names_the_rest(monkeypatch):
+    """Six references against a four-slot route: four travel, two are REPORTED.
+
+    Never silently truncated. A silently dropped product reference is exactly
+    how label and geometry drift enter a campaign (v3 §5, B3) — the user has to
+    be able to be told, so the drop is returned as a fact, not logged as an
+    aside.
+
+    Every number this test depends on is SET here rather than read from
+    config's env-loaded values: a test that reads .env passes or fails
+    depending on whose machine runs it, which this suite has been bitten by.
+    """
+    from app import media, pixelbin_client as pb
+
+    monkeypatch.setitem(config.MEDIA_REF_SLOTS, "image_final", 4)
+    monkeypatch.setitem(config.PIXELBIN_MODELS, "image_final", "nanoBanana2_generate")
+    monkeypatch.setattr(config, "MOCK_MEDIA", False)
+    monkeypatch.setattr(config, "MEDIA_PROVIDER", "pixelbin_only")
+    monkeypatch.setattr(config, "PIXELBIN_API_TOKEN", "tok")
+
+    sent: dict = {}
+
+    def fake_submit(name, payload, timeout_s=600):
+        sent["name"], sent["payload"] = name, dict(payload)
+        return ["https://cdn.example/out.png"]
+
+    monkeypatch.setattr(pb, "submit_and_wait", fake_submit)
+    monkeypatch.setattr(media, "_download", lambda url, dest: dest)
+
+    refs = [f"https://cdn.example/ref{i}.png" for i in range(6)]
+    out = media.generate("image", "a trail shoe", ratio="1:1", tier="final", image_urls=refs)
+
+    # the wire carries four, under the field name THIS model declares
+    field = pb._CAPS["nanoBanana2_generate"]["image_field"]
+    assert field == "images", "nanoBanana takes `images`; veo31 takes `image_urls`"
+    assert sent["payload"][field] == refs[:4], "the model was not sent its full four slots"
+
+    assert out["refs_used"] == refs[:4]
+    assert {d["url"] for d in out["dropped_refs"]} == set(refs[4:]), (
+        "two references vanished without being named")
+    assert all(d.get("why") for d in out["dropped_refs"]), (
+        "a drop with no reason is a silent drop with extra steps")
+
+
+def test_the_reference_budget_is_identical_under_mock_media(monkeypatch):
+    """MOCK_MEDIA is a rehearsal of the whole interaction contract, so what is
+    sent and what is dropped must be decided the same way at zero spend. If the
+    trim happened after the mock branch, Stage 6's dry run would prove nothing
+    about Stage 7's real one."""
+    from app import media
+
+    monkeypatch.setitem(config.MEDIA_REF_SLOTS, "image_final", 4)
+    monkeypatch.setattr(config, "MOCK_MEDIA", True)
+
+    refs = [f"https://cdn.example/ref{i}.png" for i in range(6)]
+    out = media.generate("image", "a trail shoe", ratio="1:1", tier="final", image_urls=refs)
+
+    assert out["mock"] is True and out["cost"] == 0.0
+    assert out["refs_used"] == refs[:4]
+    assert {d["url"] for d in out["dropped_refs"]} == set(refs[4:])
+
+
+def test_a_fal_fallback_says_which_references_it_cannot_carry(monkeypatch):
+    """The FALLBACK provider has different limits from the primary, and a
+    failover that quietly renders something else is worse than a failure.
+
+    fal's video model seeds from ONE image_url. Two references may pass the
+    slot budget and still not survive the provider, so the provider's own drop
+    is reported the same way the budget's is.
+    """
+    from app import media
+
+    monkeypatch.setitem(config.MEDIA_REF_SLOTS, "video", 2)
+    monkeypatch.setattr(config, "MOCK_MEDIA", False)
+    monkeypatch.setattr(config, "MEDIA_PROVIDER", "fal_only")
+    monkeypatch.setattr(config, "FAL_KEY", "k")
+
+    sent: dict = {}
+
+    def fake_submit(model, payload, timeout_s=300):
+        sent["payload"] = dict(payload)
+        return {"video": {"url": "https://cdn.example/out.mp4"}}
+
+    monkeypatch.setattr(media, "_submit_and_wait", fake_submit)
+    monkeypatch.setattr(media, "_download", lambda url, dest: dest)
+
+    refs = ["https://cdn.example/a.png", "https://cdn.example/b.png"]
+    out = media.generate("video", "she runs", ratio="9:16", duration_s=4.0, image_urls=refs)
+
+    assert sent["payload"]["image_url"] == refs[0]
+    assert out["refs_used"] == [refs[0]]
+    assert [d["url"] for d in out["dropped_refs"]] == [refs[1]]
+    assert "one image_url" in out["dropped_refs"][0]["why"].lower()
+
+
+def test_every_model_route_declares_a_reference_budget():
+    """Two lists that must agree, so something compares them.
+
+    B3 lints shots against MEDIA_REF_SLOTS and media.generate() sends against
+    the same table. A route present in a model map but absent from the slot
+    table falls through to MEDIA_REF_SLOTS_DEFAULT, which reads like a declared
+    capacity and is not one — it is the absence of a decision.
+    """
+    routes = set(config.PIXELBIN_MODELS) | {
+        k for k in config.MEDIA_MODELS if not k.startswith("tts")}
+    missing = sorted(r for r in routes if r not in config.MEDIA_REF_SLOTS)
+    assert not missing, (
+        f"{missing} name a model but declare no reference budget — B3 would lint "
+        "against a default nobody chose")
+
+    # and the resolver the client uses agrees with the table the lint reads
+    assert config.ref_slots("image", "draft") == config.MEDIA_REF_SLOTS["image_draft"]
+    assert config.ref_slots("image", "pro") == config.MEDIA_REF_SLOTS["image_pro"]
+    assert config.ref_slots("image", "final") == config.MEDIA_REF_SLOTS["image_final"]
+    assert config.ref_slots("video") == config.MEDIA_REF_SLOTS["video"]

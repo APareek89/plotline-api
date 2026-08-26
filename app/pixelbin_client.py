@@ -246,7 +246,7 @@ def generate(
     ratio: str = "9:16",
     duration_s: float = 4.0,
     tier: str = "final",
-    image_url: Optional[str] = None,
+    image_urls: Optional[list[str]] = None,
     resolution: str = "2K",
 ) -> dict[str, Any]:
     """One image or video via PixelBin. Returns {url, model, params}.
@@ -255,13 +255,20 @@ def generate(
     duration are snapped into that model's enum rather than passed through — a
     9:16 brief against a 16:9-only model should degrade visibly, not 400.
 
+    `image_urls` is sent under whichever field name THIS model declares —
+    `images` for the nanoBanana family, `image_urls` for veo31. That difference
+    is not cosmetic; sending the wrong one is a 400 that reads like an outage.
+    Every URL given is sent: the slot budget is applied once, upstream in
+    `media.generate()`, against the same `config.MEDIA_REF_SLOTS` the board's
+    B3 lint reads. Do NOT add a second cap here — one number, one place, or the
+    lint and the client drift apart again.
+
     Audio is deliberately absent: PixelBin's catalogue has no TTS operation, so
     routing audio here would fail at the provider with a confusing message.
     `media.py` sends audio straight to fal and says so.
     """
     if kind == "image":
-        key = "image_draft" if tier == "draft" else ("image_pro" if tier == "pro" else "image_final")
-        model = config.PIXELBIN_MODELS[key]
+        model = config.PIXELBIN_MODELS[config.media_key("image", tier)]
         timeout = 300.0
     elif kind == "video":
         model = config.PIXELBIN_MODELS["video"]
@@ -282,8 +289,11 @@ def generate(
         payload["resolution"] = "720p"
     elif caps.get("resolution"):
         payload["output_resolution"] = resolution if resolution in caps["resolution"] else "2K"
-    if image_url:
-        payload[caps["image_field"]] = [image_url]
+    refs = [u for u in (image_urls or []) if u]
+    if refs:
+        # `_as_form` repeats a list under the same field name — a JSON-encoded
+        # array is silently ignored, so the list shape has to survive this far.
+        payload[caps["image_field"]] = refs
 
     urls = submit_and_wait(model, payload, timeout_s=timeout)
     logger.info("pixelbin %s via %s (%s)", kind, model,

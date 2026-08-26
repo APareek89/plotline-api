@@ -52,7 +52,7 @@ class MediaError(RuntimeError):
 def estimate_cost(kind: str, *, duration_s: float = 0, chars: int = 0, tier: str = "draft") -> float:
     c = config.MEDIA_COST_USD
     if kind == "image":
-        return c[f"image_{tier}"] if f"image_{tier}" in c else c["image_final"]
+        return c[config.media_key("image", tier)]
     if kind == "video":
         return round(c["video_per_s"] * duration_s, 2)
     if kind == "audio":
@@ -196,12 +196,23 @@ def _mock_video(prompt: str, ratio: str, duration_s: float, dest: Path) -> Path:
 
 def _generate_fal(
     kind: str, prompt: str, *, ratio: str, duration_s: float, tier: str,
-    voice: Optional[str], image_url: Optional[str], seed: Optional[int],
-) -> tuple[str, str]:
-    """One asset via fal. Returns (url, model). Raises MediaError."""
+    voice: Optional[str], image_urls: list[str], seed: Optional[int],
+) -> tuple[str, str, list[dict[str, str]]]:
+    """One asset via fal. Returns (url, model, dropped). Raises MediaError.
+
+    `dropped` names every reference fal could NOT carry, and why. fal's image
+    models are wired here as text-to-image only — there is no verified
+    reference field on that path — and its video model takes ONE `image_url`.
+    Both are real limits of the FALLBACK provider, so a PixelBin failover with
+    references attached silently becomes a different render unless it says so.
+    """
+    dropped: list[dict[str, str]] = []
     if kind == "image":
-        model = config.MEDIA_MODELS["image_draft" if tier == "draft" else ("image_pro" if tier == "pro" else "image_final")]
+        model = config.MEDIA_MODELS[config.media_key("image", tier)]
         payload: dict[str, Any] = {"prompt": prompt, "aspect_ratio": ratio, "num_images": 1}
+        dropped += [{"url": u, "why": f"{model} is wired text-to-image here — "
+                                      "fal's reference field is not verified on this path"}
+                    for u in image_urls]
         if seed is not None:
             payload["seed"] = seed
         out = _submit_and_wait(model, payload)
@@ -220,30 +231,39 @@ def _generate_fal(
     else:
         model = config.MEDIA_MODELS["video"]
         payload = {"prompt": prompt, "duration": f"{int(duration_s)}s", "aspect_ratio": ratio}
-        if image_url:
-            payload["image_url"] = image_url
+        if image_urls:
+            payload["image_url"] = image_urls[0]
+            dropped += [{"url": u, "why": f"{model} seeds from ONE image_url"}
+                        for u in image_urls[1:]]
         out = _submit_and_wait(model, payload, timeout_s=600)
         url = out.get("video", {}).get("url")
         if not url:
             raise MediaError(f"{model} returned no video: {json.dumps(out)[:200]}")
-    return url, f"fal:{model}"
+    return url, f"fal:{model}", dropped
 
 
 def _generate_pixelbin(
     kind: str, prompt: str, *, ratio: str, duration_s: float, tier: str,
-    image_url: Optional[str],
-) -> tuple[str, str]:
-    """One asset via PixelBin. Returns (url, model). Raises MediaError, so the
-    router does not have to know two exception types."""
+    image_urls: list[str],
+) -> tuple[str, str, list[dict[str, str]]]:
+    """One asset via PixelBin. Returns (url, model, dropped). Raises MediaError,
+    so the router does not have to know two exception types.
+
+    PixelBin drops nothing of its own: the slot budget is applied ONCE, in
+    generate(), against `config.MEDIA_REF_SLOTS` — the same table the board's
+    B3 lint reads. A second cap down here would be a second representation of
+    one number, which is how the board came to police a capacity the client
+    could not use in the first place.
+    """
     from app import pixelbin_client
 
     try:
         out = pixelbin_client.generate(
-            kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_url=image_url,
+            kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_urls=image_urls,
         )
     except pixelbin_client.PixelbinError as exc:
         raise MediaError(str(exc), policy=exc.policy) from exc
-    return out["url"], out["model"]
+    return out["url"], out["model"], []
 
 
 def _provider_order(kind: str) -> list[str]:
@@ -266,19 +286,43 @@ def generate(
     duration_s: float = 4.0,
     tier: str = "final",
     voice: Optional[str] = None,
-    image_url: Optional[str] = None,
+    image_urls: Optional[list[str]] = None,
     seed: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Returns {path?, url?, model, cost, seed, mock, fallback?}. Local files
-    live under data/assets/ and are served by /api/assets.
+    """Returns {path?, url?, model, cost, seed, mock, fallback?, refs_used,
+    dropped_refs}. Local files live under data/assets/ and are served by
+    /api/assets.
 
     `model` carries its provider prefix ("pixelbin:…" / "fal:…") because the
     generation_log is an audit surface: "which provider actually made this"
     is exactly the question a cost dispute asks, and a bare model name cannot
     answer it once two providers can produce the same asset.
+
+    `image_urls` is a LIST, and the list is the point. `config.MEDIA_REF_SLOTS`
+    has declared 2–6 reference slots per model since v3 and the board's B3 lint
+    polices shots against those numbers — while this function accepted exactly
+    one URL. The lint was enforcing a capacity the client could not use.
+
+    Over-supply is trimmed HERE, once, and every dropped reference is returned
+    in `dropped_refs` with the reason it went. A silently dropped product
+    reference is precisely how label and geometry drift enter a campaign
+    (v3 §5, B3), so the drop is a fact the caller can say out loud, never a
+    log line nobody reads.
     """
     cost = estimate_cost(kind, duration_s=duration_s, chars=len(prompt), tier=tier)
     name = f"{kind}_{_slug(prompt + str(seed or 0))}"
+
+    # Trim before the mock branch, not after: the whole interaction contract —
+    # what gets sent, what gets dropped, what the user is told — has to be
+    # identical at zero spend, or MOCK_MEDIA stops being a rehearsal.
+    refs = [u for u in (image_urls or []) if u]
+    budget = config.ref_slots(kind, tier)
+    kept, over = refs[:budget], refs[budget:]
+    dropped: list[dict[str, str]] = [
+        {"url": u, "why": f"over the {budget}-slot reference budget for "
+                          f"{config.media_key(kind, tier)}"}
+        for u in over
+    ]
 
     if config.MOCK_MEDIA:
         import shutil as _sh
@@ -297,7 +341,7 @@ def generate(
             _mock_video(prompt, ratio, duration_s, dest)
         logger.info("mock %s generated (%s) — $0.00", kind, dest.name)
         return {"path": str(dest), "model": "mock", "cost": 0.0, "seed": seed, "mock": True,
-                "kind": out_kind}
+                "kind": out_kind, "refs_used": kept, "dropped_refs": dropped}
 
     order = _provider_order(kind)
     url = model = ""
@@ -305,12 +349,17 @@ def generate(
     for idx, provider in enumerate(order):
         try:
             if provider == "pixelbin":
-                url, model = _generate_pixelbin(
-                    kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_url=image_url)
+                url, model, by_provider = _generate_pixelbin(
+                    kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_urls=kept)
             else:
-                url, model = _generate_fal(
+                url, model, by_provider = _generate_fal(
                     kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier,
-                    voice=voice, image_url=image_url, seed=seed)
+                    voice=voice, image_urls=kept, seed=seed)
+            # The provider may refuse references the budget allowed — fal's
+            # video model seeds from one URL, its image path from none. That is
+            # a SECOND, different drop and it is reported the same way.
+            dropped += by_provider
+            kept = [u for u in kept if u not in {d["url"] for d in by_provider}]
             break
         except MediaError as exc:
             # A refused prompt is a real answer about the prompt. Asking a
@@ -343,9 +392,14 @@ def generate(
                 f"still at {url} — the spend is recorded so it is not invisible."
             ) from second
 
-    logger.info("%s generated via %s — est $%.2f", kind, model, cost)
+    if dropped:
+        logger.warning("%s: %d reference(s) dropped — %s", model, len(dropped),
+                       "; ".join(d["why"] for d in dropped))
+    logger.info("%s generated via %s — est $%.2f (%d ref%s)", kind, model, cost,
+                len(kept), "" if len(kept) == 1 else "s")
     return {"path": str(dest), "url": url, "model": model, "cost": cost, "seed": seed,
-            "mock": False, "fallback": bool(failures)}
+            "mock": False, "fallback": bool(failures),
+            "refs_used": kept, "dropped_refs": dropped}
 
 
 def _record_orphan_spend(kind: str, model: str, cost: float, url: str, prompt: str) -> None:
