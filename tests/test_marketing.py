@@ -3189,27 +3189,32 @@ def test_pixelbin_snaps_ratio_and_duration_into_the_model_enum():
 
 def test_per_stage_models_default_to_the_slot_they_already_used(monkeypatch):
     """A new dial, not a new behaviour: every stage falls through to the broad
-    slot it shared before, so an unset environment changes nothing. Six agents
-    on one PLANNER_MODEL meant paying planner rates to lint a shot board."""
-    import importlib
-    monkeypatch.delenv("PLOTLINE_MODEL_BOARD", raising=False)
-    monkeypatch.setenv("PLOTLINE_PLANNER_MODEL", "planner-x")
-    monkeypatch.setenv("PLOTLINE_INTAKE_MODEL", "intake-x")
-    monkeypatch.setenv("PLOTLINE_FEEDBACK_MODEL", "council-x")
-    fresh = importlib.reload(config)
-    try:
-        assert fresh.STAGE_MODELS["board"] == "planner-x"
-        assert fresh.STAGE_MODELS["options"] == "planner-x"
-        assert fresh.STAGE_MODELS["intake"] == "intake-x"
-        assert fresh.STAGE_MODELS["council"] == "council-x"
+    slot it shared before, so an unset key changes nothing.
 
-        # …and an explicit override wins for that stage ALONE
-        monkeypatch.setenv("PLOTLINE_MODEL_BOARD", "cheap-board")
-        fresh = importlib.reload(config)
-        assert fresh.STAGE_MODELS["board"] == "cheap-board"
-        assert fresh.STAGE_MODELS["options"] == "planner-x", "overriding one stage moved another"
-    finally:
-        importlib.reload(config)
+    Tests _stage_model() directly rather than reloading config: reloading
+    re-runs load_dotenv, so the assertion would read the developer's own .env
+    and pass or fail depending on whose machine it ran on. A test that consults
+    local configuration is not a test.
+    """
+    monkeypatch.delenv("PLOTLINE_MODEL_BOARD", raising=False)
+    assert config._stage_model("board", "planner-x") == "planner-x"
+    assert config._stage_model("options", "planner-x") == "planner-x"
+    assert config._stage_model("intake", "intake-x") == "intake-x"
+
+    # …and an explicit override wins for that stage ALONE
+    monkeypatch.setenv("PLOTLINE_MODEL_BOARD", "cheap-board")
+    assert config._stage_model("board", "planner-x") == "cheap-board"
+    assert config._stage_model("options", "planner-x") == "planner-x", (
+        "overriding one stage moved another")
+
+
+def test_every_llm_stage_has_a_model_slot():
+    """Two lists that must agree: a stage that calls an LLM but has no slot
+    silently inherits whatever the last edit left, which is how six agents
+    ended up sharing PLANNER_MODEL in the first place."""
+    called = {"intake", "brief", "options", "detail", "script", "board", "canon", "council"}
+    assert called <= set(config.STAGE_MODELS), (
+        f"no model slot for {sorted(called - set(config.STAGE_MODELS))}")
 
 
 def test_no_stage_model_leaks_into_the_public_api(monkeypatch):
