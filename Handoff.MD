@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `ed95581` (plotline-api) · `27c0ab8` (plotline-web)
+last-synced: `a915c9f` (plotline-api) · `50a96bd` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -10,6 +10,9 @@ last-synced: `ed95581` (plotline-api) · `27c0ab8` (plotline-web)
 Render autoDeploy is **off** on both services; nothing is pushed. `origin/master` is
 behind local. Both Render services are still RUNNING with real ANTHROPIC_API_KEY +
 FAL_KEY, publicly, **no auth** — see P0-2.
+Service ids (verified 2026-08-26, both `not_suspended`):
+`plotline-api` `srv-da4pufqfngtc73col7rg` → https://plotline-api-apyq.onrender.com ·
+`plotline-web` `srv-da4pujrl550s738l6uag` → https://plotline-web.onrender.com
 
 ## SPEC PRECEDENCE
 **v3** (`docs/v3-ENHANCEMENT-BRIEF.md` + `v3-ARTIFACT-SPEC.md` + `v3-COUNCIL-DOCTRINE.md`) >
@@ -94,10 +97,18 @@ of the four council calls, which is the main reason it exists.
 ## PENDING — start here
 - ✅ ~~P0-1 seed evidence~~ — `PLOTLINE_ALLOW_SEED_EVIDENCE=0` in `.env` (2026-08-25);
   `/health` reports `allow_seed_evidence: false`. Note `.env` is gitignored, so this is a
-  LOCAL fix — Render still needs the same change whenever it is next touched.
+  LOCAL fix — **Render still has `allow_seed_evidence: true`, confirmed live 2026-08-26.**
 - 🔴 **P0-2 Render live, real keys, no auth** — anyone with the URL spends real money.
-  RPN 224. Decide: suspend, add auth, or flip to mock. NOTE: flipping `MOCK_LLM=1` would
-  ALSO open `/api/agent-runs` publicly (P1-3) — the gate couples two unrelated concerns.
+  RPN 224. **Owner decided 2026-08-26: leave as-is for now.** Do not re-litigate; raise
+  only if it changes. Verified live that day against the public `/health`, unauthenticated,
+  HTTP 200 — the exposure is WORSE than "real keys": `mock_llm: false` with
+  **sonnet-4-6 on BOTH planner and feedback** (the expensive slots, not Haiku),
+  `media_mock: false` (**real fal media generation**), and `allow_seed_evidence: true`.
+  `plotline-web` is public too, so there is a working UI pointed at it — clickable, not
+  just curl-able. Options if revisited: suspend (seconds, reversible), add auth, or mock.
+  NOTE: flipping `MOCK_LLM=1` would ALSO open `/api/agent-runs` publicly (P1-3) — verified
+  in `app/main.py::_debug_enabled()`, which is `MOCK_LLM or PLOTLINE_DEBUG_OBSERVABILITY`;
+  that endpoint leaks full prompts and payloads, and mocking would not fix seed evidence.
 - ✅ ~~CHECKPOINTS~~ — done. Every graph node checks for a checkpoint before running and
   writes one after returning, so a node that raised leaves nothing and only a COMPLETE
   result is restored. `retry` resumes; a new rumination clears stale rows.
@@ -116,6 +127,12 @@ of the four council calls, which is the main reason it exists.
   only works from the thread page. Same step, two affordances.
 - 🤖 Dev DB is full of my QA campaigns ("Path A/B", "QA one image no claims", …). No delete
   route yet — clean directly if they bother you.
+- 🟡 **Loop.MD's Rung 1 command under-runs the suite by 12.** It says
+  `pytest tests/ -q`, but an explicit path OVERRIDES `pytest.ini`'s
+  `testpaths = tests rag/tests`, so it runs 148 and silently skips the whole `rag/tests`
+  suite. The floor of **160 is `.venv/bin/python -m pytest` with NO path argument.**
+  Same "one fact, two representations" species as the rest — pytest.ini and Loop.MD
+  disagree about what "the suite" is, and nothing compares them.
 
 ## VIDEO FLOW — RESOLVED by v3 (kept for the rationale)
 Items 1-3 (scenes/shots split, character plan, keyframe/motion split) landed as `ShotBoard`
@@ -150,6 +167,8 @@ scenes → shots → keyframes → video. Ours: options → templates → detail
 - 2026-08-25 — Confirming claims GRANTS permission to make them; it does NOT gate the start.
   Brand has no required field and is defaulted at `begin_rumination`
 - 2026-08-25 — Local only: Render autoDeploy off
+- 2026-08-26 — P0-2 deferred by owner: Render stays live, public, real keys. Logged so a
+  future session does not re-raise it as new; it is a known accepted risk, not an oversight
 
 **Session efficiency (2026-08-25):** 🎯 ~55% feature · 🔧 ~25% support · 🔁 ~20% rework
 (rework was self-inflicted: unpinned langgraph broke the Render build; unisolated LOG_DIR
