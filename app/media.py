@@ -324,7 +324,47 @@ def generate(
                            provider, order[idx + 1], exc)
 
     ext = {"image": "png", "video": "mp4", "audio": "mp3"}[kind]
-    dest = _download(url, config.ASSET_DIR / f"{name}.{ext}")
+    try:
+        dest = _download(url, config.ASSET_DIR / f"{name}.{ext}")
+    except Exception as exc:
+        # The provider has ALREADY generated and billed by this point. Losing
+        # the local copy must not also lose the RECORD of the spend, or the
+        # money becomes invisible: no asset, no generation_log row, nothing for
+        # a cost dispute to point at. One retry first — a 5 MB video over a
+        # proxy is the common case — then record the spend and say what
+        # happened, including the URL the render still lives at.
+        try:
+            dest = _download(url, config.ASSET_DIR / f"{name}.{ext}")
+        except Exception as second:
+            _record_orphan_spend(kind, model, cost, url, prompt)
+            raise MediaError(
+                f"{model} generated this {kind} and it was charged (~${cost:.2f}), but the file "
+                f"could not be downloaded after a retry ({type(second).__name__}). The render is "
+                f"still at {url} — the spend is recorded so it is not invisible."
+            ) from second
+
     logger.info("%s generated via %s — est $%.2f", kind, model, cost)
     return {"path": str(dest), "url": url, "model": model, "cost": cost, "seed": seed,
             "mock": False, "fallback": bool(failures)}
+
+
+def _record_orphan_spend(kind: str, model: str, cost: float, url: str, prompt: str) -> None:
+    """Log a render that was paid for but never landed locally.
+
+    Written from here rather than from the caller on purpose: the caller's
+    logging runs AFTER generate() returns, so an exception on the way out skips
+    it — which is exactly how a paid render became invisible. The thread comes
+    from the contextvar the runner already sets per worker.
+    """
+    try:
+        from app import store
+        from app.agents.runner import current_thread
+
+        store.log_generation(
+            current_thread.get(), None, f"{kind}_orphaned",
+            prompt=prompt[:500], model=model, cost=cost,
+        )
+        logger.error("orphaned %s spend ~$%.2f via %s — file never downloaded, url=%s",
+                     kind, cost, model, url)
+    except Exception:  # noqa: BLE001 — logging a loss must never mask the loss
+        logger.exception("could not even record the orphaned %s spend (~$%.2f)", kind, cost)

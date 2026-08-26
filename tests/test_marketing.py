@@ -3274,3 +3274,38 @@ def test_the_board_survives_a_restart_not_just_its_projection():
     assert after.get("board"), "the board did not survive; canon and keyframes would render nothing"
     assert after["board"]["shots"] == before["board"]["shots"]
     assert after.get("style_block"), "the style block rides the same payload and was dropped"
+
+
+def test_a_paid_render_whose_download_fails_is_still_recorded(monkeypatch, tmp_path):
+    """FMEA P0 (RPN 224). The provider generates and BILLS, then the file is
+    downloaded. A CDN hiccup between those two steps used to lose everything:
+    no asset, no generation_log row, no cost — money moved and nothing pointed
+    at it. The spend has to survive the failure that loses the file.
+    """
+    from app import media, store
+
+    monkeypatch.setattr(config, "MOCK_MEDIA", False)
+    monkeypatch.setattr(media, "_provider_order", lambda kind: ["fal"])
+    monkeypatch.setattr(media, "_generate_fal",
+                        lambda *a, **k: ("https://cdn.example/x.png", "fal:test-model"))
+
+    attempts = {"n": 0}
+    def always_fails(url, dest):
+        attempts["n"] += 1
+        raise OSError("connection reset")
+    monkeypatch.setattr(media, "_download", always_fails)
+
+    before = len(store.recent_generations(500))
+    with pytest.raises(media.MediaError) as exc:
+        media.generate("image", "a shoe on wet rock", ratio="9:16")
+
+    assert attempts["n"] == 2, "a 5MB file over a proxy deserves one retry before giving up"
+    message = str(exc.value)
+    assert "charged" in message and "https://cdn.example/x.png" in message, (
+        "the user must be told they were charged, and where the render still is")
+
+    rows = store.recent_generations(500)
+    assert len(rows) == before + 1, "the spend was not recorded — the money is invisible"
+    orphan = rows[0]
+    assert orphan["event"] == "image_orphaned"
+    assert orphan["cost"] > 0 and orphan["model"] == "fal:test-model"
