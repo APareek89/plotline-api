@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plotline v4 — UI/UX prototype</title>
+<style>
+/* ═══ DESIGN TOKENS ═══════════════════════════════════════════════════════
+   Dimensions measured off the reference recording (2820×1542 = 2× retina,
+   so every value below is logical px). Palette is BLUE + WHITE ONLY —
+   no red, green or amber anywhere, by owner decision.
+   Blocking states carry weight + icon + an explicit word instead of hue. */
+:root{
+  --bg:#0E1116; --surface:#141922; --surface-2:#1A212B; --raise:#212A36;
+  --line:#242D3A; --line-soft:#1B222C;
+  --text:#FFFFFF; --soft:#B9C2CE; --muted:#7B8797; --faint:#586373;
+  --blue:#4353FF; --blue-t:#A3AEFF; --blue-w:rgba(67,83,255,.13); --blue-b:rgba(67,83,255,.42);
+  --r:12px; --r-sm:8px; --r-lg:16px; --r-pill:999px;
+  --fs-h1:32px; --fs-sec:30px; --fs-body:15px; --fs-2:14px; --fs-sm:13px; --fs-lbl:11px;
+  --lh-body:24px;
+  --composer-h:99px; --ask-h:41px; --hdr-h:42px; --send:34px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:var(--fs-body);
+  line-height:var(--lh-body);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font:inherit;color:inherit;background:none;border:none;outline:none}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:#252E3B;border-radius:99px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ═══ PROTOTYPE CHROME — deliberately outside the product ═════════════════ */
+#chrome{position:fixed;inset:0 0 auto 0;height:52px;z-index:90;display:flex;align-items:center;
+  gap:14px;padding:0 16px;background:#080A0D;border-bottom:1px solid var(--line)}
+#chrome .tag{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);border:1px dashed #2C3644;border-radius:6px;padding:4px 8px;white-space:nowrap}
+.tbtn{width:32px;height:32px;border-radius:var(--r-sm);border:1px solid var(--line);
+  display:grid;place-items:center;font-size:13px;color:var(--soft);transition:.15s}
+.tbtn:hover{background:var(--surface-2);color:#fff}
+#play{width:auto;padding:0 16px;gap:8px;display:flex;align-items:center;background:var(--blue);
+  border-color:var(--blue);color:#fff;font-weight:600;font-size:var(--fs-sm)}
+#play:hover{filter:brightness(1.12)}
+#scrub{flex:1;-webkit-appearance:none;height:3px;border-radius:99px;background:#242D3A;min-width:80px}
+#scrub::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;
+  background:var(--blue);cursor:pointer}
+#stepLbl{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;min-width:196px}
+#speed{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:6px 8px;font-size:12px;color:var(--soft);cursor:pointer;outline:none}
+/* stage rail — proves the 13-stage agentic flow is untouched */
+#rail{position:fixed;top:52px;left:0;right:0;height:30px;z-index:89;display:flex;align-items:center;
+  gap:3px;padding:0 16px;background:#080A0D;border-bottom:1px solid var(--line);overflow-x:auto}
+#rail b{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);margin-right:6px;font-weight:500;white-space:nowrap}
+.stg{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--faint);padding:3px 7px;border-radius:5px;white-space:nowrap;transition:.2s}
+.stg.on{background:var(--blue);color:#fff}
+.stg.past{color:var(--blue-t);background:var(--blue-w)}
+
+#stage{position:fixed;top:82px;left:0;right:0;bottom:0;overflow:hidden}
+
+/* ═══ SCENE 1 — PROJECTS GRID ═════════════════════════════════════════════ */
+#projects{height:100%;overflow-y:auto;padding:34px 40px}
+.p-h1{font-size:var(--fs-h1);font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.p-sub{font-size:var(--fs-2);color:var(--muted);margin-top:6px}
+.p-top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+.p-search{display:flex;align-items:center;gap:9px;width:330px;height:40px;padding:0 14px;
+  border:1px solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--muted);
+  font-size:var(--fs-2)}
+.p-bar{display:flex;align-items:center;justify-content:space-between;margin:26px 0 22px;
+  border-bottom:1px solid var(--line-soft);padding-bottom:14px}
+.seg{display:flex;gap:4px}
+.seg button{padding:7px 15px;border-radius:var(--r-sm);font-size:var(--fs-2);color:var(--muted)}
+.seg button.on{background:var(--surface-2);color:#fff;font-weight:600}
+.sort{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);color:var(--muted)}
+.sort button{padding:6px 13px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:var(--fs-sm)}
+.sort button.on{background:var(--surface-2);color:#fff;border-color:#2F3A49}
+.p-lbl{font-size:var(--fs-2);font-weight:600;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:22px 20px}
+.card .thumb{aspect-ratio:16/10;border-radius:var(--r);border:1px solid var(--line);
+  background:var(--surface);display:grid;place-items:center;overflow:hidden;transition:.16s}
+.card:hover .thumb{border-color:var(--blue-b)}
+.card .meta{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:var(--fs-2)}
+.card .meta .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .meta .dots{color:var(--faint)}
+.folder{width:15px;height:12px;border-radius:2px 3px 3px 3px;background:var(--blue-t);
+  position:relative;flex-shrink:0;opacity:.85}
+.folder:before{content:"";position:absolute;top:-3px;left:0;width:6px;height:3px;
+  border-radius:2px 2px 0 0;background:var(--blue-t)}
+.newtile{border-style:dashed!important;border-color:#2C3644!important}
+.newtile span{font-size:26px;color:var(--muted);font-weight:200}
+.spark{font-size:22px;color:#39414F}
+/* CSS-only contact-sheet thumbnails — no real media in the prototype */
+.sheet{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);
+  width:100%;height:100%;gap:1px}
+.sheet i{position:relative;display:block;font-style:normal}
+.sheet i:after{content:attr(data-l);position:absolute;left:3px;top:2px;font-family:var(--mono);
+  font-size:7px;color:rgba(255,255,255,.72);letter-spacing:.04em}
+
+/* ═══ SCENE 2 — NAME MODAL ════════════════════════════════════════════════ */
+#modal{position:absolute;inset:0;background:rgba(6,8,11,.72);backdrop-filter:blur(3px);
+  display:grid;place-items:center;z-index:60}
+.mbox{width:436px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:26px;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+.mbox h2{font-size:20px;font-weight:650;letter-spacing:-.01em}
+.mbox p{font-size:var(--fs-sm);color:var(--muted);margin-top:5px;line-height:19px}
+.mfield{margin-top:20px;height:46px;border:1px solid var(--line);border-radius:var(--r);
+  background:var(--bg);display:flex;align-items:center;padding:0 14px;font-size:var(--fs-2)}
+.mfield.act{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-w)}
+.caret{display:inline-block;width:1.5px;height:17px;background:var(--blue-t);margin-left:1px;
+  animation:bl .9s steps(2) infinite;vertical-align:-3px}
+@keyframes bl{50%{opacity:0}}
+.mact{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+.btn{padding:9px 17px;border-radius:var(--r-sm);font-size:var(--fs-2);font-weight:600;
+  border:1px solid var(--line);color:var(--soft);transition:.14s}
+.btn:hover{background:var(--surface-2);color:#fff}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.pri:hover{filter:brightness(1.12);background:var(--blue)}
+.btn.ghost{border-color:transparent;color:var(--muted)}
+
+/* ═══ SCENE 3 — STUDIO (two panes) ════════════════════════════════════════ */
+#studio{display:flex;height:100%}
+.pane-l{flex:1 1 50%;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line)}
+.pane-r{flex:1 1 50%;display:flex;flex-direction:column;min-width:0;background:#0B0E13}
+.hdr{height:var(--hdr-h);flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 16px;
+  border-bottom:1px solid var(--line-soft)}
+.hdr .ttl{font-size:var(--fs-2);font-weight:650;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr .act{font-size:var(--fs-sm);color:var(--muted);display:flex;align-items:center;gap:5px}
+
+/* ── conversation ── */
+.chat{flex:1;overflow-y:auto;padding:22px 18px 8px;display:flex;flex-direction:column;gap:20px}
+.turn{max-width:100%;animation:rise .3s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.who{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.dot{width:17px;height:17px;border-radius:50%;background:var(--blue);flex-shrink:0;
+  display:grid;place-items:center}
+.dot:after{content:"";width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:4px 0 0 #fff}
+.who b{font-size:var(--fs-2);font-weight:650}
+.badge{font-size:var(--fs-lbl);padding:2px 7px;border-radius:5px;background:var(--blue-w);
+  color:var(--blue-t);font-weight:600;letter-spacing:.02em}
+.worked{font-size:var(--fs-sm);color:var(--muted);display:flex;align-items:center;gap:5px;
+  margin-bottom:8px;cursor:pointer}
+.worked:hover{color:var(--soft)}
+.worked u{text-decoration:none;border-bottom:1px dotted #39414F}
+.worked-body{margin:0 0 10px;padding:11px 13px;border-left:2px solid var(--line);
+  font-size:var(--fs-sm);color:var(--muted);line-height:20px;display:none}
+.worked-body.open{display:block}
+.worked-body code{font-family:var(--mono);font-size:11.5px;color:var(--blue-t)}
+.a-txt{font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text)}
+.a-txt p+p{margin-top:11px}
+.u-turn{display:flex;justify-content:flex-end}
+.u-turn>div{max-width:80%}
+.u-bub{background:var(--surface-2);border-radius:var(--r);padding:10px 15px;width:fit-content;
+  margin-left:auto;font-size:var(--fs-body);line-height:22px}
+.u-imgs{display:flex;gap:6px;margin-top:9px;justify-content:flex-end}
+.u-imgs i{width:44px;height:44px;border-radius:var(--r-sm);border:1px solid var(--line);display:block}
+/* labelled working line — never a bare spinner (invariant) */
+.work{display:flex;align-items:center;gap:9px;font-size:var(--fs-2);color:var(--muted)}
+.ring{width:13px;height:13px;border-radius:50%;border:1.5px solid #2B3542;border-top-color:var(--blue);
+  animation:sp .8s linear infinite;flex-shrink:0}
+@keyframes sp{to{transform:rotate(360deg)}}
+.work.done .ring{border:1.5px solid var(--blue-b);border-top-color:var(--blue-b);animation:none;
+  position:relative}
+.work.done .ring:after{content:"";position:absolute;inset:0;margin:auto;width:5px;height:5px;
+  border-radius:50%;background:var(--blue-t)}
+.fact{display:flex;align-items:center;gap:8px;font-size:var(--fs-2);color:var(--soft)}
+.fact:before{content:"";width:13px;height:13px;border-radius:50%;border:1.5px solid var(--blue-b);
+  flex-shrink:0;position:relative}
+
+/* ── composer + the ASK strip above it ── */
+.comp-wrap{flex-shrink:0;padding:0 18px 10px}
+.ask{border:1px solid var(--blue-b);background:var(--blue-w);border-radius:var(--r);
+  padding:13px 14px;margin-bottom:9px;animation:rise .26s ease-out}
+.ask-q{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  font-size:var(--fs-2);font-weight:600;min-height:calc(var(--ask-h) - 22px)}
+.ask-x{color:var(--muted);font-size:15px;line-height:1;padding:0 2px}
+.ask-opts{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+.opt{padding:7px 13px;border:1px solid var(--blue-b);border-radius:var(--r-pill);
+  font-size:var(--fs-sm);color:var(--blue-t);background:rgba(67,83,255,.07);transition:.14s}
+.opt:hover{background:var(--blue);color:#fff;border-color:var(--blue)}
+.opt.pick{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
+.opt.free{border-style:dashed;color:var(--muted);border-color:#3A4453;background:none}
+.ask-note{font-size:var(--fs-sm);color:var(--muted);margin-top:10px;line-height:19px}
+.ask-chk{display:flex;flex-direction:column;gap:8px;margin-top:11px}
+.chk{display:flex;align-items:center;gap:9px;font-size:var(--fs-2);color:var(--soft)}
+.chk i{width:15px;height:15px;border-radius:4px;border:1.5px solid #3A4453;flex-shrink:0;
+  display:grid;place-items:center;font-style:normal;font-size:10px;color:#fff}
+.chk.on i{background:var(--blue);border-color:var(--blue)}
+.chk.on i:after{content:"✓"}
+.chk.off{color:var(--faint);text-decoration:line-through;text-decoration-color:#3A4453}
+.composer{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);
+  min-height:var(--composer-h);display:flex;flex-direction:column;justify-content:space-between;
+  padding:13px 14px 11px}
+.composer .ph{font-size:var(--fs-body);color:var(--faint)}
+.comp-row{display:flex;align-items:center;justify-content:space-between;margin-top:auto}
+.comp-l{display:flex;gap:7px}
+.cbtn{width:28px;height:28px;border-radius:var(--r-sm);border:1px solid var(--line);
+  display:grid;place-items:center;color:var(--muted);font-size:14px}
+.comp-r{display:flex;align-items:center;gap:10px}
+.model{font-size:var(--fs-sm);color:var(--muted)}
+.send{width:var(--send);height:var(--send);border-radius:50%;background:var(--blue);
+  display:grid;place-items:center;color:#fff;font-size:13px}
+.disc{text-align:center;font-size:var(--fs-lbl);color:var(--faint);padding:7px 0 9px}
+
+/* ── artifact panel ── */
+.tabs{display:flex;gap:2px;padding:0 12px;flex-shrink:0;border-bottom:1px solid var(--line-soft)}
+.tab{padding:11px 14px;font-size:var(--fs-2);color:var(--faint);border-bottom:2px solid transparent;
+  display:flex;align-items:center;gap:7px;transition:.16s;position:relative;white-space:nowrap}
+.tab:hover{color:var(--soft)}
+.tab.on{color:#fff;font-weight:600;border-bottom-color:var(--blue)}
+.tab.live{color:var(--blue-t)}
+.tab .cnt{font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:4px;
+  background:var(--surface-2);color:var(--muted)}
+.tab.on .cnt{background:var(--blue-w);color:var(--blue-t)}
+.tab .pulse{width:6px;height:6px;border-radius:50%;background:var(--blue);
+  animation:pl 1.1s ease-in-out infinite}
+@keyframes pl{50%{opacity:.25}}
+.follow{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);
+  color:var(--blue-t);padding:0 4px}
+.follow i{width:6px;height:6px;border-radius:50%;background:var(--blue);animation:pl 1.4s infinite;
+  font-style:normal}
+.abody{flex:1;overflow-y:auto;padding:22px 20px 20px}
+.empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:9px;color:var(--faint);text-align:center;padding:0 40px}
+.empty b{font-size:var(--fs-2);color:var(--muted);font-weight:500}
+.empty small{font-size:var(--fs-sm);line-height:19px;max-width:290px}
+
+.art{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);
+  padding:17px 18px;margin-bottom:16px;animation:rise .32s ease-out}
+.art.new{border-color:var(--blue-b)}
+.art-h{display:flex;align-items:center;gap:9px;margin-bottom:3px}
+.art-h .k{font-family:var(--mono);font-size:var(--fs-lbl);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted)}
+.art-h .st{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.09em;
+  text-transform:uppercase;padding:3px 8px;border-radius:5px;background:var(--surface-2);color:var(--muted)}
+.art-h .st.ok{background:var(--blue-w);color:var(--blue-t)}
+.art-t{font-size:19px;font-weight:650;letter-spacing:-.01em;margin-bottom:13px;line-height:25px}
+.sec-h{font-size:var(--fs-sec);font-weight:400;letter-spacing:-.02em;padding-bottom:13px;
+  border-bottom:1px solid var(--line-soft);margin-bottom:15px}
+.dl{display:grid;grid-template-columns:112px 1fr;gap:9px 16px;font-size:var(--fs-2)}
+.dl dt{color:var(--muted);font-size:var(--fs-sm)}
+.dl dd{color:var(--text)}
+.hero{background:var(--surface-2);border-radius:var(--r-sm);padding:13px 15px;margin-bottom:14px}
+.hero .k{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:5px}
+.hero .v{font-size:17px;font-weight:600;line-height:24px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--r-pill);
+  background:var(--blue-w);color:var(--blue-t);font-size:var(--fs-sm);margin:3px 5px 0 0}
+.pill.mut{background:var(--surface-2);color:var(--muted)}
+.ref{display:flex;gap:9px;font-size:var(--fs-sm);color:var(--soft);line-height:19px;
+  border:1px solid var(--line-soft);border-radius:var(--r-sm);padding:9px 11px;margin-top:7px}
+.ref b{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--blue-t);
+  padding-top:3px;flex-shrink:0}
+.ref code{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.acts{display:flex;gap:9px;margin-top:15px;flex-wrap:wrap}
+.rows{display:flex;flex-direction:column;gap:1px;background:var(--line-soft);border:1px solid var(--line);
+  border-radius:var(--r-sm);overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:10px 13px;background:var(--surface);
+  font-size:var(--fs-2)}
+.row .n{font-family:var(--mono);font-size:11px;color:var(--faint);width:20px;flex-shrink:0}
+.row .b{flex:1;min-width:0}
+.row .b small{display:block;font-size:var(--fs-sm);color:var(--muted);line-height:18px;margin-top:2px}
+.row .chk2{font-family:var(--mono);font-size:10px;color:var(--blue-t);white-space:nowrap}
+.row .ed{font-size:var(--fs-sm);color:var(--faint)}
+.thumbs{display:grid;gap:9px}
+.thumbs.c3{grid-template-columns:repeat(3,1fr)}
+.thumbs.c4{grid-template-columns:repeat(4,1fr)}
+.th{border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;position:relative}
+.th .im{aspect-ratio:1;display:block}
+.th.v .im{aspect-ratio:9/16}
+.th .cap{padding:6px 8px;font-size:var(--fs-sm);color:var(--soft);border-top:1px solid var(--line-soft);
+  display:flex;align-items:center;justify-content:space-between;gap:6px}
+.th .cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.th .tick{font-family:var(--mono);font-size:9px;color:var(--blue-t);flex-shrink:0}
+.th.appr{border-color:var(--blue-b)}
+.th .badge2{position:absolute;top:6px;left:6px;font-family:var(--mono);font-size:8.5px;
+  letter-spacing:.08em;background:rgba(8,10,14,.78);color:#fff;padding:2px 6px;border-radius:4px}
+/* cost gate — always before generation, plus an explicit event (invariant) */
+.gate{border:1px solid var(--blue-b);background:var(--blue-w);border-radius:var(--r);
+  padding:15px 16px;margin-bottom:16px}
+.gate .g1{font-family:var(--mono);font-size:var(--fs-lbl);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--blue-t);margin-bottom:7px}
+.gate .g2{font-size:21px;font-weight:650;letter-spacing:-.01em}
+.gate .g3{font-size:var(--fs-sm);color:var(--soft);margin-top:6px;line-height:19px}
+.stopmark{display:inline-flex;align-items:center;gap:7px;font-weight:650}
+.stopmark:before{content:"■";font-size:9px;color:var(--blue-t)}
+.qc{display:flex;flex-direction:column;gap:1px;background:var(--line-soft);border:1px solid var(--line);
+  border-radius:var(--r-sm);overflow:hidden}
+.qc div{display:flex;align-items:center;gap:11px;padding:9px 13px;background:var(--surface);
+  font-size:var(--fs-2)}
+.qc .v{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  padding:2px 7px;border-radius:4px;margin-left:auto;flex-shrink:0}
+.qc .v.pass{background:var(--blue-w);color:var(--blue-t)}
+.qc .v.skip{background:var(--surface-2);color:var(--muted)}
+.qc .v.block{background:#fff;color:#0E1116;font-weight:700}
+.foot{flex-shrink:0;border-top:1px solid var(--line-soft);padding:11px 18px;display:flex;
+  align-items:center;gap:10px}
+.foot .s{font-size:var(--fs-2);font-weight:600;flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.foot .m{font-size:var(--fs-sm);color:var(--faint)}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="chrome">
+  <span class="tag">Prototype · not the product</span>
+  <button id="play">▶ Play</button>
+  <button class="tbtn" id="back" title="Step back">‹</button>
+  <button class="tbtn" id="fwd" title="Step forward">›</button>
+  <input type="range" id="scrub" min="0" value="0">
+  <span id="stepLbl"></span>
+  <select id="speed">
+    <option value="1">1×</option><option value="1.8" selected>1.8×</option>
+    <option value="3">3×</option><option value="6">6×</option>
+  </select>
+  <button class="tbtn" id="restart" title="Restart">↺</button>
+</div>
+<div id="rail"><b>stage</b></div>
+
+<div id="stage">
+  <!-- SCENE 1 -->
+  <section id="projects">
+    <div class="p-top">
+      <div>
+        <h1 class="p-h1">Campaigns</h1>
+        <p class="p-sub">Brief once. The agent builds the rest.</p>
+      </div>
+      <div class="p-search">⌕ Search campaigns…</div>
+    </div>
+    <div class="p-bar">
+      <div class="seg"><button class="on">Current</button><button>Archived</button></div>
+      <div class="sort"><span>Sort</span><button>Recent</button><button class="on">Newest</button></div>
+    </div>
+    <p class="p-lbl">My campaigns</p>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <!-- SCENE 2 -->
+  <div id="modal" class="hidden">
+    <div class="mbox">
+      <h2>Name your campaign</h2>
+      <p>One name, that's all. Everything else you'll tell the agent in the thread.</p>
+      <div class="mfield" id="mfield"><span id="mtxt"></span><span class="caret"></span></div>
+      <div class="mact">
+        <button class="btn ghost">Cancel</button>
+        <button class="btn pri" id="mgo">Create campaign</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENE 3 -->
+  <section id="studio" class="hidden">
+    <div class="pane-l">
+      <div class="hdr">
+        <div class="dot"></div>
+        <span class="ttl" id="cName">—</span>
+        <span class="act">Replay</span><span class="act">⋮</span>
+      </div>
+      <div class="chat" id="chat"></div>
+      <div class="comp-wrap">
+        <div id="askSlot"></div>
+        <div class="composer">
+          <div class="ph">Send a message…</div>
+          <div class="comp-row">
+            <div class="comp-l"><button class="cbtn">+</button><button class="cbtn">⌘</button></div>
+            <div class="comp-r"><span class="model">Plotline agent ⌄</span><span class="send">➤</span></div>
+          </div>
+        </div>
+        <div class="disc">The agent can be wrong. Every gate is yours to approve.</div>
+      </div>
+    </div>
+
+    <div class="pane-r">
+      <div class="hdr">
+        <span class="ttl" id="cName2">—</span>
+        <span class="follow" id="follow"><i></i> Following</span>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div class="abody" id="abody"></div>
+      <div class="foot">
+        <div class="dot"></div>
+        <span class="s" id="sum">—</span>
+        <span class="m" id="sumM"></span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Thumbnail helper — every "image" is CSS, so the prototype ships no media.
+   ═══════════════════════════════════════════════════════════════════════ */
+const G=(a,b,ang)=>`background:linear-gradient(${ang||135}deg,${a},${b})`;
+const SW=[["#2B3550","#4353FF"],["#1D2740","#3A4A8F"],["#243049","#5866D8"],["#1A2236","#2E3C6B"],
+          ["#2F3A55","#6D79E8"],["#151C2C","#39457A"]];
+const sw=i=>SW[i%SW.length];
+const tile=(i,l,ar)=>`<div class="th${ar==='v'?' v':''}"><span class="im" style="${G(...sw(i))}"></span>${l?`<span class="badge2">${l}</span>`:''}</div>`;
+
+/* ═══ SEED CAMPAIGNS for the grid ═══ */
+const SEED=[
+  {n:"Monsoon Drop",  s:[["CU",0],["WS",1],["MS",2],["OTS",3],["MCU",4],["ECU",5]]},
+  {n:"Trail Series",  s:null},
+  {n:"Festive Edit",  s:[["WS",2],["CU",5],["MS",1],["TWO",3],["GRP",0],["MCU",4]]},
+  {n:"Studio Basics", s:null},
+];
+document.getElementById('grid').innerHTML =
+  `<div class="card"><div class="thumb newtile"><span>+</span></div>
+     <div class="meta"><span class="nm" style="color:var(--soft)">New campaign</span></div></div>` +
+  SEED.map(c=>`<div class="card"><div class="thumb">${
+    c.s ? `<div class="sheet">${c.s.map(([l,i])=>`<i data-l="${l}" style="${G(...sw(i),120)}"></i>`).join('')}</div>`
+        : `<span class="spark">✦</span>`}</div>
+    <div class="meta"><span class="folder"></span><span class="nm">${c.n}</span><span class="dots">⋮</span></div>
+  </div>`).join('');
+
+/* ═══ TABS — five, mapped to our real artifact types ═══ */
+const TABS=[
+  {id:"brief",     lbl:"Brief",     hint:"campaign_brief · options · style_block"},
+  {id:"script",    lbl:"Script",    hint:"hook_rack · shot_board"},
+  {id:"cast",      lbl:"Cast",      hint:"canon_sheet ×4"},
+  {id:"keyframes", lbl:"Keyframes", hint:"keyframe_board — the hard gate"},
+  {id:"creative",  lbl:"Creative",  hint:"creative set · variant_matrix · qc_report · Ad Card"},
+];
+const STAGES=["name","brief","options","templates","script","board","canon","keyframes","generate","creative","qc","done"];
+
+/* ═══ ARTIFACT RENDERERS ═══ */
+const A={
+intake:()=>`<div class="art"><div class="art-h"><span class="k">intake</span>
+  <span class="st">awaiting you</span></div>
+  <div class="art-t">Four things and I can start</div>
+  <div class="rows">
+    <div class="row"><span class="n">01</span><div class="b">Product images<small>Drop them in the composer — I read them, I don't guess.</small></div><span class="ed">optional</span></div>
+    <div class="row"><span class="n">02</span><div class="b">What we're making<small>One line is enough.</small></div><span class="ed">needed</span></div>
+    <div class="row"><span class="n">03</span><div class="b">Where it runs<small>Sets ratio and duration.</small></div><span class="ed">needed</span></div>
+    <div class="row"><span class="n">04</span><div class="b">Who it's for<small>Drives hook and pacing.</small></div><span class="ed">needed</span></div>
+  </div>
+  <div class="ask-note">Answer in any order, or ignore this and just talk — I'll ask for what's missing.</div></div>`,
+
+brief:()=>`<div class="art new"><div class="art-h"><span class="k">campaign_brief</span>
+  <span class="st ok">free gate</span></div>
+  <div class="hero"><span class="k">single message</span>
+    <span class="v">The trail is the proving ground — not the showroom.</span></div>
+  <dl class="dl">
+    <dt>Format</dt><dd>Single video · Instagram Reels</dd>
+    <dt>Ratio</dt><dd>9:16</dd>
+    <dt>Duration</dt><dd>12s · hook must land by 2.0s</dd>
+    <dt>Audience</dt><dd>Young trail runners, 18–30</dd>
+    <dt>Product</dt><dd>Speedcross 6 — teal heel, orange mesh, ENERGY BLADE midsole</dd>
+    <dt>Approved</dt><dd><span class="pill">waterproof</span><span class="pill">ENERGY BLADE midsole</span></dd>
+    <dt>Banned</dt><dd><span class="pill mut">18% lighter — unconfirmed</span></dd>
+  </dl>
+  <div class="acts"><button class="btn pri">Approve brief</button><button class="btn">Regenerate</button><button class="btn">Edit</button></div></div>`,
+
+options:()=>`<div class="art new"><div class="art-h"><span class="k">options</span>
+  <span class="st">3 · reviewed</span></div>
+  ${[["First Light","Runner laces up in the dark; first step onto wet rock as the sun clears the ridge. The shoe is only ever shown doing its job.","A1 — visible proof beats adjectives"],
+     ["The Descent","One unbroken shot down a scree slope, camera locked to the midsole. The grip is the whole argument.","A2 — single-mechanic demos hold to the end"],
+     ["No Road Here","Cuts between road-shoe hesitation and trail-shoe commitment at the same trailhead.","A3 — contrast frames the category"]]
+   .map(([t,d,r],i)=>`<div style="padding:13px 0;${i?'border-top:1px solid var(--line-soft)':''}">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--faint)">0${i+1}</span>
+        <b style="font-size:15.5px;font-weight:650">${t}</b></div>
+      <p style="font-size:var(--fs-2);color:var(--soft);line-height:21px;margin:6px 0 0">${d}</p>
+      <div class="ref"><b>REF</b><span>${r} <code>[asset:A${170+i}]</code></span></div>
+      <div class="acts"><button class="btn pri">Approve</button><button class="btn">Regenerate</button></div>
+    </div>`).join('')}</div>`,
+
+style:()=>`<div class="art new"><div class="art-h"><span class="k">style_block</span>
+  <span class="st">editable · used verbatim</span></div>
+  <div class="art-t">Style block</div>
+  <div class="rows">${[["Look","Overcast dawn, low contrast, cold blue shadows"],
+    ["Camera","Handheld, 35mm, chest height, never static"],["Motion","Follow and settle — no whip pans"],
+    ["Palette","Slate, wet rock, one teal accent"],["Grade","Filmic, lifted blacks, no crush"],
+    ["Never","Studio light · slow motion · lens flare"]]
+    .map(([k,v])=>`<div class="row"><div class="b" style="display:flex;gap:14px">
+      <span style="width:64px;color:var(--muted);font-size:var(--fs-sm);flex-shrink:0">${k}</span>
+      <span>${v}</span></div><span class="ed">edit</span></div>`).join('')}</div>
+  <div class="acts"><button class="btn">Copy block</button></div></div>`,
+
+hooks:()=>`<div class="art new"><div class="art-h"><span class="k">hook_rack</span>
+  <span class="st ok">W1–W3 pass</span></div>
+  <div class="art-t">Hooks</div>
+  <div class="rows">${[["“The road ends. Keep going.”",7,2.4],["“Grip is not a feature. It's the floor.”",8,2.8],["“Built for where the map stops.”",6,2.0]]
+    .map(([t,w,s],i)=>`<div class="row"><span class="n">0${i+1}</span>
+      <div class="b">${t}<small>${w} words · needs ≥ ${s.toFixed(1)}s to read</small></div>
+      <span class="chk2">W1 ✓</span></div>`).join('')}</div>
+  <div class="ask-note">The threshold and its arithmetic are injected from the same constant the lint reads — never hand-copied.</div></div>`,
+
+board:()=>`<div class="art new"><div class="art-h"><span class="k">shot_board</span>
+  <span class="st ok">B1–B4 pass</span></div>
+  <div class="art-t">Shot board · 4 shots · 12s</div>
+  <div class="rows">${[["Laces pulled tight in half-dark","CU",2.5],["First step onto wet rock","MCU",3.0],["Descent, camera on the midsole","WS",4.0],["Ridge line, runner small in frame","WS",2.5]]
+    .map(([d,f,s],i)=>`<div class="row"><span class="n">0${i+1}</span>
+      <div class="b">${d}<small>${f} · ${s.toFixed(1)}s · 1 reference slot</small></div>
+      <span class="chk2">B3 ✓</span></div>`).join('')}</div>
+  <div class="ask-note">The board is the source of truth. Detail is its one-way projection.</div></div>`,
+
+canon:()=>`<div class="art new"><div class="art-h"><span class="k">canon_sheet</span>
+  <span class="st">4 views · locked</span></div>
+  <div class="art-t">Cast &amp; canon</div>
+  ${[["Runner","Front · 3/4 · Profile · Back"],["Product","Lateral · Sole · Heel · Detail"],
+     ["Environment","Ridge · Scree · Treeline · Stream"],["Voice","Terse · Low · Unhurried · Dry"]]
+   .map(([t,v],i)=>`<div style="margin-bottom:14px">
+     <div style="display:flex;align-items:baseline;gap:9px;margin-bottom:8px">
+       <b style="font-size:var(--fs-2);font-weight:650">${t}</b>
+       <span style="font-size:var(--fs-sm);color:var(--muted)">${v}</span></div>
+     <div class="thumbs c4">${v.split(' · ').map((l,j)=>tile(i*2+j,l)).join('')}</div></div>`).join('')}
+  <div class="acts"><button class="btn pri">Lock canon</button><button class="btn">Save to My Brand</button></div></div>`,
+
+gateK:()=>`<div class="gate"><div class="g1">cost — before anything is made</div>
+  <div class="g2">6 keyframes · 12 credits</div>
+  <div class="g3">Nothing is generated until you press the button. No setting removes this gate.</div>
+  <div class="acts"><button class="btn pri">Generate keyframes — 12 credits</button><button class="btn">Change count</button></div></div>`,
+
+keyf:()=>`<div class="art new"><div class="art-h"><span class="k">keyframe_board</span>
+  <span class="st">hard gate</span></div>
+  <div class="art-t"><span class="stopmark">No video until every keyframe is approved</span></div>
+  <div class="thumbs c3">${[["01 CU",1],["02 MCU",1],["03 WS",2],["04 WS",3],["05 CU",3],["06 WS",4]]
+    .map(([l,shot],i)=>`<div class="th appr">
+      <span class="im" style="${G(...sw(i))}"></span>
+      <span class="badge2">${l}</span>
+      <span class="cap"><span>Shot ${shot}</span><span class="tick">approved</span></span>
+    </div>`).join('')}</div>
+  <div class="acts"><button class="btn pri">All six approved — continue</button><button class="btn">Re-roll one</button></div></div>`,
+
+gateG:()=>`<div class="gate"><div class="g1">cost — before anything is made</div>
+  <div class="g2">3 variants · 45 credits</div>
+  <div class="g3">Control · hook swap · copy angle. Per-asset re-roll only — never a batch redo.</div>
+  <div class="acts"><button class="btn pri">Generate — 45 credits</button><button class="btn">Single, not variants</button></div></div>`,
+
+creative:()=>`<div class="art new"><div class="art-h"><span class="k">creative_set</span>
+  <span class="st">3 takes</span></div>
+  <div class="thumbs c3">${["control","hook swap","copy angle"].map((l,i)=>
+    `<div class="th v"><span class="im" style="${G(...sw(i+2),160)}"></span>
+     <span class="badge2">${l}</span>
+     <span class="cap"><span>Take ${i+1}</span><span class="tick">12s</span></span></div>`).join('')}</div>
+  <div class="ask-note" style="margin-bottom:9px">Reject with a cause — the cause is what teaches the next take.</div>
+  <div class="acts">${["off-brief","wrong cast","bad motion","claim risk","just weak"]
+    .map(c=>`<button class="btn" style="font-size:var(--fs-sm);padding:6px 12px">${c}</button>`).join('')}</div>
+  <div class="acts"><button class="btn pri">Accept take 1</button><button class="btn">Re-roll take 3</button></div></div>`,
+
+qc:()=>`<div class="art new"><div class="art-h"><span class="k">qc_report</span>
+  <span class="st">hold — 1 blocking</span></div>
+  <div class="art-t">QC</div>
+  <div class="qc">
+    <div><span>Claims map to confirmed list</span><span class="v pass">pass</span></div>
+    <div><span>Banned word in final copy</span><span class="v block">blocking</span></div>
+    <div><span>Ratio and duration match brief</span><span class="v pass">pass</span></div>
+    <div><span>Music rights cleared</span><span class="v skip">not run</span></div>
+    <div><span>Talent release on file</span><span class="v skip">n/a</span></div>
+  </div>
+  <div class="ask-note"><b>“18% lighter” reached the final copy.</b> You didn't confirm it, so it's a kill flag — delivery is held until it's cut or confirmed. A check that never ran says <b>not run</b>, never <b>pass</b>.</div>
+  <div class="acts"><button class="btn pri">Cut the claim</button><button class="btn">Confirm it instead</button></div></div>`,
+
+done:()=>`<div class="art new"><div class="art-h"><span class="k">ad_card</span>
+  <span class="st ok">delivered</span></div>
+  <div class="art-t">Trail Runner Launch — 01</div>
+  <div class="thumbs c3" style="margin-bottom:14px">${[0,1,2].map(i=>
+    `<div class="th v"><span class="im" style="${G(...sw(i+2),160)}"></span></div>`).join('')}</div>
+  <dl class="dl"><dt>Delivered</dt><dd>3 takes · 9:16 · 12s</dd>
+    <dt>Credits</dt><dd>57 quoted · 57 spent · reconciled</dd>
+    <dt>Audit</dt><dd>generation_log — every call, every retry</dd></dl>
+  <div class="acts"><button class="btn pri">Download set</button><button class="btn">Open audit</button></div></div>`,
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TIMELINE — the whole campaign, as data. Every step is idempotent so the
+   scrubber can rebuild any position from zero.
+   ═══════════════════════════════════════════════════════════════════════ */
+const T=[
+ {l:"Campaigns — the grid",              scene:"projects", stage:"name"},
+ {l:"New campaign → name modal",         scene:"modal",    type:"name", txt:""},
+ {l:"Typing the name",                   scene:"modal",    type:"name", txt:"Trail Runner Launch"},
+ {l:"Created — the studio opens",        scene:"studio",   stage:"brief", name:"Trail Runner Launch",
+    agent:"Tell me what we're making and who it's for. Drop product images if you have them.",
+    art:{tab:"brief", k:"intake"}, sum:"New campaign — nothing known yet."},
+ {l:"User briefs in one message",        user:"Ad for our new trail running shoe, launching next month.", imgs:2},
+ {l:"Reading the attachments",           work:"Reading your two images…"},
+ {l:"Web search — enrichment",           work:"Searching the web for the product…"},
+ {l:"Agent names what it found",         workDone:["Read 2 images","Searched the web · 3 sources"],
+    agent:"That's a Salomon Speedcross 6 — teal heel, orange mesh, ENERGY BLADE midsole. More mountain than billboard.",
+    worked:"Matched your images against 3 sources.<br><code>salomon.com/speedcross-6</code> · <code>runnersworld.com</code> · <code>irunfar.com</code><br>Colourway and midsole name are quoted from the manufacturer page, not inferred.",
+    sum:"Anand wants a trail-shoe ad."},
+ {l:"ASK — one question, with options",  ask:{q:"Where does this run?", opts:["Instagram Reels","YouTube Shorts","TikTok"], free:true}},
+ {l:"User picks Reels",                  pick:0, user:"Instagram Reels"},
+ {l:"Agent locks the format",            fact:"Reels — 9:16, hook by 2.0s.",
+    agent:"Reels it is. Who's it for?", sum:"Anand wants an Instagram Reels trail-shoe ad."},
+ {l:"ASK — audience",                    ask:{q:"Who's it for?", opts:["Young trail runners","Weekend hikers","Ultra athletes"], free:true}},
+ {l:"User picks young runners",          pick:0, user:"Young trail runners"},
+ {l:"Extracting claims",                 work:"Reading your description for claims…"},
+ {l:"ASK — claims (compliance gate)",    stage:"brief",
+    ask:{q:"Three claims found. Which may I use?", chk:[["waterproof",1],["ENERGY BLADE midsole",1],["18% lighter",0]],
+         note:"Anything you don't confirm becomes a kill flag at QC — I won't quietly drop it. Confirming an empty list is allowed."}},
+ {l:"User confirms two, rejects one",    user:"First two are fine. Drop the 18%.",
+    fact:"2 claims approved · 1 banned."},
+ {l:"Brief built → tab switches",        stage:"brief", work:"Writing the brief…",
+    art:{tab:"brief", k:"brief"}, sum:"Reels · 9:16 · young trail runners.",
+    agent:"Brief's ready. It locks format and claims — nothing downstream can re-decide them."},
+ {l:"Approved → rumination runs",        stage:"options", approve:true,
+    workDone:["Brief approved"], work:"Planning → reviewing → refining…"},
+ {l:"Three options land",                stage:"options", art:{tab:"brief", k:"options"},
+    agent:"Three routes. Each one earns its claim on screen.", sum:"3 options on the table."},
+ {l:"Style block — editable",            stage:"templates", art:{tab:"brief", k:"style"},
+    agent:"Option one approved. Here's the style block it implies — edit any row, it's used verbatim."},
+ {l:"Tab auto-switches → Script",        stage:"script", tab:"script", work:"Writing hooks…"},
+ {l:"Hook rack + the w/s lint",          stage:"script", art:{tab:"script", k:"hooks"},
+    agent:"Three hooks, all readable in the time they have.", sum:"Hooks written."},
+ {l:"Shot board",                        stage:"board", art:{tab:"script", k:"board"},
+    agent:"Four shots, twelve seconds. The board is what everything downstream reads."},
+ {l:"Tab auto-switches → Cast",          stage:"canon", tab:"cast", work:"Rendering canon views…"},
+ {l:"Canon sheets — 4 views each",       stage:"canon", art:{tab:"cast", k:"canon"},
+    agent:"Cast, product, place and voice — locked so every frame agrees.", sum:"Canon locked."},
+ {l:"Tab auto-switches → Keyframes",     stage:"keyframes", tab:"keyframes"},
+ {l:"COST GATE — shown before making",   stage:"keyframes", art:{tab:"keyframes", k:"gateK"},
+    agent:"Six stills, twelve credits. Nothing is made until you say."},
+ {l:"Keyframes — the hard gate",         stage:"keyframes", work:"Rendering 6 stills…",
+    art:{tab:"keyframes", k:"keyf"}, sum:"6 keyframes awaiting approval."},
+ {l:"All six approved",                  approve:true, fact:"6 of 6 approved — motion unlocked.",
+    sum:"Keyframes approved."},
+ {l:"Tab auto-switches → Creative",      stage:"generate", tab:"creative"},
+ {l:"COST GATE — variants",              stage:"generate", art:{tab:"creative", k:"gateG"},
+    agent:"Three variants, forty-five credits. Or one, if you'd rather."},
+ {l:"Takes render",                      stage:"creative", work:"Generating 3 takes…",
+    art:{tab:"creative", k:"creative"}, agent:"Three takes. Reject with a cause and the cause feeds the next one.",
+    sum:"3 takes generated."},
+ {l:"QC holds delivery — honestly",      stage:"qc", art:{tab:"creative", k:"qc"},
+    agent:"One blocking finding. The banned claim reached the final copy.",
+    sum:"QC holding on 1 blocking finding."},
+ {l:"Cut the claim → delivered",         stage:"done", art:{tab:"creative", k:"done"},
+    agent:"Cut and re-checked. Ad Card assembled, credits reconciled.",
+    sum:"Delivered — 3 takes, 57 credits."},
+];
+
+/* ═══ STATE + RENDER ═══ */
+let S, i=-1, playing=false, timer=null;
+const $=id=>document.getElementById(id);
+const reset=()=>S={scene:"projects",stage:"name",name:"",nameTxt:"",msgs:[],ask:null,tab:"brief",
+  arts:{brief:[],script:[],cast:[],keyframes:[],creative:[]},sum:"—",live:null};
+
+function apply(s){
+  if(s.scene)S.scene=s.scene;
+  if(s.stage)S.stage=s.stage;
+  if(s.name)S.name=s.name;
+  if(s.type==="name")S.nameTxt=s.txt;
+  if(s.workDone)S.msgs.filter(m=>m.t==="work").forEach(m=>m.done=true);
+  if(s.work){S.msgs.push({t:"work",x:s.work});S.live=s.work;}
+  if(s.agent){S.msgs.filter(m=>m.t==="work").forEach(m=>m.done=true);S.live=null;
+              S.msgs.push({t:"agent",x:s.agent,w:s.worked});}
+  if(s.fact)S.msgs.push({t:"fact",x:s.fact});
+  if(s.user){if(S.ask)S.ask=null;S.msgs.push({t:"user",x:s.user,imgs:s.imgs});}
+  if(s.ask)S.ask={...s.ask,pick:null};
+  if(s.pick!=null&&S.ask)S.ask.pick=s.pick;
+  if(s.tab)S.tab=s.tab;
+  if(s.art){const{tab,k}=s.art;if(!S.arts[tab].includes(k))S.arts[tab].push(k);S.tab=tab;}
+  if(s.sum)S.sum=s.sum;
+}
+function goto(n){
+  reset(); n=Math.max(0,Math.min(T.length-1,n));
+  for(let k=0;k<=n;k++)apply(T[k]);
+  i=n; render();
+}
+function render(){
+  // scenes
+  $('projects').classList.toggle('hidden',S.scene!=="projects");
+  $('modal').classList.toggle('hidden',S.scene!=="modal");
+  $('studio').classList.toggle('hidden',S.scene!=="studio");
+  $('mtxt').textContent=S.nameTxt;
+  $('mfield').classList.toggle('act',!!S.nameTxt);
+  $('cName').textContent=S.name||"—"; $('cName2').textContent=S.name||"—";
+  // stage rail
+  const si=STAGES.indexOf(S.stage);
+  $('rail').innerHTML='<b>stage</b>'+STAGES.map((s,k)=>
+    `<span class="stg ${k===si?'on':k<si?'past':''}">${s}</span>`).join('');
+  // chat
+  $('chat').innerHTML=S.msgs.map(m=>{
+    if(m.t==="work")return `<div class="turn"><div class="work${m.done?' done':''}">
+      <span class="ring"></span><span>${m.x}</span></div></div>`;
+    if(m.t==="fact")return `<div class="turn"><div class="fact">${m.x}</div></div>`;
+    if(m.t==="user")return `<div class="turn u-turn"><div><div class="u-bub">${m.x}</div>${
+      m.imgs?`<div class="u-imgs">${[...Array(m.imgs)].map((_,j)=>
+        `<i style="${G(...sw(j+1))}"></i>`).join('')}</div>`:''}</div></div>`;
+    return `<div class="turn"><div class="who"><span class="dot"></span><b>Plotline</b>
+      <span class="badge">agent</span></div>
+      ${m.w?`<div class="worked" onclick="this.nextElementSibling.classList.toggle('open')">
+             <u>Worked briefly</u> ›</div><div class="worked-body">${m.w}</div>`:''}
+      <div class="a-txt"><p>${m.x}</p></div></div>`;
+  }).join('');
+  $('chat').scrollTop=$('chat').scrollHeight;
+  // ask strip
+  const a=S.ask;
+  $('askSlot').innerHTML=!a?'':`<div class="ask">
+    <div class="ask-q"><span>${a.q}</span><span class="ask-x">✕</span></div>
+    ${a.opts?`<div class="ask-opts">${a.opts.map((o,k)=>
+        `<button class="opt${a.pick===k?' pick':''}">${o}</button>`).join('')}
+        ${a.free?'<button class="opt free">or type your own…</button>':''}</div>`:''}
+    ${a.chk?`<div class="ask-chk">${a.chk.map(([t,on])=>
+        `<label class="chk ${on?'on':'off'}"><i></i>${t}</label>`).join('')}</div>`:''}
+    ${a.note?`<div class="ask-note">${a.note}</div>`:''}</div>`;
+  // tabs
+  $('tabs').innerHTML=TABS.map(t=>{
+    const n=S.arts[t.id].length, on=S.tab===t.id, live=on&&S.live;
+    return `<button class="tab ${on?'on':''} ${live?'live':''}" data-t="${t.id}" title="${t.hint}">
+      ${live?'<span class="pulse"></span>':''}${t.lbl}${n?`<span class="cnt">${n}</span>`:''}</button>`;
+  }).join('');
+  $('follow').classList.toggle('hidden',S.scene!=="studio");
+  // artifacts
+  const list=S.arts[S.tab];
+  $('abody').innerHTML=list.length?list.map(k=>A[k]()).join(''):
+    `<div class="empty"><b>Nothing here yet</b>
+     <small>${TABS.find(t=>t.id===S.tab).hint.replace(/_/g,'_')} — the agent fills this tab and switches to it the moment it has something.</small></div>`;
+  // footer + transport
+  $('sum').textContent=S.sum; $('sumM').textContent=S.live?"working…":"";
+  $('scrub').max=T.length-1; $('scrub').value=Math.max(0,i);
+  $('stepLbl').textContent=`${String(Math.max(0,i)+1).padStart(2,'0')}/${T.length} · ${T[Math.max(0,i)].l}`;
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest('.tab'); if(t){S.tab=t.dataset.t;render();}
+});
+
+/* ═══ TRANSPORT ═══ */
+const dur=()=>{const s=T[i]||{};let d=1150;
+  if(s.work)d=1500; if(s.type==="name")d=900; if(s.ask)d=1900; if(s.art)d=2100;
+  return d/parseFloat($('speed').value);};
+function step(){ if(i>=T.length-1){stop();return;} goto(i+1); if(playing)timer=setTimeout(step,dur()); }
+function play(){ if(i>=T.length-1)goto(0); playing=true; $('play').innerHTML="❚❚ Pause"; timer=setTimeout(step,300); }
+function stop(){ playing=false; $('play').innerHTML="▶ Play"; clearTimeout(timer); }
+$('play').onclick=()=>playing?stop():play();
+$('fwd').onclick=()=>{stop();goto(i+1);};
+$('back').onclick=()=>{stop();goto(i-1);};
+$('restart').onclick=()=>{stop();goto(0);};
+$('scrub').oninput=e=>{stop();goto(+e.target.value);};
+document.addEventListener('keydown',e=>{
+  if(e.key===" "){e.preventDefault();playing?stop():play();}
+  if(e.key==="ArrowRight"){stop();goto(i+1);} if(e.key==="ArrowLeft"){stop();goto(i-1);}
+});
+goto(0);
+</script>
+</body>
+</html>
