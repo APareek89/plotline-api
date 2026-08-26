@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `e588592` (plotline-api) · `9600150` (plotline-web)
+last-synced: `90abec5` (plotline-api) · `2797e3d` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -68,7 +68,7 @@ in full detail. **167 tests green** (floor was 83).
 
 ## v5 — IN FLIGHT (`docs/v5-MASTER-PROMPT.md` + the owner's addendum)
 Seven stages, a Code QA gate after each, Stage 7 (paid) gated on a morning go-ahead.
-Owner's visual target is `~/Documents/Reference material/`. **Floor: 187 tests.**
+Owner's visual target is `~/Documents/Reference material/`. **Floor: 190 tests.**
 
 - ✅ **Stage 0** — 183 tests green at `7a806ce`, typecheck clean, `MOCK_MEDIA=1`,
   `/observability` renders both lenses (agents 300 · media 51 · $1.52 lifetime).
@@ -79,14 +79,27 @@ Owner's visual target is `~/Documents/Reference material/`. **Floor: 187 tests.*
   policing a capacity the client could not reach since v3. `config.media_key()` /
   `config.ref_slots()` are now the one resolver both sides read; do not add a second
   cap in the client. 187 tests.
-- ⏭ **Stage 2 next** — one sheet per canon kind, not one render per view. **Blocked on
-  one owner fact:** does a higher `output_resolution` cost more PixelBin credits? If
-  not, a full 8-view sheet and a single angle both cost 1 credit and the addendum's
-  "assume the cheap option" has no cheap option to assume.
-- ⚠️ Owner addendum supersedes the master prompt on Stage 2: **do not ask the angle
-  question.** Assume forward, state the upgrade cost, correct at the gate — same
-  principle as `MAX_INTAKE_ASKS`. Stage 6's walk line still says "angle choice"; it
-  is wrong.
+- ✅ **Stage 2 — reference sheets** (`90abec5` + web `2797e3d`). ONE labelled sheet per
+  canon kind, not one render per view. Layout first, negatives second; `locks` and
+  `risk_notes` injected from campaign data, never restated. Owner decision: sheets
+  render at **1K** (`config.IMAGE_RESOLUTION_DEFAULT`) on the FINAL tier — draft is
+  nanoBanana v1, which declares no output_resolution and cannot make legible panel
+  labels. **No angle question** (owner addendum); the gate states the resolution and
+  the saving, and offers a priced 2K `resheet_canon` that drops the library copy first
+  so an upgrade cannot re-bill the same sheet. Coverage now means COMPOSED, not
+  verified — the chip reads "N views in one sheet" and the card shows the image.
+  190 tests.
+- ⏭ **Stage 3 next** — bind the approved sheet's `sheet_url` into every keyframe render
+  for shots that reference its canon id. Both halves it needs now exist.
+- 🔴 **MOCK_LLM=1 cannot complete an intake** — found driving Stage 2. `mock_campaign_intake`
+  never learned `assume_mode`, and the assume pass sends `message: ""`, so the mock
+  returns the context unchanged; `_assume_and_proceed` then offers **Start**
+  unconditionally and Start refuses ("Not ready yet"). The free rung of the loop
+  therefore reaches no stage past intake, and every zero-spend QA becomes a paid one.
+  Point two bites in REAL mode too: a model that under-fills in assume mode gives the
+  same dead-end CTA. NOT fixed — the fix is the owner's call. See Learning.MD.
+- ⚠️ Stage 6's walk line still says "canon (sheets, angle choice)" — that choice is
+  gone; the line is wrong.
 - ⚠️ QA gate now also requires: **type like a person** — 3+ short fragments through any
   conversational stage before calling it done, never one well-formed sentence.
 
@@ -122,7 +135,7 @@ of the four council calls, which is the main reason it exists.
 - ✅ Shipped earlier: v2 verified end-to-end on real models + real fal (Ad Card
   `ad_faa4f000b5` LIVE, credits reconciled); pre-pivot app deleted (−4.8k lines);
   rumination on LangGraph; observability surface. See git log + Learning.MD.
-- ✅ **187 tests pass** (floor was 83; 183 before Stage 1). Run `.venv/bin/python -m pytest` with **NO path
+- ✅ **190 tests pass** (floor was 83; 183 before v5). Run `.venv/bin/python -m pytest` with **NO path
   argument** — passing `tests/` overrides `pytest.ini`'s `testpaths = tests rag/tests`
   and silently skips 12. `tests/test_marketing.py` holds the acceptance floor: never
   weaken one; re-point only when an INVARIANT changed by owner decision, and say so.
