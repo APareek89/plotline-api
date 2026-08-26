@@ -3332,13 +3332,15 @@ def _keyframes_turn(thread_id: str, campaign_id: str) -> None:
 
         ratio = (ws.get("brief") or {}).get("aspect_ratios", ["9:16"])[0]
         frames: list[dict[str, Any]] = []
+        unusable: list[str] = []
         for shot in shots:
-            asset = _render_keyframe(thread_id, shot, ratio)
+            asset = _render_keyframe(thread_id, shot, ratio, ws)
+            unusable.extend(asset["dropped"])
             frames.append({
                 "shot_slot": shot["slot"], "asset_id": asset["asset_id"],
                 "picked_from": policy.keyframes_per_shot,
-                "refs_used": (shot.get("cast_refs") or []) + (shot.get("product_refs") or [])
-                             + (shot.get("env_refs") or []),
+                # what CONDITIONED the frame, not what the board asked for
+                "refs_used": asset["refs_used"],
                 # Unwired detectors report `na`, never `pass` — a check nobody
                 # ran must not render as a check that succeeded.
                 "checks": {c: "na" for c in KEYFRAME_CHECKS},
@@ -3348,6 +3350,7 @@ def _keyframes_turn(thread_id: str, campaign_id: str) -> None:
         validate_keyframe_board(board_obj, board_slots=[s["slot"] for s in shots])
         ws["keyframes"] = board_obj.model_dump(mode="json")
 
+        seeded = sum(1 for f in frames if f["refs_used"])
         _say(thread_id,
              f"{len(frames)} keyframe(s) — nothing animates until every one is approved.",
              [ArtifactEnvelope(
@@ -3356,7 +3359,12 @@ def _keyframes_turn(thread_id: str, campaign_id: str) -> None:
                  payload={"board": ws["keyframes"]},
                  actions=_actions(("approve_keyframes", "Approve all", "primary"),
                                   ("regenerate_keyframes", "Re-render", "secondary")))],
-             question="Approve each frame, or tell me which one is wrong?")
+             question="Approve each frame, or tell me which one is wrong?",
+             # Whether the approved sheets actually reached these frames is the
+             # difference between a consistent film and four different shoes,
+             # and it is not visible in the image until it is too late.
+             note=(f"{seeded}/{len(frames)} frame(s) seeded from the approved canon sheets."
+                   + (" Not seeded: " + "; ".join(dict.fromkeys(unusable)) if unusable else "")))
         store.log_artifact_activity(thread_id, "keyframes", "proposed",
                                     f"{len(frames)} frames · ${board_obj.total_cost_usd:.2f}")
         _stage_done(thread_id, campaign_id, "keyframes",
@@ -3369,20 +3377,87 @@ def _keyframes_turn(thread_id: str, campaign_id: str) -> None:
         _working.pop(thread_id, None)
 
 
-def _render_keyframe(thread_id: str, shot: dict[str, Any], ratio: str) -> dict[str, Any]:
-    """One still per shot. A keyframe is always an IMAGE, whatever animates it
-    later — routing a video shot to the video model here would pay for motion at
-    the gate whose whole purpose is to avoid paying for motion."""
+def _shot_canon_ids(shot: dict[str, Any]) -> list[str]:
+    """Every canon id this shot binds, in reference-priority order.
+
+    Product first ON PURPOSE. When a shot over-subscribes its model's reference
+    slots something has to go, and losing the product is the failure that shows:
+    a wrong face is a different ad, a wrong label is a recalled one.
+    """
+    ordered = ((shot.get("product_refs") or []) + (shot.get("cast_refs") or [])
+               + (shot.get("env_refs") or []))
+    return list(dict.fromkeys(ordered))
+
+
+def _canon_reference_urls(
+    ws: dict[str, Any], shot: dict[str, Any]
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """([(canon_id, url) to send], reasons ids could not be sent).
+
+    Pairs, not two parallel lists: an unusable sheet makes the url list shorter
+    than the id list, and zipping them afterwards would silently attribute one
+    canon's reference to another.
+
+    THE CONSISTENCY GAP, closed. Until now `canon → keyframe` was text only:
+    `CanonSheet.locks` went into the prompt as strings and the approved sheet
+    IMAGES were never passed as references, so the product in a keyframe did not
+    have to match the sheet the user approved. `keyframe → video` was already
+    image-seeded, which made the break invisible — the film was internally
+    consistent and consistently wrong.
+
+    A sheet is only usable as a reference if it has a url the GENERATOR can
+    fetch. `sheet_url` is the provider's own CDN url; a local /api/assets path
+    is not reachable from PixelBin's servers. Under MOCK_MEDIA there is no
+    provider and therefore no CDN url, so the local path stands in — nothing
+    fetches it, and the alternative is a rehearsal that exercises none of this
+    wiring. A sheet with neither is REPORTED, never silently skipped.
+    """
+    sheets = {s.get("id"): s for s in (ws.get("canon") or [])}
+    pairs: list[tuple[str, str]] = []
+    unusable: list[str] = []
+    for canon_id in _shot_canon_ids(shot):
+        sheet = sheets.get(canon_id)
+        if not sheet:
+            unusable.append(f"{canon_id} (no sheet — canon was skipped or the id is unknown)")
+            continue
+        url = sheet.get("sheet_url")
+        if not url and config.MOCK_MEDIA and sheet.get("sheet_asset_id"):
+            url = _asset_url(sheet["sheet_asset_id"])
+        if url:
+            pairs.append((canon_id, url))
+        else:
+            unusable.append(f"{canon_id} (sheet has no fetchable url)")
+    return pairs, unusable
+
+
+def _render_keyframe(thread_id: str, shot: dict[str, Any], ratio: str,
+                     ws: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """One still per shot, conditioned on the approved canon sheets it binds.
+
+    A keyframe is always an IMAGE, whatever animates it later — routing a video
+    shot to the video model here would pay for motion at the gate whose whole
+    purpose is to avoid paying for motion.
+    """
     tier = "final" if shot.get("model_route") != "image_pro" else "pro"
-    frame = generate("image", shot["keyframe_prompt"], ratio=ratio, tier=tier)
+    pairs, unusable = _canon_reference_urls(ws or {}, shot)
+    frame = generate("image", shot["keyframe_prompt"], ratio=ratio, tier=tier,
+                     image_urls=[url for _, url in pairs])
+    # What ACTUALLY conditioned this frame, not what the board asked for. The
+    # slot budget may have dropped some (Stage 1) and a sheet may have been
+    # unusable; reporting the request as if it were the result is how a
+    # consistency failure gets blamed on the model.
+    sent = set(frame.get("refs_used") or [])
+    used = [cid for cid, url in pairs if url in sent]
+    dropped = unusable + [d["why"] for d in (frame.get("dropped_refs") or [])]
     asset_id = store.add_asset(
         thread_id, f"keyframe_{shot['slot']}", frame.get("kind", "image"), frame["path"],
         {"model": frame["model"], "prompt": shot["keyframe_prompt"], "ratio": ratio,
-         "shot_slot": shot["slot"], "refs": shot.get("product_refs") or []},
+         "shot_slot": shot["slot"], "refs": used, "refs_dropped": dropped,
+         "url": frame.get("url")},
         frame["cost"])
     store.log_generation(thread_id, asset_id, "generate", prompt=shot["keyframe_prompt"],
                          model=frame["model"], seed=str(frame.get("seed")), cost=frame["cost"])
-    return {"asset_id": asset_id, "cost": frame["cost"]}
+    return {"asset_id": asset_id, "cost": frame["cost"], "refs_used": used, "dropped": dropped}
 
 
 def _qc_turn(thread_id: str, campaign_id: str) -> None:

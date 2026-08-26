@@ -3743,3 +3743,98 @@ def test_the_canon_gate_assumes_the_cheap_render_and_says_so(monkeypatch):
     # and the upgrade is a real, routed event — not a button that does nothing
     assert any("sharper" in lab.lower() for lab in labels), "no upgrade CTA"
     assert "resheet_canon" in [o["event"] for o in question["options"]]
+
+
+# --- Stage 3 · the consistency gap -------------------------------------------
+
+
+def test_a_keyframe_bound_to_a_canon_id_is_seeded_from_that_sheet(monkeypatch):
+    """THE test of this phase.
+
+    `canon → keyframe` was TEXT ONLY: CanonSheet.locks went into the prompt as
+    strings and the approved sheet IMAGES were never passed as references, so
+    the product in a keyframe did not have to match the sheet the user approved.
+    `keyframe → video` was already image-seeded, which is what made the break
+    invisible — the film came out internally consistent and consistently wrong.
+
+    Without this check the chain silently regresses to text-only and nobody
+    notices until the creative looks like four different shoes.
+    """
+    seen: list[dict] = []
+    from app import media
+    real = media.generate
+
+    def watching(kind, prompt, **kw):
+        seen.append({"kind": kind, "prompt": prompt, "image_urls": list(kw.get("image_urls") or [])})
+        return real(kind, prompt, **kw)
+
+    monkeypatch.setattr(campaign, "generate", watching)
+
+    cid, tid = _ruminated("Seeded frames", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+    _approve(tid, "hook_rack", "approve_script")
+    _approve(tid, "board", "approve_board")
+
+    sheets = _artifacts(tid, "canon_sheet")[-1]["payload"]["sheets"]
+    by_id = {s["id"]: s for s in sheets}
+    _approve(tid, "canon", "approve_canon")
+
+    board = _artifacts(tid, "campaign_detail")[-1]["payload"]["board"]
+    bound = [s for s in board["shots"] if campaign._shot_canon_ids(s)]
+    assert bound, "no shot binds a canon id — this test would prove nothing"
+
+    frames = _artifacts(tid, "keyframe_board")[-1]["payload"]["board"]["frames"]
+    keyframe_calls = [c for c in seen if c["kind"] == "image"
+                      and "PANELS, in this exact order" not in c["prompt"]]
+    assert keyframe_calls, "no keyframe was rendered"
+
+    seeded = [c for c in keyframe_calls if c["image_urls"]]
+    assert seeded, (
+        "every keyframe was rendered with NO reference image — the canon sheets "
+        "the user approved never reached them, which is the whole gap")
+
+    # the url that travelled is the sheet's own, not some other asset
+    sheet_urls = {
+        s.get("sheet_url") or f"/api/assets/{s['sheet_asset_id']}/file"
+        for s in sheets if s.get("sheet_asset_id")
+    }
+    for call in seeded:
+        for url in call["image_urls"]:
+            assert url in sheet_urls, f"{url} is not an approved canon sheet"
+
+    # and the board reports what CONDITIONED each frame, not what was requested
+    for frame in frames:
+        shot = next(s for s in board["shots"] if s["slot"] == frame["shot_slot"])
+        assert set(frame["refs_used"]) <= set(campaign._shot_canon_ids(shot))
+        if frame["refs_used"]:
+            assert by_id[frame["refs_used"][0]].get("sheet_asset_id"), (
+                "a frame claims a reference from a sheet that was never rendered")
+
+
+def test_an_unusable_canon_sheet_is_named_never_silently_skipped():
+    """A sheet with no fetchable url cannot condition anything. Dropping it
+    quietly turns 'the user approved this product' into 'the model improvised
+    one', and the failure only shows up in the finished creative."""
+    ws = {"canon": [
+        {"id": "@product", "sheet_asset_id": "ast_1", "sheet_url": "https://cdn/x.png"},
+        {"id": "@priya", "sheet_asset_id": None, "sheet_url": None},
+    ]}
+    shot = {"product_refs": ["@product"], "cast_refs": ["@priya"], "env_refs": ["@nowhere"]}
+
+    pairs, unusable = campaign._canon_reference_urls(ws, shot)
+
+    assert pairs == [("@product", "https://cdn/x.png")]
+    assert any("@priya" in u for u in unusable), "a sheet with no url vanished"
+    assert any("@nowhere" in u for u in unusable), "an unknown canon id vanished"
+
+
+def test_the_product_reference_outranks_the_rest_when_slots_run_out():
+    """Something has to go when a shot over-subscribes its model's slots. A
+    wrong face is a different ad; a wrong label is a recalled one, so the
+    product goes LAST — which means it must be sent FIRST."""
+    shot = {"cast_refs": ["@priya"], "product_refs": ["@shoe"], "env_refs": ["@ghat"]}
+    assert campaign._shot_canon_ids(shot)[0] == "@shoe"
+    # and duplicates collapse rather than eating two slots for one sheet
+    assert campaign._shot_canon_ids(
+        {"product_refs": ["@shoe", "@shoe"], "cast_refs": ["@shoe"]}) == ["@shoe"]
