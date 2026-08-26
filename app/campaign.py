@@ -2798,6 +2798,27 @@ class WorkspaceIncomplete(RuntimeError):
     """A stage was reached without the state it depends on."""
 
 
+def _approved_option_json(ws: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """The approved option, as JSON, DERIVED rather than mirrored.
+
+    There used to be a second slot, `approved_option_json`, which nothing ever
+    wrote — it was only ever read, by the script and board turns. So both were
+    handed `option: null` and had to invent the campaign from the brief alone.
+    The board's B1/B4 lints then failed on work it was never given the input
+    for: asked for a two-shot film, it produced eight shots and six characters,
+    burned three attempts, and escalated as "the shot board kept failing its
+    lints" — blaming the model for a fact it was never told.
+
+    Deriving from the one slot that IS written means the two can never diverge
+    again. This is the same lesson as the R2 lexicon and the renderer
+    allowlist; the cheapest version of it is not to keep a second copy.
+    """
+    option = ws.get("approved_option")
+    if option is None:
+        return None
+    return option.model_dump(mode="json") if hasattr(option, "model_dump") else option
+
+
 def _require(ws: dict[str, Any], stage: str) -> None:
     """Refuse to start a stage whose inputs are missing.
 
@@ -2941,7 +2962,7 @@ def _script_turn(thread_id: str, campaign_id: str) -> None:
         brief = ws.get("brief") or {}
         rack, _log = run_agent(
             agent="hook_rack", prompt_name="hook_rack", model=config.STAGE_MODELS["script"],
-            user_payload={"brief": brief, "option": ws.get("approved_option_json"),
+            user_payload={"brief": brief, "option": _approved_option_json(ws),
                           "hooks_wanted": _policy_of(campaign_id).hooks_count},
             schema=HookRack, dispatcher=None, use_tools=False,
             # The W1 table is INJECTED from the constant the check reads. Never
@@ -2988,7 +3009,7 @@ def _board_turn(thread_id: str, campaign_id: str) -> None:
         ws["style_block"] = style
         board, _log = run_agent(
             agent="shot_board", prompt_name="shot_board", model=config.STAGE_MODELS["board"],
-            user_payload={"brief": brief, "option": ws.get("approved_option_json"),
+            user_payload={"brief": brief, "option": _approved_option_json(ws),
                           "hook_rack": ws.get("hook_rack"),
                           "style_block_id": style.get("id"),
                           "available_routes": sorted(config.MEDIA_MODELS),

@@ -380,3 +380,33 @@ reason this took one run to find rather than three.
 visible within minutes of clicking through the app. That is now the fourth
 time. The rule stands: a flow with a UI needs one pass driven through the UI,
 every time, no exceptions.
+
+## 2026-08-26 — The board was blamed for an input nobody gave it
+
+**Symptom.** A live QA run escalated: "The shot board kept failing its lints." Asked
+for a two-shot film, it produced eight shots and six distinct characters, failed B1/B4
+three times, and gave up.
+
+**Why-chain.**
+1. Why did the lints fail? Too many shots, too many characters, too many refs per shot.
+2. Why did it over-produce? It was reconstructing the campaign from the brief alone.
+3. Why only the brief? Its payload carried `option: ws.get("approved_option_json")`.
+4. Why was that null? **`approved_option_json` was READ by two turns and WRITTEN by
+   nothing.** It never existed. The script and board had been handed `option: null`
+   for the entire life of v3.
+5. **Deepest why: `design`** — a mirrored copy of a fact that nobody kept in sync,
+   which is the same family as the R2 lexicon and the renderer allowlist. The cheapest
+   version of that lesson is not to keep a second copy at all.
+
+**Action (aimed at why-5).** `_approved_option_json(ws)` DERIVES the JSON from the one
+slot that is actually written. There is no second slot to drift. A test asserts the
+option reaches the board and that no mirrored key comes back.
+
+**Preventive action for the class.** A slot that is only ever read is not a slot, it is
+a typo with a default. Grep any new workspace key for its WRITE site before trusting it;
+`ws.get(x)` returning None looks identical whether x is empty or misspelled.
+
+**Second lesson — read what a node was GIVEN.** The run log's `node_input` said
+`option: null` immediately. The validation errors, which is where attention goes, only
+described the *shape of the output*. An agent that fails its checks is often correct
+about the input it was handed.

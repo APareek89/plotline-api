@@ -3309,3 +3309,28 @@ def test_a_paid_render_whose_download_fails_is_still_recorded(monkeypatch, tmp_p
     orphan = rows[0]
     assert orphan["event"] == "image_orphaned"
     assert orphan["cost"] > 0 and orphan["model"] == "fal:test-model"
+
+
+def test_the_script_and_board_actually_receive_the_approved_option():
+    """`approved_option_json` was READ by the script and board turns and WRITTEN
+    by nothing. Both were handed option: null for the entire life of v3, and had
+    to invent the campaign from the brief alone.
+
+    It surfaced as a lint failure, not a missing input: asked for a two-shot
+    film the board produced eight shots and six characters, burned three
+    attempts and escalated as "the shot board kept failing its lints" — the
+    model blamed for a fact nobody gave it. Approving an option has to mean the
+    stages after it can SEE the option.
+    """
+    cid, tid = _ruminated("Option reaches the board", creative_type="video")
+    _act(tid, "o1", "approve")
+
+    ws = campaign._ws(tid)
+    assert ws.get("approved_option") is not None, "nothing was approved — test proves nothing"
+
+    payload = campaign._approved_option_json(ws)
+    assert payload is not None, "the board would be handed option: null"
+    assert payload.get("option_id") == "o1"
+    # derived, never mirrored — a second slot is how the two diverged before
+    assert "approved_option_json" not in ws, (
+        "a mirrored copy is back; derive it instead so the two cannot diverge")
