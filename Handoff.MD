@@ -112,6 +112,16 @@ of the four council calls, which is the main reason it exists.
 - ▶ Loop.MD status: offered (awaiting your answer)
 
 ## PENDING — start here
+- ▶ **NEXT SESSION: `docs/v5-MASTER-PROMPT.md`.** Seven stages, a Code QA gate after each,
+  and the paid run (Stage 7) BLOCKED until the owner gives a morning go-ahead. Budget for
+  that run is a hard ceiling: $1-2 Anthropic + 50 PixelBin credits, one attempt.
+- 🔴 **Consistency gap, the important one.** canon → keyframe is TEXT ONLY: `CanonSheet.locks`
+  are strings in a prompt and the canon IMAGES are never passed as references, so the
+  product in the keyframes need not match the product sheet the user approved.
+  keyframe → video IS image-consistent (`image_url=frame["url"]`, verified live).
+  Compounding it: `media.generate()` takes a SINGULAR `image_url` while
+  `config.MEDIA_REF_SLOTS` declares 2-6 slots and the B3 lint polices those numbers —
+  the lint enforces a capacity the client cannot use. Stages 1 and 3 of the master prompt.
 - ✅ ~~P0-1 seed evidence~~ — `PLOTLINE_ALLOW_SEED_EVIDENCE=0` in `.env` (2026-08-25);
   `/health` reports `allow_seed_evidence: false`. Note `.env` is gitignored, so this is a
   LOCAL fix — **Render still has `allow_seed_evidence: true`, confirmed live 2026-08-26.**
