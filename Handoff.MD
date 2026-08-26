@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `90abec5` (plotline-api) · `2797e3d` (plotline-web)
+last-synced: `e9112af` (plotline-api) · `3bfbda4` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -68,7 +68,7 @@ in full detail. **167 tests green** (floor was 83).
 
 ## v5 — IN FLIGHT (`docs/v5-MASTER-PROMPT.md` + the owner's addendum)
 Seven stages, a Code QA gate after each, Stage 7 (paid) gated on a morning go-ahead.
-Owner's visual target is `~/Documents/Reference material/`. **Floor: 190 tests.**
+Owner's visual target is `~/Documents/Reference material/`. **Floor: 200 tests.**
 
 - ✅ **Stage 0** — 183 tests green at `7a806ce`, typecheck clean, `MOCK_MEDIA=1`,
   `/observability` renders both lenses (agents 300 · media 51 · $1.52 lifetime).
@@ -89,8 +89,41 @@ Owner's visual target is `~/Documents/Reference material/`. **Floor: 190 tests.*
   so an upgrade cannot re-bill the same sheet. Coverage now means COMPOSED, not
   verified — the chip reads "N views in one sheet" and the card shows the image.
   190 tests.
-- ⏭ **Stage 3 next** — bind the approved sheet's `sheet_url` into every keyframe render
-  for shots that reference its canon id. Both halves it needs now exist.
+- ✅ **Stage 3 — the consistency gap CLOSED** (`5954126`). Every keyframe render carries
+  the approved sheets for the canon ids its shot binds. Product refs go FIRST (a wrong
+  face is a different ad; a wrong label is a recalled one). `_canon_reference_urls`
+  returns (canon_id, url) PAIRS so an unusable sheet cannot mis-attribute another's
+  reference. `refs_used` on each frame is now what CONDITIONED it, not what was
+  requested. Verified live: "2/2 frame(s) seeded from the approved canon sheets".
+- ✅ **Stage 4 — stitching** (`3ef1534`). `media.stitch()` joins accepted clips in board
+  order via the concat DEMUXER (no re-encode); a missing clip is named and the rest are
+  still cut; no ffmpeg → the clips are handed over with the reason. The film LEADS in the
+  Ad Card at 0.00, since the clips were already charged. Verified live: two 3s clips →
+  one 6.0s film, `joined=['shot_01_9x16','shot_02_9x16']`, stitch row in the media lens.
+- ✅ **Stage 5 — artifact detail view** (`3536324` + web `3bfbda4`). Full-height surface,
+  rail = Prompt (Copy/Show more) · Name (double-click) · Settings chips · safe actions ·
+  Download · Delete. Approve/reject fire the SAME UserAction events as the chat.
+  `ArtifactAction.spends` is stamped server-side from `SPENDING_EVENTS`, and the panel
+  filters `a.spends === false` — **fails closed**, because pre-flag envelopes carry no
+  flag and `!a.spends` offered their re-renders with no price. New routes: GET/PATCH/
+  DELETE `/api/assets/{id}`; DELETE keeps the file and the generation_log. Phase 2
+  (Select & edit / inpainting) deliberately unbuilt, pinned by a test that reads the TSX.
+- ✅ **Stage 6 — full dry run, zero spend** (`e9112af`). name → 4 typed fragments →
+  assume-mode → brief → options → script → board → canon → keyframes (hard gate) →
+  generate (cost quoted) → creative → qc → **Deliver** → done. Found and fixed a dead end:
+  a cleared qc declared `deliver` and posted `question=None`, so the CTA was never lifted
+  and the read-only panel gave no second way in. The guard for that failure existed and
+  was correct — it walked four gates short. It now walks to `done`.
+- 🔴 **STAGE 7 BLOCKER — the approved keyframe is NOT the frame the film is made from.**
+  `_render_slot` never reads `ws["keyframes"]`: it re-renders a fresh still from
+  `_visual_prompt` and seeds the clip from THAT. So the hard gate approves a frame that
+  is then discarded, which is a gate protecting nothing — and it costs one extra paid
+  image per shot. Left UNFIXED on purpose: changing the generate path immediately before
+  a one-attempt paid run, untested against a real provider, is the wrong moment. Owner's
+  call. Two extra credits in the plan below assume it stays as-is.
+- 🔴 **Veo 3.1 has no 3-second duration.** `_CAPS["veo31_generate"]["durations"]` is
+  {4,6,8} and `_snap_duration` rounds 3 → 4. The requested "two 3s clips → one 6s film"
+  will actually be two 4s clips → an 8s film, at whatever 4s costs.
 - 🔴 **MOCK_LLM=1 cannot complete an intake** — found driving Stage 2. `mock_campaign_intake`
   never learned `assume_mode`, and the assume pass sends `message: ""`, so the mock
   returns the context unchanged; `_assume_and_proceed` then offers **Start**
