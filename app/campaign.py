@@ -3559,7 +3559,14 @@ def _qc_turn(thread_id: str, campaign_id: str) -> None:
                  payload={"report": ws["qc"]},
                  actions=_actions(("deliver", "Deliver", "primary"))
                          if report.verdict == "cleared" else [])],
-             question=None if report.verdict == "cleared"
+             # A CLEARED report used to pass question=None, so `_options_from`
+             # never ran and the Deliver action it had just declared was never
+             # lifted into the composer. The right panel is read-only, so the
+             # campaign simply stopped at the last gate with nothing to press —
+             # found by walking the flow, invisible to 200 passing tests. Every
+             # CTA is answered in the chat; an artifact that declares one and
+             # posts no question is a dead end by construction.
+             question="Deliver the campaign?" if report.verdict == "cleared"
                       else "Delivery is held until the blocking findings clear.")
         store.log_artifact_activity(thread_id, "qc", "proposed",
                                     f"{report.verdict} · {len(blocking)} blocking")

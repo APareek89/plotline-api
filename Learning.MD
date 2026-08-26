@@ -490,3 +490,37 @@ convenience — it is the free rung of the loop, and a rung that cannot reach th
 stage under test silently promotes every QA pass to a paid one. And a turn that
 posts a "we're ready" CTA must assert readiness from the DATA it just received,
 never from the fact that the call returned.
+
+## 2026-08-26 — A guard that was right, and a dead end four gates past where it looked
+
+**Symptom.** The Stage 6 dry run reached `qc`, printed "QC cleared.", and stopped.
+No options in the composer, no Ad Card, no film. The campaign could not be
+finished by any means available to a user.
+
+**Why-chain.**
+1. Why could nothing be pressed? The turn carried no question, so the composer
+   rendered no options.
+2. But the `qc_report` DECLARED a `deliver` action. Why was it not offered?
+   `_say(...)` only lifts options from artifacts when a question exists —
+   `question=None if report.verdict == "cleared"` skipped the lift entirely.
+3. Why did nothing catch it? `test_every_cta_a_card_declares_is_answerable_in_the_chat`
+   exists for precisely this failure and compares `(artifact_id, event)` pairs
+   correctly. It walked as far as `_pass_script()` — four gates short of qc.
+4. Why did the walk stop there? It was written when the script was the last new
+   gate, and grew no further as v3 added canon, keyframes, generate, creative
+   and qc behind it.
+5. **Deepest why: `process`** — a correct check with a short walk reads exactly
+   like a check that passes. Coverage of the RULE was never the question;
+   coverage of the FLOW was, and nothing measured it.
+
+**Action (aimed at why-5).** The guard now walks to `done` and asserts it saw a
+`qc_report` and at least seven actioned cards, so a walk that silently shortens
+fails instead of passing quietly. The qc turn asks "Deliver the campaign?" when
+it clears. Verified it bites: restoring `question=None` fails with
+`[('qc_report', 'qc', ['deliver'])]`.
+
+**Preventive action for the class.** A guard over "every X must satisfy Y" is
+only as good as the set of X it visits, so it has to assert the SIZE and REACH
+of that set, not just the property. Two of the last three dead ends in this
+project were at a gate no test had ever walked to — the rule was never wrong,
+the itinerary was.

@@ -2937,9 +2937,22 @@ def test_every_cta_a_card_declares_is_answerable_in_the_chat():
     actually covers what was declared. Verified non-vacuous: it inspects 7
     actioned cards on this walk.
     """
-    cid, tid = _ruminated("CTA reachability")
+    # The walk goes to the END of the flow, not to the script.
+    #
+    # This guard was RIGHT and still missed a dead end at the last gate: a
+    # cleared qc_report declared "Deliver" and posted question=None, so the
+    # option was never lifted and — the panel being read-only — the campaign
+    # simply stopped with nothing to press. The check never saw it because the
+    # walk ended four gates earlier. A guard only covers what it visits.
+    cid, tid = _ruminated("CTA reachability", creative_type="video")
     _act(tid, "o1", "approve")
     _pass_script(tid)
+    for artifact, event in (("board", "approve_board"), ("canon", "approve_canon"),
+                            ("keyframes", "approve_keyframes")):
+        if any(a["type"] for a in _envelopes(tid)[-1].get("artifacts", [])):
+            _approve(tid, artifact, event)
+    _act(tid, "model", "generate")
+    _act(tid, "creative", "accept_all")
 
     inspected, unreachable = 0, []
     for env in _envelopes(tid):
@@ -2964,7 +2977,12 @@ def test_every_cta_a_card_declares_is_answerable_in_the_chat():
                 unreachable.append(
                     (card["type"], card["id"], sorted(e for _, e in declared - offered)))
 
-    assert inspected, "no actioned cards on this walk — the test would pass vacuously"
+    assert inspected >= 7, (
+        f"only {inspected} actioned cards inspected — the walk is not reaching the "
+        "later gates, which is exactly how the qc dead end survived this check")
+    assert any(a["type"] == "qc_report" for a in
+               (c for env in _envelopes(tid) for c in env.get("artifacts", []))), (
+        "the walk never reached qc, so the last gate is still uncovered")
     assert not unreachable, (
         "these CTAs are declared on a card but cannot be answered in the chat, "
         f"so the user has no way to press them: {unreachable}")
