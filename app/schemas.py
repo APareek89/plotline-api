@@ -15,6 +15,39 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _explicit_null_means_absent(cls, data: Any) -> Any:
+        """An explicitly-null field with a default uses the default.
+
+        A pydantic default only applies when the key is ABSENT. Our prompts
+        print the full OUTPUT SHAPE and models dutifully emit every key,
+        including ones they do not know, as null — so a defaulted field arrives
+        as an explicit null and is rejected against a default it was never
+        allowed to reach.
+
+        This is how a real user got stuck at intake: they said "instagram,
+        young women, comfortable everyday wear top", the model filled the
+        campaign block and set `creative_type: null` because nobody had said
+        video or image, and the whole block failed validation on a field that
+        defaults to "image". Three turns later intake hard-failed. The user had
+        given enough to start; the schema demanded a production decision they
+        were never asked for.
+
+        Only fields that HAVE a default are stripped, so anything genuinely
+        required still fails loudly — and for a field whose default is None the
+        result is identical either way.
+        """
+        if not isinstance(data, dict):
+            return data
+        cleaned = {}
+        for key, value in data.items():
+            field = cls.model_fields.get(key)
+            if value is None and field is not None and not field.is_required():
+                continue  # let the default apply
+            cleaned[key] = value
+        return cleaned
+
 
 # ---------------------------------------------------------------- Evidence ---
 

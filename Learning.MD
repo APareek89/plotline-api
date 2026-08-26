@@ -410,3 +410,44 @@ a typo with a default. Grep any new workspace key for its WRITE site before trus
 `option: null` immediately. The validation errors, which is where attention goes, only
 described the *shape of the output*. An agent that fails its checks is often correct
 about the input it was handed.
+
+## 2026-08-26 — A default that could never apply, and a QA that typed like a spec
+
+**Symptom.** A real user typed three fragments — "help me with an ad for this product
+as part of summer campaign" / "instagram, young women, its a comfortable everyday wear
+top" / "awareness" — and got "Noted.", "Noted.", then "Intake couldn't produce a valid
+context after retries." Nothing was filed. The conversation was dead.
+
+**Why-chain.**
+1. Why did nothing file? Every campaign block failed validation.
+2. On what? `campaign.creative_type` — "Input should be 'video' or 'image', got None".
+3. But it HAS a default (`= "image"`). Why did the default not apply? **A pydantic
+   default only applies when the key is ABSENT.** The model sent it explicitly as null.
+4. Why did it send null? Our prompts print the full OUTPUT SHAPE, so the model
+   dutifully emits every key, filling unknown ones with null.
+5. **Deepest why: `design`** — the schema and the prompt disagreed about what "unknown"
+   looks like. The schema says "omit it"; the prompt says "print every key". Between
+   them sat a default that was unreachable by construction.
+
+Second, independent cause: `product.name` is required, and the user DESCRIBED without
+NAMING ("a comfortable everyday wear top"). People describe; they rarely name.
+
+**Action.** `Strict` gains a `mode="before"` validator: an explicitly-null field that
+HAS a default is dropped so the default applies. Required fields still fail loudly, so
+this is not a blanket "nulls are fine". The intake prompt now says to OMIT unknown
+optional keys rather than write null, that a name may be a LABEL derived from the user's
+own words, and that creative_type is INFERRED from the platform, never asked — it is a
+production decision nobody should have to make before describing the product. And a
+parse failure no longer escalates: the conversation is the only way into this product,
+so it keeps the thread alive and asks for the gap.
+
+**Preventive action for the class.** A field with a default is only optional if the
+producer is allowed to omit it. When a prompt prints a schema, it is a second
+specification of that schema — and the two must agree about absence, not just types.
+
+**The QA lesson, which is the bigger one.** 182 tests and a full browser walk missed
+all of this because every intake test either called `save_block()` with structured data
+or typed ONE well-formed sentence containing everything. Real users type in fragments.
+The new test asserts the SHAPE of a fragmented conversation reaching a startable
+campaign, not the wording of any turn. This is the third time this file has recorded
+"the tests never type like a person", and the first time a test actually does.

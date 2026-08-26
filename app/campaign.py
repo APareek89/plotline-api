@@ -842,7 +842,18 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
             _ws(thread_id)["searched"] = searched
         _progress_turn(thread_id, context, before=current, conversational=True)
     except AgentHardFail as exc:
-        _fail(thread_id, "Intake couldn't produce a valid context after retries — nothing was guessed.", str(exc))
+        # A parse failure is NOT a dead end. The conversation is the only way
+        # into this product, so escalating here strands the user with no move
+        # — which is exactly what happened to a real one: three fragments, an
+        # error card, and nothing to click. Keep the thread alive and ask for
+        # the specific gap instead. Nothing is guessed either way.
+        logger.warning("intake could not parse turn on thread %s: %s", thread_id, exc)
+        context = _context_of(campaign_id)
+        _say(thread_id,
+             "I didn't catch that cleanly — say it once more and I'll file it.",
+             [_progress_artifact(context)],
+             question=_combined_question(context) or "What are we making, and who is it for?",
+             note="Nothing was guessed or lost. Everything you have told me so far is still here.")
     except Exception as exc:
         _fail(thread_id, f"Intake failed: {exc}", traceback.format_exc())
     finally:

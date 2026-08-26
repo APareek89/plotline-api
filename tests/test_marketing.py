@@ -3339,3 +3339,114 @@ def test_the_script_and_board_actually_receive_the_approved_option():
     # derived, never mirrored — a second slot is how the two diverged before
     assert "approved_option_json" not in ws, (
         "a mirrored copy is back; derive it instead so the two cannot diverge")
+
+
+def test_a_defaulted_field_sent_as_explicit_null_uses_its_default():
+    """A pydantic default only applies when a key is ABSENT. Our prompts print
+    the full OUTPUT SHAPE, so models emit every key — including unknown ones as
+    null — and a defaulted field arrives as an explicit null and is rejected
+    against a default it was never allowed to reach.
+
+    This is the exact payload that stranded a real user at intake: they said
+    "instagram, young women, comfortable everyday wear top", nobody had said
+    video or image, and the whole campaign block failed on creative_type.
+    """
+    ctx = CampaignContext.model_validate({
+        "name": "AP", "product": None, "brand": None,
+        "campaign": {"objective": "awareness", "target_audience": "young women",
+                     "platforms": ["instagram_feed"], "description": None,
+                     "creative_type": None},
+    })
+    assert ctx.campaign.creative_type == "image", "the default never got a chance"
+
+    # a genuinely REQUIRED field still fails loudly — this must not become a
+    # blanket "nulls are fine" rule
+    with pytest.raises(ValidationError):
+        CampaignContext.model_validate({
+            "name": "AP",
+            "campaign": {"objective": None, "target_audience": "x",
+                         "platforms": ["instagram_feed"]},
+        })
+
+
+def test_intake_survives_a_turn_it_cannot_parse(monkeypatch):
+    """The conversation is the ONLY way into this product, so a parse failure
+    that escalates strands the user with nothing to click. A real one hit
+    exactly that: three fragments, an error card, dead end.
+
+    The turn must stay alive and ask for the specific gap.
+    """
+    from app.agents.runner import AgentHardFail
+
+    def always_fails(*a, **k):
+        raise AgentHardFail("could not parse", ["no JSON object found in agent output"])
+    monkeypatch.setattr(campaign, "run_agent", always_fails)
+
+    started = campaign.start_campaign("Unparseable")
+    tid = started["thread"]["id"]
+    _text(tid, "help me with an ad for this product")
+
+    last = _envelopes(tid)[-1]
+    assert not any(a["type"] == "escalation" for a in last.get("artifacts", [])), (
+        "a parse failure escalated — the user has no move from there")
+    assert last.get("question"), "the thread went quiet instead of asking for the gap"
+    assert "guessed" in (last["question"].get("note") or "").lower(), (
+        "the user must be told nothing was invented or lost")
+
+
+def test_a_person_typing_in_fragments_reaches_a_startable_campaign(monkeypatch):
+    """THE test this suite was missing.
+
+    Every intake test until now either called save_block() with structured data
+    or typed ONE well-formed sentence containing everything. A real user typed
+    three fragments — "help me with an ad for this product as part of summer
+    campaign" / "instagram, young women, its a comfortable everyday wear top" /
+    "awareness" — and the app answered "Noted.", "Noted.", then hard-failed.
+
+    Nothing about that was a model problem. The fragments carry a product
+    description, a platform, an audience and an objective: enough to start. The
+    schema demanded a creative_type nobody had asked for and a product NAME the
+    user never spoke, and the block died on both.
+
+    This asserts the shape of the conversation, not the wording of any turn.
+    """
+    def scripted(*, agent, user_payload, **kw):
+        # A stand-in that behaves the way the prompt now tells the real model to:
+        # label the product from the user's own words, infer nothing it wasn't
+        # told, and OMIT unknown optional keys rather than writing null.
+        ctx = dict(user_payload["context"])
+        transcript = user_payload.get("transcript") or []
+        said = " ".join(
+            m if isinstance(m, str) else str(m.get("text", "")) for m in transcript
+        ) + " " + user_payload["message"]
+        low = said.lower()
+        if "top" in low and ctx.get("product") is None:
+            ctx["product"] = {"name": "Everyday wear top",
+                              "description": "a comfortable everyday wear top"}
+        if "instagram" in low and any(o in low for o in ("awareness", "traffic", "conversion")):
+            ctx["campaign"] = {"objective": "awareness",
+                               "target_audience": "young women",
+                               "platforms": ["instagram_feed"]}   # creative_type OMITTED
+        return CampaignContext.model_validate(ctx), type("L", (), {"searched": []})()
+
+    monkeypatch.setattr(campaign, "run_agent", scripted)
+
+    started = campaign.start_campaign("Fragments")
+    cid, tid = started["campaign_id"], started["thread"]["id"]
+    for fragment in ("help me with an ad for this product as part of summer campaign",
+                     "instagram, young women, its a comfortable everyday wear top",
+                     "awareness"):
+        _text(tid, fragment)
+
+    context = CampaignContext.model_validate(store.get_series(cid)["context"])
+    assert context.product is not None, "three fragments described a product and none was filed"
+    assert context.campaign is not None, "platform, audience and objective were all given"
+    assert context.campaign.creative_type == "image", "an unasked field must default, not block"
+    assert campaign.missing_blocks(context) == [], (
+        "the user gave enough to start and the app still says it is not ready")
+
+    # and the thread never dead-ended
+    assert not any(
+        a["type"] == "escalation"
+        for env in _envelopes(tid) for a in env.get("artifacts", [])
+    ), "the conversation escalated on input that was actually sufficient"
