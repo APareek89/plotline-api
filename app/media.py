@@ -1,13 +1,22 @@
-"""fal.ai media client (Addendum-02; models per v1 §07).
+"""Media generation — provider routing over PixelBin (primary) and fal (fallback).
 
-Queue API: POST queue.fal.run/{model} → poll status → fetch result. No
-webhooks in Phase-2 dev — the driver polls (thread stays usable; completion
-posts a message).
+Owner decision 2026-08-26: PixelBin generates, fal stays wired as the fallback.
+`PLOTLINE_MEDIA_PROVIDER` names which is tried FIRST; the other is reached only
+when the first raises. Suffix `_only` disables the fallback.
+
+The fallback is deliberately NOT attempted on a policy refusal. A model that
+declined a prompt is giving a real answer about the prompt, and re-sending the
+same words to a second provider spends money to be told the same thing. Only
+transport and provider-side failures fall through.
+
+fal queue API: POST queue.fal.run/{model} → poll status → fetch result. No
+webhooks in dev — the driver polls (thread stays usable; completion posts a
+message). PixelBin's REST contract lives in `pixelbin_client.py`.
 
 MOCK_MEDIA=1: deterministic placeholder files (SVG frames, ffmpeg color
 clips, sine-wave WAV) written to data/assets/ at ZERO cost — the entire
 interaction contract (prompt artifacts, cost lines, accept/reroll) still
-runs. Failed real runs are not charged (fal bills completed jobs).
+runs, and neither provider is contacted.
 """
 from __future__ import annotations
 
@@ -185,6 +194,70 @@ def _mock_video(prompt: str, ratio: str, duration_s: float, dest: Path) -> Path:
 # ---------------------------------------------------------------- generate --
 
 
+def _generate_fal(
+    kind: str, prompt: str, *, ratio: str, duration_s: float, tier: str,
+    voice: Optional[str], image_url: Optional[str], seed: Optional[int],
+) -> tuple[str, str]:
+    """One asset via fal. Returns (url, model). Raises MediaError."""
+    if kind == "image":
+        model = config.MEDIA_MODELS["image_draft" if tier == "draft" else ("image_pro" if tier == "pro" else "image_final")]
+        payload: dict[str, Any] = {"prompt": prompt, "aspect_ratio": ratio, "num_images": 1}
+        if seed is not None:
+            payload["seed"] = seed
+        out = _submit_and_wait(model, payload)
+        url = (out.get("images") or [{}])[0].get("url") or out.get("image", {}).get("url")
+        if not url:
+            raise MediaError(f"{model} returned no image: {json.dumps(out)[:200]}")
+    elif kind == "audio":
+        model = config.MEDIA_MODELS["tts_draft" if tier == "draft" else "tts_final"]
+        payload = {"text": prompt}
+        if voice:
+            payload["voice"] = voice
+        out = _submit_and_wait(model, payload)
+        url = out.get("audio", {}).get("url") or out.get("audio_url", {}).get("url") or out.get("audio_file", {}).get("url")
+        if not url:
+            raise MediaError(f"{model} returned no audio: {json.dumps(out)[:200]}")
+    else:
+        model = config.MEDIA_MODELS["video"]
+        payload = {"prompt": prompt, "duration": f"{int(duration_s)}s", "aspect_ratio": ratio}
+        if image_url:
+            payload["image_url"] = image_url
+        out = _submit_and_wait(model, payload, timeout_s=600)
+        url = out.get("video", {}).get("url")
+        if not url:
+            raise MediaError(f"{model} returned no video: {json.dumps(out)[:200]}")
+    return url, f"fal:{model}"
+
+
+def _generate_pixelbin(
+    kind: str, prompt: str, *, ratio: str, duration_s: float, tier: str,
+    image_url: Optional[str],
+) -> tuple[str, str]:
+    """One asset via PixelBin. Returns (url, model). Raises MediaError, so the
+    router does not have to know two exception types."""
+    from app import pixelbin_client
+
+    try:
+        out = pixelbin_client.generate(
+            kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_url=image_url,
+        )
+    except pixelbin_client.PixelbinError as exc:
+        raise MediaError(str(exc), policy=exc.policy) from exc
+    return out["url"], out["model"]
+
+
+def _provider_order(kind: str) -> list[str]:
+    """Which providers to try, in order. PixelBin has no TTS operation, so
+    audio goes straight to fal rather than failing at the provider with a
+    message about a plugin that was never going to exist."""
+    if kind == "audio":
+        return ["fal"]
+    pref = config.MEDIA_PROVIDER
+    if pref.endswith("_only"):
+        return [pref[:-5]]
+    return ["pixelbin", "fal"] if pref == "pixelbin" else ["fal", "pixelbin"]
+
+
 def generate(
     kind: str,  # image | video | audio
     prompt: str,
@@ -196,8 +269,14 @@ def generate(
     image_url: Optional[str] = None,
     seed: Optional[int] = None,
 ) -> dict[str, Any]:
-    """Returns {path?, url?, model, cost, seed, mock}. Local files live under
-    data/assets/ and are served by /api/assets."""
+    """Returns {path?, url?, model, cost, seed, mock, fallback?}. Local files
+    live under data/assets/ and are served by /api/assets.
+
+    `model` carries its provider prefix ("pixelbin:…" / "fal:…") because the
+    generation_log is an audit surface: "which provider actually made this"
+    is exactly the question a cost dispute asks, and a bare model name cannot
+    answer it once two providers can produce the same asset.
+    """
     cost = estimate_cost(kind, duration_s=duration_s, chars=len(prompt), tier=tier)
     name = f"{kind}_{_slug(prompt + str(seed or 0))}"
 
@@ -220,36 +299,32 @@ def generate(
         return {"path": str(dest), "model": "mock", "cost": 0.0, "seed": seed, "mock": True,
                 "kind": out_kind}
 
-    if kind == "image":
-        model = config.MEDIA_MODELS["image_draft" if tier == "draft" else ("image_pro" if tier == "pro" else "image_final")]
-        payload: dict[str, Any] = {"prompt": prompt, "aspect_ratio": ratio, "num_images": 1}
-        if seed is not None:
-            payload["seed"] = seed
-        out = _submit_and_wait(model, payload)
-        url = (out.get("images") or [{}])[0].get("url") or out.get("image", {}).get("url")
-        if not url:
-            raise MediaError(f"{model} returned no image: {json.dumps(out)[:200]}")
-        dest = _download(url, config.ASSET_DIR / f"{name}.png")
-    elif kind == "audio":
-        model = config.MEDIA_MODELS["tts_draft" if tier == "draft" else "tts_final"]
-        payload = {"text": prompt}
-        if voice:
-            payload["voice"] = voice
-        out = _submit_and_wait(model, payload)
-        url = out.get("audio", {}).get("url") or out.get("audio_url", {}).get("url") or out.get("audio_file", {}).get("url")
-        if not url:
-            raise MediaError(f"{model} returned no audio: {json.dumps(out)[:200]}")
-        dest = _download(url, config.ASSET_DIR / f"{name}.mp3")
-    else:
-        model = config.MEDIA_MODELS["video"]
-        payload = {"prompt": prompt, "duration": f"{int(duration_s)}s", "aspect_ratio": ratio}
-        if image_url:
-            payload["image_url"] = image_url
-        out = _submit_and_wait(model, payload, timeout_s=600)
-        url = out.get("video", {}).get("url")
-        if not url:
-            raise MediaError(f"{model} returned no video: {json.dumps(out)[:200]}")
-        dest = _download(url, config.ASSET_DIR / f"{name}.mp4")
+    order = _provider_order(kind)
+    url = model = ""
+    failures: list[str] = []
+    for idx, provider in enumerate(order):
+        try:
+            if provider == "pixelbin":
+                url, model = _generate_pixelbin(
+                    kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_url=image_url)
+            else:
+                url, model = _generate_fal(
+                    kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier,
+                    voice=voice, image_url=image_url, seed=seed)
+            break
+        except MediaError as exc:
+            # A refused prompt is a real answer about the prompt. Asking a
+            # second provider the same question costs money to hear it again.
+            if exc.policy:
+                raise
+            failures.append(f"{provider}: {exc}")
+            if idx == len(order) - 1:
+                raise MediaError(" · ".join(failures)) from exc
+            logger.warning("media: %s failed, falling back to %s — %s",
+                           provider, order[idx + 1], exc)
 
-    logger.info("fal %s generated via %s — est $%.2f", kind, model, cost)
-    return {"path": str(dest), "url": url, "model": model, "cost": cost, "seed": seed, "mock": False}
+    ext = {"image": "png", "video": "mp4", "audio": "mp3"}[kind]
+    dest = _download(url, config.ASSET_DIR / f"{name}.{ext}")
+    logger.info("%s generated via %s — est $%.2f", kind, model, cost)
+    return {"path": str(dest), "url": url, "model": model, "cost": cost, "seed": seed,
+            "mock": False, "fallback": bool(failures)}

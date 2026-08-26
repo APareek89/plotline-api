@@ -76,7 +76,25 @@ MAX_VALIDATION_RETRIES = 2  # §3.9: re-run with the error, max 2 retries
 # surfaces as a bogus "Expecting ',' delimiter" instead of an honest overflow.
 MAX_OUTPUT_TOKENS = int(os.environ.get("PLOTLINE_MAX_OUTPUT_TOKENS", "32000"))
 
-# --- Creative Studio media (Addendum-02; fal.ai per v1 §07) -----------------
+# --- Creative Studio media --------------------------------------------------
+# PixelBin is the primary provider (owner decision 2026-08-26); fal.ai stays
+# wired as the FALLBACK, so a PixelBin outage degrades instead of stopping the
+# flow. MEDIA_PROVIDER names the one that is tried FIRST; the other is only
+# reached if the first raises. Set to "fal" to invert, "pixelbin_only" /
+# "fal_only" to disable the fallback entirely.
+MEDIA_PROVIDER = os.environ.get("PLOTLINE_MEDIA_PROVIDER", "pixelbin").strip().lower()
+PIXELBIN_API_TOKEN = os.environ.get("PIXELBIN_API_TOKEN", "")
+PIXELBIN_CLOUD_NAME = os.environ.get("PIXELBIN_CLOUD_NAME", "")
+PIXELBIN_DOMAIN = os.environ.get("PIXELBIN_DOMAIN", "https://api.pixelbin.io")
+# PixelBin prediction names are "<plugin>_<operation>" and are a DIFFERENT
+# namespace from fal's model slugs — the two maps are deliberately separate so
+# a fallback never silently sends a fal slug to PixelBin or vice versa.
+PIXELBIN_MODELS = {
+    "image_draft": os.environ.get("PLOTLINE_PB_IMAGE_DRAFT", "nanoBanana_generate"),
+    "image_final": os.environ.get("PLOTLINE_PB_IMAGE_FINAL", "nanoBanana2_generate"),
+    "image_pro": os.environ.get("PLOTLINE_PB_IMAGE_PRO", "nanoBananaPro_generate"),
+    "video": os.environ.get("PLOTLINE_PB_VIDEO", "veo3Fast_generate"),
+}
 FAL_KEY = os.environ.get("FAL_KEY", "")
 # MOCK_MEDIA=1 → deterministic placeholder assets, zero spend; the full flow
 # (prompt artifacts, cost lines, per-asset accept/reroll, Post Card) still runs.

@@ -43,7 +43,7 @@ from app.seats import SeatConfigError, SeatSpec
 from app.seats import resolve as resolve_seats
 from app.seats import slugs as seat_slugs
 from app.agents.runner import AgentHardFail, _cited_ids, current_thread, run_agent
-from app.fal_client import MediaError, estimate_cost, generate
+from app.media import MediaError, estimate_cost, generate
 from app.graph import RuminationDeps, RuminationState, build_rumination_graph
 from app.rag_client import RagUnavailable, rag
 from app.schemas import (

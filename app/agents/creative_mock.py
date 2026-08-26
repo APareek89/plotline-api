@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app import config
-from app.fal_client import estimate_cost
+from app.media import estimate_cost
 
 LOCKS = [
     "identity: faceless creator, hands + screen only",

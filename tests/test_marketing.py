@@ -602,7 +602,8 @@ def test_no_generation_without_a_model_confirm_and_an_explicit_event():
     assert payload["payload"]["cost_single"] > 0        # cost BEFORE any spend
     assert {a["event"] for a in payload["actions"]} >= {
         "generate_single", "generate_variants_2", "generate_variants_3"}
-    assert _envelopes(tid)[-1]["question"] and "variants" in _envelopes(tid)[-1]["question"].lower()
+    q = _envelopes(tid)[-1]["question"]
+    assert q and "variants" in q["text"].lower()
     assert store.list_assets(tid) == []                 # the card alone renders nothing
 
     _act(tid, "confirm", "generate_single")
@@ -618,7 +619,7 @@ def test_a_variant_set_is_never_generated_without_an_explicit_count():
 
     _act(tid, "confirm", "generate_variants_0")         # button with no count
     assert store.list_assets(tid) == []
-    assert _envelopes(tid)[-1]["question"] == "Two variants or three?"
+    assert _envelopes(tid)[-1]["question"]["text"] == "Two variants or three?"
 
     _text(tid, "give me variants")                      # typed, still no count
     assert store.list_assets(tid) == []
@@ -707,7 +708,7 @@ def test_ad_card_fails_on_a_missing_or_off_spec_ratio():
 def test_ad_card_credits_account_for_every_paid_render(monkeypatch):
     """MOCK_MEDIA renders at $0, which hides cost bugs — price the mock renders
     with the same estimator the confirm card quotes from, then compare."""
-    from app.fal_client import estimate_cost, generate as real_generate
+    from app.media import estimate_cost, generate as real_generate
 
     def priced(kind, prompt, **kwargs):
         out = real_generate(kind, prompt, **kwargs)
@@ -2881,3 +2882,38 @@ def test_every_artifact_the_server_emits_has_a_renderer_registered():
     assert v3 <= set(typing.get_args(ArtifactType)), "the server lost an artifact type"
     assert v3 <= switched, f"no renderer for {sorted(v3 - switched)}"
     assert v3 <= listed, f"not routed to the campaign renderer: {sorted(v3 - listed)}"
+
+
+def test_every_cta_a_card_declares_is_answerable_in_the_chat():
+    """The artifact panel is a READ-ONLY review surface (owner decision
+    2026-08-26): a card still DECLARES its actions, but the user answers in the
+    composer. So any turn whose artifact offers actions must also carry a
+    question that surfaces every one of them.
+
+    This is the dead-end bug in its new form. Previously a gate rendered with
+    no buttons because two lists disagreed; now the risk is a CTA that exists
+    in the payload with nowhere to be pressed. Options are LIFTED from the
+    actions rather than hand-written beside them, and this asserts the lift
+    actually covers what was declared. Verified non-vacuous: it inspects 7
+    actioned cards on this walk.
+    """
+    cid, tid = _ruminated("CTA reachability")
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+
+    inspected, unreachable = 0, []
+    for env in _envelopes(tid):
+        question = env.get("question") or {}
+        offered = {o["event"] for o in question.get("options", []) if o.get("event")}
+        for card in env.get("artifacts", []):
+            declared = {a["event"] for a in card.get("actions", []) if a.get("event")}
+            if not declared:
+                continue
+            inspected += 1
+            if not declared <= offered:
+                unreachable.append((card["type"], sorted(declared - offered)))
+
+    assert inspected, "no actioned cards on this walk — the test would pass vacuously"
+    assert not unreachable, (
+        "these CTAs are declared on a card but cannot be answered in the chat, "
+        f"so the user has no way to press them: {unreachable}")

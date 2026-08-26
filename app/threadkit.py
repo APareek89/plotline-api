@@ -21,10 +21,12 @@ from app import store
 from app.rag_client import rag
 from app.schemas import (
     AgentMessage,
+    AgentQuestion,
     ArtifactEnvelope,
     CreatorContext,
     Feedback,
     ObjectiveFamily,
+    QuestionOption,
 )
 from app.tools import ToolDispatcher
 
@@ -64,10 +66,68 @@ def _say(
     thread_id: str,
     text: str,
     artifacts: Optional[list[ArtifactEnvelope]] = None,
-    question: Optional[str] = None,
+    question: Optional[Any] = None,
+    *,
+    options: Optional[list[dict[str, Any]]] = None,
+    note: Optional[str] = None,
+    multi: bool = False,
+    free_text: bool = True,
 ) -> None:
-    msg = AgentMessage(thread_id=thread_id, text=text, artifacts=artifacts or [], question=question)
+    """Post an agent turn.
+
+    `question` accepts a plain string or a ready AgentQuestion. The string form
+    is kept because most call sites ask an open question with no fixed answers,
+    and forcing every one of them to construct an object would add ceremony
+    without adding truth. Pass `options=[{label, event, ...}]` to attach the
+    tappable CTAs — those are what the composer renders above itself.
+    """
+    q: Optional[AgentQuestion] = None
+    if isinstance(question, AgentQuestion):
+        q = question
+    elif question:
+        # A question is a prompt to the user, not a place to dump content. Long
+        # text here is always a bug upstream; truncating keeps the turn valid
+        # instead of failing validation deep in the driver.
+        text_q = str(question)
+        if len(text_q) > 240:
+            text_q = text_q[:237].rstrip() + "…"
+        q = AgentQuestion(
+            text=text_q,
+            options=[QuestionOption(**o) for o in (options or [])],
+            multi=multi, free_text=free_text, note=note,
+        )
+    if q is not None and not q.options and artifacts:
+        q.options = _options_from(artifacts[-1])
+    msg = AgentMessage(thread_id=thread_id, text=text, artifacts=artifacts or [], question=q)
     store.append_message(thread_id, "agent", msg.model_dump(mode="json"))
+
+
+def _options_from(artifact: Any) -> list[QuestionOption]:
+    """Lift an artifact's actions into the question's options.
+
+    Since 2026-08-26 the artifact panel is READ-ONLY and every CTA is answered
+    in the chat. The actions are still declared exactly once — on the artifact
+    that owns them — and lifted here, so the card and the composer cannot
+    disagree about what the user is allowed to do. Hand-writing the same
+    buttons in both places is the two-representations bug this codebase has
+    now hit four times.
+    """
+    if isinstance(artifact, ArtifactEnvelope):
+        aid, actions = artifact.id, [a.model_dump() for a in artifact.actions]
+    elif isinstance(artifact, dict):
+        aid, actions = artifact.get("id", ""), artifact.get("actions") or []
+    else:
+        return []
+    out: list[QuestionOption] = []
+    for a in actions:
+        label, event = a.get("label"), a.get("event")
+        if not label or not event:
+            continue
+        out.append(QuestionOption(
+            label=label, event=event, artifact_id=aid,
+            primary=a.get("style") == "primary",
+        ))
+    return out
 
 
 def _actions(*pairs: tuple[str, str, str]) -> list[dict[str, Any]]:

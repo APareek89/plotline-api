@@ -370,6 +370,38 @@ class ArtifactEnvelope(Strict):
     actions: list[ArtifactAction] = Field(default_factory=list)
 
 
+class QuestionOption(Strict):
+    """One tappable answer.
+
+    `event` is the UserAction this option fires, which is the whole point: the
+    option IS the call to action. Since 2026-08-26 the artifact panel is a
+    READ-ONLY review surface and every approve / regenerate / feedback lives
+    here instead, so a user never has to hunt a card for a button. An option
+    with no `event` is answer-only — it just posts its label as the reply.
+    """
+
+    label: str
+    event: Optional[str] = None
+    artifact_id: Optional[str] = None
+    primary: bool = False
+
+
+class AgentQuestion(Strict):
+    """The ONE question an agent turn may ask, plus how to answer it.
+
+    Still one question per turn — options are alternative answers to the same
+    question, not a queue of questions. `free_text` stays true by default
+    because a fixed option list that cannot be escaped is how an agent traps a
+    user who wants to say something the designer did not predict.
+    """
+
+    text: str
+    options: list[QuestionOption] = Field(default_factory=list)
+    multi: bool = False
+    free_text: bool = True
+    note: Optional[str] = None
+
+
 class AgentMessage(Strict):
     """Every agent turn, all studios. Text is a conversational envelope ONLY —
     artifact content is never restated as prose."""
@@ -377,7 +409,7 @@ class AgentMessage(Strict):
     thread_id: str
     text: str = Field(max_length=280)
     artifacts: list[ArtifactEnvelope] = Field(default_factory=list)
-    question: Optional[str] = None  # at most ONE — single field by design
+    question: Optional[AgentQuestion] = None  # at most ONE — single field by design
 
     @field_validator("text")
     @classmethod
