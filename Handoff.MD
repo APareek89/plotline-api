@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `a915c9f` (plotline-api) · `50a96bd` (plotline-web)
+last-synced: `eb5cc94` (plotline-api) · `22c522e` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -20,47 +20,63 @@ Service ids (verified 2026-08-26, both `not_suspended`):
 (owner, THE DESIGN CONTRACT) > `docs/SYSTEM-PROMPT-v2-marketing-studio.md` > Addendum-02 >
 Addendum-01 > PRD-v1. `PRD-addendum-03-generated.html` is reference only, NOT authoritative.
 
-## v3 — SHIPPED end to end, API and UI (build order in the brief §6)
-Owner decisions 2026-08-25: RAG removed from the **council only** (planner keeps it) · canon
-sheets **workspace-global** · stakeholder seats ship, but **the council is now ONE Marketing
-Expert** (later owner decision, see below) · final stitch **deferred, checkpoints instead**.
+## ✅ SHIPPED — v3 and v4 (see git log + Learning.MD for the detail)
+**v3** (2026-08-25): all ten build-order steps — council doctrine v3.1.0 + ONE Marketing
+Expert · `ReviewPolicy`/settings/presets · `campaign_brief` · `hook_rack` + W1-W3 ·
+`ShotBoard` + B1-B4 · `style_block` · `canon_sheet` ×4 · `keyframe_board` + hard gate ·
+`qc_report` + rights ledger · `TakeReject` + `variant_matrix` · stage checkpoints.
+Owner decisions: RAG removed from the council only · canon workspace-global · final
+stitch deferred.
 
-**✅ Shipped (160 tests green; floor was 83).** All ten build-order steps:
-council doctrine v3.1.0 + one reviewer · `ReviewPolicy`/settings API/presets ·
-`campaign_brief` · `hook_rack` + W1-W3 · `ShotBoard` + B1-B4 · `style_block` ·
-`canon_sheet` ×4 · `keyframe_board` + hard gate · `qc_report` + rights ledger ·
-`TakeReject` + `variant_matrix` · **stage checkpoints** · the 5 new stages in
-`CAMPAIGN_STAGES` + `advance_from()`. Step 1 was verified on real sonnet-4-6.
+**v4 interaction pivot** (2026-08-26): the card path is GONE — conversation is the only
+way in. Media routes through PixelBin with fal as fallback. Every CTA answered in the
+chat. Two panes, five agent-driven tabs. Blue and white only. See below.
 
-### ✅ THE PIPELINE RUNS. Verified over HTTP on real Claude.
-Five turn handlers + four prompts + dispatcher routing. Flow: cards → **brief** → options →
-templates(+style block) → **script** (video only) → **board** → **canon** → **keyframes**
-(hard gate) → generate → creative → **qc** → done. `_pauses_at()` is read per stage;
-`advance_from()` steps over `skip`ped work only.
-- **QA image: 21/21 end to end.** QA video: brief/options/script/board all produced.
-- Prompts inject their checks' constants: `script_thresholds_text()` (W1, with the
-  ARITHMETIC not just the ceiling) and `ref_slots_text()` (B3). NEVER hand-copy either.
-- The board is the source of truth; `detail` is its one-way server projection.
+## v4 — CURRENT SHAPE
+Flow: name → **intake** (conversation) → brief → options → templates(+style) → script
+(video only) → board → canon → keyframes (hard gate) → generate → creative → qc → done.
+`"paths"` and `"cards"` no longer exist as stages.
 
-### ✅ THE UI IS BUILT. Walked in the browser end to end.
-All six new artifact types render with working actions; **My Brand** ships with the canon
-library grid and its nav entry. Verified live: the brief card draws its full definition list
-with `single_message` largest, and clicking Approve advances the stage to options.
-⚠️ **Two lists must agree** — `CAMPAIGN_ARTIFACT_TYPES` (routing) and the switch (rendering)
-in `campaign-artifacts.tsx`. A type in the switch but not the list NEVER reaches the switch
-and draws a placeholder with no buttons. A Python test reads the TypeScript and guards it.
+- **Naming is the only form in the product.** `/studio/campaign` lands on it;
+  `/campaigns` is the browse GRID (Current/Archived, search, sort, delete).
+- **Every CTA lives in the composer.** `AgentMessage.question` is an `AgentQuestion`
+  with tappable options. Options are LIFTED from each artifact's own `actions` in
+  `threadkit._options_from()` — declared once, rendered twice, so they cannot drift.
+  ⚠️ It lifts from EVERY actioned artifact in the turn and labels carry the artifact id
+  when more than one is in play. Taking only the last one made options 1 and 2
+  unapprovable — see Learning.MD 2026-08-26.
+- **The right panel is READ-ONLY.** `readOnly` on `CampaignArtifactCard` sets a context
+  AND a pointer-events wrapper; bespoke button rows exist in several cards and gating
+  them by hand is how one stays live. ActionRow prints "waiting on you: …" so a blocked
+  card never looks finished.
+- **Claims confirmation moved to a question** (multi-select, consequence stated inline,
+  confirming none still confirms). The Brand card was its only home before.
+- **Media:** `app/media.py` routes PixelBin → fal. Never falls back on a POLICY refusal —
+  a declined prompt is a real answer. Audio goes straight to fal (PixelBin has no TTS).
+  REST contract in `app/pixelbin_client.py`, read off `@pixelbin/admin`, not guessed.
+- **Web search:** Anthropic's NATIVE tool, on the INTAKE agent only. Never the planner or
+  council — a web result must not become the evidence behind a claim. Queries captured
+  into `RunLog.searched` and shown, so "searched the web" is never an empty claim.
+- **Palette:** ok/warn/danger keep their token NAMES but resolve to accent / secondary /
+  INVERTED white. Status reads by weight, not hue.
+
+### ✅ QA — walked in the browser on real Haiku, 2026-08-26
+name → intake (one message filled product+campaign+brand) → web search corrected an
+invented spec → claims gate → brief → options → templates(skipped) → **script**. 8 agent
+calls, ~$0.30, well under the $2 budget. Tabs auto-switched; brief and script both render
+in full detail. **167 tests green** (floor was 83).
 
 ### 🔴 WHAT IS STILL MISSING
-1. **fal untested** — balance is low, so `MOCK_MEDIA=1` throughout. Generate/creative/
-   keyframes/canon are verified for WIRING only; no real image or video under v3.
-2. **The reject UI is server-side only.** `reject_<cause>_<slot>` works and is tested, but
-   `CreativeSetCard` does not yet offer the five causes as buttons — a user can only re-roll.
-3. **Canon views use the draft tier and a generic per-view prompt.** Good enough to prove
-   coverage; a real sheet wants the sheet's own brief + locks in each view prompt.
-4. **Style block has no editable card.** It rides on the board card as a read-only block;
-   §3 asks for six editable rows and a copy action.
-5. `keyframes` renders one frame per shot regardless of `keyframes_per_shot` — the setting
-   is stored and shown but not yet consumed by the renderer loop.
+1. **fal AND PixelBin are both untested for real.** `MOCK_MEDIA=1` throughout; no real
+   image or video has rendered under v3 or v4. Owner is adding `PIXELBIN_API_TOKEN`.
+2. **QA stopped at script by design.** board → canon → keyframes → generate → creative →
+   qc are unexercised in v4; they passed under v3 and the stage machine is unchanged.
+3. **The reject UI is server-side only.** `reject_<cause>_<slot>` works and is tested, but
+   the five causes are not offered as options yet.
+4. **Canon views use the draft tier and a generic per-view prompt.**
+5. `keyframes_per_shot` is stored and shown but not consumed by the renderer loop.
+6. **31 QA campaigns are still in the dev DB.** The grid can delete them now — not done
+   for you, since that is your data.
 
 ### 📌 Prompt lessons from the paid runs — do not undo these
 Three retry causes fixed by prompt, never by weakening a check: (a) the reviewer invented
@@ -73,12 +89,13 @@ Haiku's chair went 3 attempts → 1; Sonnet needs none.
 of the four council calls, which is the main reason it exists.
 
 ## CURRENT STATE
-- ✅ Shipped: v2 campaign flow verified END-TO-END on real models + real fal (Ad Card
-  `ad_faa4f000b5` LIVE, credits reconciled exactly); pre-pivot app deleted from both repos
-  (−4.8k lines); rumination ported to LangGraph; observability surface; 4 real-mode prompt
-  bug classes fixed. See git log + Learning.MD.
-- ✅ **160 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
-  floor — never weaken one; re-point it only when an INVARIANT changed by owner decision.
+- ✅ Shipped earlier: v2 verified end-to-end on real models + real fal (Ad Card
+  `ad_faa4f000b5` LIVE, credits reconciled); pre-pivot app deleted (−4.8k lines);
+  rumination on LangGraph; observability surface. See git log + Learning.MD.
+- ✅ **167 tests pass** (floor was 83). Run `.venv/bin/python -m pytest` with **NO path
+  argument** — passing `tests/` overrides `pytest.ini`'s `testpaths = tests rag/tests`
+  and silently skips 12. `tests/test_marketing.py` holds the acceptance floor: never
+  weaken one; re-point only when an INVARIANT changed by owner decision, and say so.
 - ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
   real key in `.env`.
   **Start it — ONE command:** `cd ~/Documents/plotline-web && npm run dev`. Its `predev`
@@ -116,44 +133,28 @@ of the four council calls, which is the main reason it exists.
   artifacts (CoverageChip renders only on legacy concept/plan/confidence_card, which the v2
   flow never produces). So doctrine §1's honest-label instruction has no target, and a
   stakeholder seat produces a review nobody can see. Owner declined the surface — small to add.
-- 🟡 `MOCK_MEDIA=1` is set in `.env` from council testing — flip back before media work.
+- 🟡 `MOCK_MEDIA=1` in `.env`. Flip to 0 **and** add `PIXELBIN_API_TOKEN` before media
+  work — PixelBin is primary now, fal is the fallback. Neither is tested for real.
 - 🟡 Corpus is still the real limit: 25 chunks, 0 with a real URL. `kb/sources/*.yaml` →
   ≥60 real-URL chunks. NOTE this now affects the PLANNER ONLY — the reviewer is frozen.
-- 🤖 Addendum-03 leftovers: `brand_profile` storage+routes (My Brand SHIPPED — it hosts the
-  Canon library; brand_profile would be a second section on it); `reference_media[]`
-  (user reference > template); campaign archive/rename/delete; My Campaigns is still a
-  ROW LIST — §02 wants a folder GRID.
-- 🤖 QA finding: `/studio/campaign` Step 2 disables the prompt bar, so the brief-first path
-  only works from the thread page. Same step, two affordances.
-- 🤖 Dev DB is full of my QA campaigns ("Path A/B", "QA one image no claims", …). No delete
-  route yet — clean directly if they bother you.
-- 🟡 **Loop.MD's Rung 1 command under-runs the suite by 12.** It says
-  `pytest tests/ -q`, but an explicit path OVERRIDES `pytest.ini`'s
-  `testpaths = tests rag/tests`, so it runs 148 and silently skips the whole `rag/tests`
-  suite. The floor of **160 is `.venv/bin/python -m pytest` with NO path argument.**
-  Same "one fact, two representations" species as the rest — pytest.ini and Loop.MD
-  disagree about what "the suite" is, and nothing compares them.
+- ✅ ~~My Campaigns is a row list~~ — it is the folder GRID now, with delete. ~~Step 2's
+  disabled prompt bar~~ — that whole screen is gone.
+- 🤖 Addendum-03 leftovers: `brand_profile` storage+routes (My Brand hosts the Canon
+  library; brand_profile would be a second section on it); `reference_media[]` (user
+  reference > template); campaign rename, and a REAL archive — the Archived tab currently
+  derives from status rather than a stored flag, and says so.
+- 🤖 31 QA campaigns still in the dev DB. The grid deletes them now; left for you.
+- 🟡 **Loop.MD's Rung 1 command still says `pytest tests/`** and so under-runs by 12.
+  Fix the file when you next touch it; the real command is in CURRENT STATE above.
 
-## VIDEO FLOW — RESOLVED by v3 (kept for the rationale)
-Items 1-3 (scenes/shots split, character plan, keyframe/motion split) landed as `ShotBoard`
-+ `CanonSheet` + `KeyframeBoard`. Item 5 (checkpoints) is done. Item 4 (stitching) is the one
-explicit DEFERRAL — owner chose checkpoints over it. Original study below.
-
-### original proposal (reference-only study of gofynd/pixelbin@marketing-studio-service)
-Read for ARCHITECTURE ONLY; nothing copied, nothing of theirs lands here (their stack is
-Node/Remotion, ours Python/fal). Their pipeline: inputs → ad-vector → strategy → assets →
-scenes → shots → keyframes → video. Ours: options → templates → detail → generate → creative.
-1. **Split scenes from shots** — plan narrative beats, then decompose to camera units. Gives
-   a cheap place to critique the story before paying for frames.
-2. **Character plan + safety pass** — `characters[]{character_id, description, role,
-   outfits[]}`; every shot binds exactly ONE role (character+outfit OR product). We have no
-   character primitive today; this is what "character shots" needs.
-3. **Split keyframe/motion prompts with negatives + provider length pre-check** — and a
-   motion-verb lexicon (same trick as our R2 receipt cues).
-4. **Stitching** — we don't stitch at all today; we hand over N clips. ffmpeg concat + audio
-   bed is our equivalent. Pattern worth copying: stitching DEGRADES honestly, never crashes.
-5. **Checkpoints (biggest reliability win, not video-specific)** — stage-level resume. Today
-   a transient error discards a full paid rumination (~25 min, real money).
+## VIDEO FLOW — RESOLVED by v3
+Scenes/shots split, character plan and keyframe/motion split all landed as `ShotBoard` +
+`CanonSheet` + `KeyframeBoard`; checkpoints are done. **Stitching is the one explicit
+DEFERRAL** — the owner chose checkpoints over it, so today we hand over N clips rather
+than one film. ffmpeg concat + an audio bed is our equivalent when it is picked up, and
+the pattern worth copying is that stitching DEGRADES honestly rather than crashing. The
+full reference-only study of gofynd/pixelbin@marketing-studio-service is in git history
+(nothing of theirs landed here — their stack is Node/Remotion, ours Python/fal).
 
 ## Decisions
 - 2026-08-21 — SQLite + local files for dev; ports api 8600 / web 3100 / rag 8788 / devrag 8787
@@ -169,17 +170,16 @@ scenes → shots → keyframes → video. Ours: options → templates → detail
 - 2026-08-25 — Local only: Render autoDeploy off
 - 2026-08-26 — P0-2 deferred by owner: Render stays live, public, real keys. Logged so a
   future session does not re-raise it as new; it is a known accepted risk, not an oversight
-- 2026-08-26 — **v4 interaction pivot (owner), detailed spec still pending.** The campaign
+- 2026-08-26 — **v4 interaction pivot (owner) — SHIPPED.** The campaign
   flow becomes conversation-first: (a) enrich the brief with Anthropic's NATIVE
   `web_search` tool — no new vendor or key, citations arrive in a shape the existing
   evidence validators can consume; (b) the structured 3-card detail path is removed
   ENTIRELY, cards and block routes included — the agent becomes the only way to populate a
   campaign, and this re-points ~30 tests by owner decision, not by weakening them;
-  (c) the left campaign rail is deleted outright. The STAGES do not change — only how
-  input is gathered. ⚠️ Removing the brand card orphans `claims_confirmed`, which intake
-  may not self-confirm (`test_path_b_intake_may_not_rename_drop_or_self_confirm`); it
-  needs a new home or the compliance chain breaks. Await the owner's flow/UI prompt.
+  (c) the left campaign rail is deleted outright. The STAGES did not change — only how
+  input is gathered. `claims_confirmed` was orphaned by (b) and now lives in a chat
+  question, since intake may not self-confirm it. All of this is shipped and QA'd.
 
-**Session efficiency (2026-08-25):** 🎯 ~55% feature · 🔧 ~25% support · 🔁 ~20% rework
-(rework was self-inflicted: unpinned langgraph broke the Render build; unisolated LOG_DIR
-leaked test failures into observability; `npm run build` clobbered dev's `.next` three times)
+**Session efficiency (2026-08-26):** 🎯 ~70% feature · 🔧 ~15% support · 🔁 ~15% rework
+(rework was two dead ends the suite could not see — both found within minutes of driving
+the browser, both now pinned by tests that bite)
