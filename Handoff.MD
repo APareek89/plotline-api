@@ -77,7 +77,14 @@ of the four council calls, which is the main reason it exists.
 - ✅ **160 tests pass** (floor was 83). `tests/test_marketing.py` holds the acceptance
   floor — never weaken one; re-point it only when an INVARIANT changed by owner decision.
 - ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
-  real key in `.env`. Start: `bash run.sh` (api+rag+devrag), `npm run dev` (web).
+  real key in `.env`.
+  **Start it:** `bash run-detached.sh` (all three, survives the shell that started them) +
+  `npm run dev` in plotline-web. `bash run.sh` still works but runs in the FOREGROUND and
+  traps EXIT to kill devrag — right for a terminal you are watching, fatal for anything that
+  starts it from a tool call, because the whole stack dies with that shell.
+  `bash run-detached.sh --status | --stop` for the rest.
+  ⚠️ Symptom when the stack is down: **"Failed to fetch" / "Can't reach the API"** in the
+  browser. It is ops, not an app bug — check `--status` FIRST before debugging anything.
 - ✅ Observability = its own nav tab `/observability` (NOT per-thread). Gated on
   `PLOTLINE_DEBUG_OBSERVABILITY=1` (already in `.env`) + `NODE_ENV !== production`.
 - ▶ Loop.MD status: offered (awaiting your answer)

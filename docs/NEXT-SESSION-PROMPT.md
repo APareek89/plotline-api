@@ -26,8 +26,13 @@ Pipeline: cards → **brief** → options → templates(+style block) → **scri
 **board** → **canon** → **keyframes** (hard gate) → generate → creative → **qc** → done.
 All six new artifact types render with working actions; My Brand hosts the canon library.
 
-Run it: `bash run.sh` in plotline-api (api :8600 + rag :8788 + devrag :8787),
-`npm run dev` in plotline-web (:3100). Observability at
+**Run it FIRST, before anything else:** `bash run-detached.sh` in plotline-api (starts
+api :8600 + rag :8788 + devrag :8787 detached, idempotent, `--status` / `--stop` too), and
+`npm run dev` in plotline-web (:3100). Do NOT use `run.sh` from a tool call — it runs in the
+foreground and traps EXIT to kill devrag, so the whole stack dies when that shell ends. If
+the browser says "Can't reach the API", that is this, not an app bug: run `--status`.
+
+Observability at
 `http://localhost:3100/observability` shows every agent node's structured input/output.
 Use it FIRST when something stalls — it names which node died and what it was asked.
 
