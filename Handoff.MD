@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `eb5cc94` (plotline-api) · `22c522e` (plotline-web)
+last-synced: `e588592` (plotline-api) · `9600150` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -66,7 +66,37 @@ invented spec → claims gate → brief → options → templates(skipped) → *
 calls, ~$0.30, well under the $2 budget. Tabs auto-switched; brief and script both render
 in full detail. **167 tests green** (floor was 83).
 
+## v5 — IN FLIGHT (`docs/v5-MASTER-PROMPT.md` + the owner's addendum)
+Seven stages, a Code QA gate after each, Stage 7 (paid) gated on a morning go-ahead.
+Owner's visual target is `~/Documents/Reference material/`. **Floor: 187 tests.**
+
+- ✅ **Stage 0** — 183 tests green at `7a806ce`, typecheck clean, `MOCK_MEDIA=1`,
+  `/observability` renders both lenses (agents 300 · media 51 · $1.52 lifetime).
+- ✅ **Stage 1 — plural references** (`e588592`). `media.generate()` and
+  `pixelbin_client.generate()` take `image_urls: list[str]`; over-supply is trimmed
+  ONCE in the router against `config.MEDIA_REF_SLOTS` — the same table B3 lints —
+  and every dropped ref comes back in `dropped_refs` with its reason. B3 had been
+  policing a capacity the client could not reach since v3. `config.media_key()` /
+  `config.ref_slots()` are now the one resolver both sides read; do not add a second
+  cap in the client. 187 tests.
+- ⏭ **Stage 2 next** — one sheet per canon kind, not one render per view. **Blocked on
+  one owner fact:** does a higher `output_resolution` cost more PixelBin credits? If
+  not, a full 8-view sheet and a single angle both cost 1 credit and the addendum's
+  "assume the cheap option" has no cheap option to assume.
+- ⚠️ Owner addendum supersedes the master prompt on Stage 2: **do not ask the angle
+  question.** Assume forward, state the upgrade cost, correct at the gate — same
+  principle as `MAX_INTAKE_ASKS`. Stage 6's walk line still says "angle choice"; it
+  is wrong.
+- ⚠️ QA gate now also requires: **type like a person** — 3+ short fragments through any
+  conversational stage before calling it done, never one well-formed sentence.
+
 ### 🔴 WHAT IS STILL MISSING
+0. **fal cannot carry image references on the IMAGE path** — found wiring Stage 1.
+   Its video model seeds from ONE `image_url`; its image path here is text-to-image
+   with no verified reference field. Both now REPORT what they could not carry, so a
+   PixelBin→fal failover no longer silently renders something else — but a failover
+   mid-campaign still means weaker consistency than the primary. Wire fal's reference
+   field from its real schema, or accept the degradation knowingly.
 1. **fal AND PixelBin are both untested for real.** `MOCK_MEDIA=1` throughout; no real
    image or video has rendered under v3 or v4. Owner is adding `PIXELBIN_API_TOKEN`.
 2. **QA stopped at script by design.** board → canon → keyframes → generate → creative →
@@ -92,7 +122,7 @@ of the four council calls, which is the main reason it exists.
 - ✅ Shipped earlier: v2 verified end-to-end on real models + real fal (Ad Card
   `ad_faa4f000b5` LIVE, credits reconciled); pre-pivot app deleted (−4.8k lines);
   rumination on LangGraph; observability surface. See git log + Learning.MD.
-- ✅ **167 tests pass** (floor was 83). Run `.venv/bin/python -m pytest` with **NO path
+- ✅ **187 tests pass** (floor was 83; 183 before Stage 1). Run `.venv/bin/python -m pytest` with **NO path
   argument** — passing `tests/` overrides `pytest.ini`'s `testpaths = tests rag/tests`
   and silently skips 12. `tests/test_marketing.py` holds the acceptance floor: never
   weaken one; re-point only when an INVARIANT changed by owner decision, and say so.
@@ -112,16 +142,28 @@ of the four council calls, which is the main reason it exists.
 - ▶ Loop.MD status: offered (awaiting your answer)
 
 ## PENDING — start here
-- ▶ **NEXT SESSION: `docs/v5-MASTER-PROMPT.md`.** Seven stages, a Code QA gate after each,
-  and the paid run (Stage 7) BLOCKED until the owner gives a morning go-ahead. Budget for
-  that run is a hard ceiling: $1-2 Anthropic + 50 PixelBin credits, one attempt.
-- 🔴 **Consistency gap, the important one.** canon → keyframe is TEXT ONLY: `CanonSheet.locks`
-  are strings in a prompt and the canon IMAGES are never passed as references, so the
-  product in the keyframes need not match the product sheet the user approved.
-  keyframe → video IS image-consistent (`image_url=frame["url"]`, verified live).
-  Compounding it: `media.generate()` takes a SINGULAR `image_url` while
-  `config.MEDIA_REF_SLOTS` declares 2-6 slots and the B3 lint polices those numbers —
-  the lint enforces a capacity the client cannot use. Stages 1 and 3 of the master prompt.
+- ▶ **Stage 2 of `docs/v5-MASTER-PROMPT.md`**, read with the owner's addendum. Awaiting
+  the resolution/credit answer above before the cost line can be honest.
+- 🔴 **Consistency gap, the important one — Stage 3, still open.** canon → keyframe is
+  TEXT ONLY: `CanonSheet.locks` are strings in a prompt and the canon IMAGES are never
+  passed as references, so the product in the keyframes need not match the sheet the
+  user approved. `_render_keyframe()` calls `generate()` with no references at all.
+  keyframe → video IS image-consistent (verified live). The client half is now done —
+  `image_urls[]` exists and the slot budget is honoured — so Stage 3 is purely a matter
+  of binding the approved sheet's URL to the shots that reference its canon id.
+- 🟠 **Reference-material questions the master prompt does not settle** (raised before
+  Stage 2, unanswered):
+  1. `CANON_COVERAGE` names product views `front/rear/left/right/top/base`; the owner's
+     sheet names them lateral/medial profile, 3/4 front/rear, top-down, outsole, heel
+     detail, midsole detail. `coverage`, `complete` and `validate_canon_sheet` all key
+     off the former. Whose vocabulary wins is an invariant call, not a cosmetic one.
+  2. The 3×3 storyboard sheet in the reference shots cannot be the video seed — Stage 3
+     needs per-frame URLs. Treating it as a review artifact ALONGSIDE per-shot stills
+     unless the owner says otherwise.
+  3. The artifact detail rail is type-dependent in the reference: images get Prompt +
+     Settings + approve/reject; text artifacts get only Name + Download + Delete.
+     Approve is a TOGGLE ("Mark as approved" ⇄ "Remove approved status"). There is also
+     a version chip and prev/next paging the master prompt does not mention.
 - ✅ ~~P0-1 seed evidence~~ — `PLOTLINE_ALLOW_SEED_EVIDENCE=0` in `.env` (2026-08-25);
   `/health` reports `allow_seed_evidence: false`. Note `.env` is gitignored, so this is a
   LOCAL fix — **Render still has `allow_seed_evidence: true`, confirmed live 2026-08-26.**
@@ -154,8 +196,8 @@ of the four council calls, which is the main reason it exists.
   reference > template); campaign rename, and a REAL archive — the Archived tab currently
   derives from status rather than a stored flag, and says so.
 - 🤖 31 QA campaigns still in the dev DB. The grid deletes them now; left for you.
-- 🟡 **Loop.MD's Rung 1 command still says `pytest tests/`** and so under-runs by 12.
-  Fix the file when you next touch it; the real command is in CURRENT STATE above.
+- ✅ ~~Loop.MD Rung 1 said `pytest tests/`~~ — fixed 2026-08-26; it now says no path argument.
+
 
 ## VIDEO FLOW — RESOLVED by v3
 Scenes/shots split, character plan and keyframe/motion split all landed as `ShotBoard` +
