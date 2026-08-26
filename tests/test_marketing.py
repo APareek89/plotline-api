@@ -3116,3 +3116,72 @@ def test_a_restart_mid_campaign_does_not_lose_the_brief():
         assert after.get(key), f"{key} did not survive a restart — the stage after it gets nothing"
     assert after["brief"] == before["brief"]
     assert after.get("approved_option") is not None, "the approved option did not survive either"
+
+
+# ---- PixelBin wire contract -------------------------------------------------
+# Four separate bugs shipped in the first cut of this client, and every one of
+# them only surfaced at GENERATION time — i.e. after the user had approved a
+# cost gate. Listing models and reading schemas worked throughout, which is
+# exactly what made them easy to miss. These pin the wire shape.
+
+
+def test_pixelbin_form_fields_are_namespaced_under_input():
+    """The endpoint validates against /input, so a flat `prompt` field comes
+    back as 'missingProperty: prompt' while the value is sitting in the body."""
+    from app import pixelbin_client as pb
+
+    fields = dict(pb._as_form({"prompt": "x", "aspect_ratio": "9:16"}))
+    assert "input.prompt" in fields and "prompt" not in fields
+    assert fields["input.aspect_ratio"] == "9:16"
+
+    # a list repeats under one field name; a JSON array is silently ignored
+    repeated = pb._as_form({"images": ["a", "b"]})
+    assert repeated == [("input.images", "a"), ("input.images", "b")]
+
+
+def test_pixelbin_platform_auth_is_base64_not_the_raw_token(monkeypatch):
+    """/service/public/* accepts the raw token and /service/platform/* does not.
+    So schemas and model lists work while generation 401s — the one call that
+    costs money is the only one that fails."""
+    import base64
+    from app import pixelbin_client as pb
+
+    monkeypatch.setattr(config, "PIXELBIN_API_TOKEN", "tok-123")
+    header = pb._headers()["Authorization"]
+    assert header == "Bearer " + base64.b64encode(b"tok-123").decode()
+    assert "tok-123" not in header, "the raw token must not travel"
+
+
+def test_every_configured_pixelbin_model_has_a_capability_row():
+    """The capability table says which parameters a model actually declares —
+    video takes image_urls where image takes images, duration is a STRING enum,
+    and nanoBanana has no output_resolution at all. A configured model with no
+    row means the client would guess, and a guessed parameter is a 400 that
+    reads like an outage. Two lists that must agree, so something compares them.
+    """
+    from app import pixelbin_client as pb
+
+    missing = [m for m in config.PIXELBIN_MODELS.values() if m not in pb._CAPS]
+    assert not missing, f"no capability row for {missing} — add it from the schema endpoint"
+
+
+def test_pixelbin_snaps_ratio_and_duration_into_the_model_enum():
+    """Veo offers only 9:16 and 16:9 and durations 4/6/8. A brief outside those
+    has to land somewhere DELIBERATELY, not as a provider error the user reads
+    as an outage."""
+    from app import pixelbin_client as pb
+
+    veo = pb._CAPS["veo31_generate"]
+    assert pb._snap_ratio("9:16", veo["ratios"]) == "9:16"
+    assert pb._snap_ratio("16:9", veo["ratios"]) == "16:9"
+    # by ratio distance: 1.0 is 0.44 from 0.5625 and 0.78 from 1.78, so a square
+    # brief lands PORTRAIT. Deterministic and stated, rather than a coin flip.
+    assert pb._snap_ratio("1:1", veo["ratios"]) == "9:16"
+    assert pb._snap_ratio("4:5", veo["ratios"]) == "9:16"      # 0.8 → nearer 0.5625
+    assert pb._snap_ratio("21:9", veo["ratios"]) == "16:9"     # 2.33 → nearer 1.78
+    assert pb._snap_ratio("garbage", veo["ratios"]) == "9:16"  # unparseable never crashes
+
+    assert pb._snap_duration(6, veo["durations"]) == "6"
+    assert pb._snap_duration(5, veo["durations"]) in {"4", "6"}
+    assert pb._snap_duration(30, veo["durations"]) == "8"      # clamps, never passes 30 through
+    assert isinstance(pb._snap_duration(6, veo["durations"]), str), "the enum is strings, not ints"

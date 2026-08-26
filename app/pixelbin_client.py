@@ -19,6 +19,7 @@ PixelBin failure and a fal failure identically when it decides to fall back.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import time
@@ -57,28 +58,45 @@ def split_name(name: str) -> tuple[str, str]:
 
 
 def _headers() -> dict[str, str]:
+    """Platform auth is `Bearer base64(token)`, NOT the raw token.
+
+    The /service/public/* endpoints accept the raw value, which makes this easy
+    to get wrong: listing models and reading schemas both work, and only
+    generation — the call that costs money — comes back 401. Read off
+    PlatformAPIClient.execute() in @pixelbin/admin, which base64s the access
+    token before prefixing "Bearer ".
+    """
     if not configured():
         raise PixelbinError(
             "PIXELBIN_API_TOKEN is not set — PixelBin generation unavailable "
             "(set MOCK_MEDIA=1 to develop without it, or PLOTLINE_MEDIA_PROVIDER=fal)"
         )
-    return {"Authorization": f"Bearer {config.PIXELBIN_API_TOKEN.strip()}"}
+    encoded = base64.b64encode(config.PIXELBIN_API_TOKEN.strip().encode()).decode()
+    return {"Authorization": f"Bearer {encoded}"}
 
 
 def _as_form(payload: dict[str, Any]) -> list[tuple[str, str]]:
-    """Multipart fields. A list value is repeated under the same key, which is
-    what the SDK does for `images` — a JSON-encoded array is silently ignored
-    by the endpoint, so this shape is not cosmetic."""
+    """Multipart fields, named `input.<key>` — NOT the bare key.
+
+    The endpoint validates against `/input`, so a flat `prompt` field comes back
+    as "missingProperty: prompt" while the value is sitting right there in the
+    body. Read off Predictions.create() in @pixelbin/admin, which builds
+    `const fieldName = \\`input.${key}\\``.
+
+    A list value is repeated under the same field name; a JSON-encoded array is
+    silently ignored, so this shape is not cosmetic either.
+    """
     fields: list[tuple[str, str]] = []
     for key, value in payload.items():
         if value is None:
             continue
+        field = f"input.{key}"
         if isinstance(value, (list, tuple)):
-            fields.extend((key, str(v)) for v in value if v is not None)
+            fields.extend((field, str(v)) for v in value if v is not None)
         elif isinstance(value, bool):
-            fields.append((key, "true" if value else "false"))
+            fields.append((field, "true" if value else "false"))
         else:
-            fields.append((key, str(value)))
+            fields.append((field, str(value)))
     return fields
 
 
@@ -100,6 +118,14 @@ def submit_and_wait(name: str, payload: dict[str, Any], timeout_s: float = 600) 
             ], timeout=60)
             if sub.status_code in (400, 422):
                 raise PixelbinError(f"{name} rejected the request: {sub.text[:300]}", policy=True)
+            if sub.status_code in (401, 403):
+                # Credentials are a real answer, not a blip. Retrying spends
+                # wall-clock to be told the same thing, and the message has to
+                # name the likely cause or the next person re-derives it.
+                raise PixelbinError(
+                    f"{name} rejected the credentials ({sub.status_code}). The platform API "
+                    "wants Bearer base64(PIXELBIN_API_TOKEN); check the token is current."
+                )
             if sub.status_code in (402, 429):
                 # quota and rate-limit are real answers; falling back to the
                 # other provider is the right move, retrying here is not.
@@ -144,6 +170,75 @@ def submit_and_wait(name: str, payload: dict[str, Any], timeout_s: float = 600) 
     raise PixelbinError(f"{name} unreachable after retry: {last}")
 
 
+# Per-model capability table, read from the LIVE schema endpoint on 2026-08-26:
+#   GET /service/public/transformation/v1.0/predictions/schema/{name}
+#
+# These models do NOT share a parameter set, and the differences are not
+# cosmetic — video takes `image_urls` where image takes `images`, `duration` is
+# a STRING enum rather than a number, and nanoBanana has no output_resolution at
+# all. Sending a parameter a model does not declare turns a 400 into "the
+# provider is broken", which is the dishonest-error class this codebase keeps
+# stamping out. Re-check with `scripts/`-less curl against the schema URL above
+# if a model is added.
+_CAPS: dict[str, dict[str, Any]] = {
+    "nanoBanana_generate": {
+        "image_field": "images",
+        "ratios": {"auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
+        "resolution": None,
+    },
+    "nanoBanana2_generate": {
+        "image_field": "images",
+        "ratios": {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
+                   "4:1", "1:4", "1:8", "8:1"},
+        "resolution": {"0.5K", "1K", "2K", "4K"},
+    },
+    "nanoBananaPro_generate": {
+        "image_field": "images",
+        "ratios": {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"},
+        "resolution": {"1K", "2K", "4K"},
+    },
+    "veo31_generate": {
+        "image_field": "image_urls",
+        "ratios": {"9:16", "16:9"},
+        "durations": {"4", "6", "8"},
+        "resolutions": {"720p", "1080p", "4k"},
+    },
+    "veo31Fast_generate": {
+        "image_field": "image_urls",
+        "ratios": {"9:16", "16:9"},
+        "durations": {"4", "6", "8"},
+        "resolutions": {"720p", "1080p", "4k"},
+    },
+}
+
+
+def _snap_ratio(ratio: str, allowed: set[str]) -> str:
+    """Nearest allowed aspect ratio. Veo only offers 9:16 and 16:9, so a 1:1
+    brief has to land somewhere — and it must land DELIBERATELY rather than as
+    a provider error the user reads as an outage."""
+    if ratio in allowed:
+        return ratio
+    try:
+        w, h = (float(x) for x in ratio.split(":"))
+        want = w / h
+    except (ValueError, ZeroDivisionError):
+        return "9:16" if "9:16" in allowed else sorted(allowed)[0]
+    best, gap = None, float("inf")
+    for cand in allowed:
+        if cand == "auto":
+            continue
+        cw, ch = (float(x) for x in cand.split(":"))
+        d = abs(cw / ch - want)
+        if d < gap:
+            best, gap = cand, d
+    return best or sorted(allowed)[0]
+
+
+def _snap_duration(seconds: float, allowed: set[str]) -> str:
+    """Nearest allowed duration, as the STRING the enum declares."""
+    return min(allowed, key=lambda d: abs(int(d) - seconds))
+
+
 def generate(
     kind: str,
     prompt: str,
@@ -154,35 +249,44 @@ def generate(
     image_url: Optional[str] = None,
     resolution: str = "2K",
 ) -> dict[str, Any]:
-    """One image or video via PixelBin. Returns {url, model}.
+    """One image or video via PixelBin. Returns {url, model, params}.
 
-    Audio is deliberately absent: PixelBin's prediction catalogue has no TTS
-    operation, so routing audio here would fail at the provider with a confusing
-    message. `media.py` sends audio straight to fal and says so.
+    Only parameters the target model actually declares are sent, and ratio and
+    duration are snapped into that model's enum rather than passed through — a
+    9:16 brief against a 16:9-only model should degrade visibly, not 400.
+
+    Audio is deliberately absent: PixelBin's catalogue has no TTS operation, so
+    routing audio here would fail at the provider with a confusing message.
+    `media.py` sends audio straight to fal and says so.
     """
     if kind == "image":
         key = "image_draft" if tier == "draft" else ("image_pro" if tier == "pro" else "image_final")
         model = config.PIXELBIN_MODELS[key]
-        payload: dict[str, Any] = {
-            "prompt": prompt,
-            "aspect_ratio": ratio,
-            "output_resolution": resolution,
-        }
-        if image_url:
-            payload["images"] = [image_url]
-        urls = submit_and_wait(model, payload, timeout_s=300)
+        timeout = 300.0
     elif kind == "video":
         model = config.PIXELBIN_MODELS["video"]
-        payload = {
-            "prompt": prompt,
-            "aspect_ratio": ratio,
-            "duration": int(duration_s),
-        }
-        if image_url:
-            payload["images"] = [image_url]
-        urls = submit_and_wait(model, payload, timeout_s=900)
+        timeout = 900.0
     else:
         raise PixelbinError(f"PixelBin has no {kind} operation — fal handles that kind")
 
-    logger.info("pixelbin %s generated via %s", kind, model)
-    return {"url": urls[0], "model": f"pixelbin:{model}"}
+    caps = _CAPS.get(model)
+    if caps is None:
+        raise PixelbinError(
+            f"{model} is not in the capability table — its parameter set is unknown, and "
+            "guessing one is how a silent 400 becomes a fake outage. Read its schema and add it."
+        )
+
+    payload: dict[str, Any] = {"prompt": prompt, "aspect_ratio": _snap_ratio(ratio, caps["ratios"])}
+    if kind == "video":
+        payload["duration"] = _snap_duration(duration_s, caps["durations"])
+        payload["resolution"] = "720p"
+    elif caps.get("resolution"):
+        payload["output_resolution"] = resolution if resolution in caps["resolution"] else "2K"
+    if image_url:
+        payload[caps["image_field"]] = [image_url]
+
+    urls = submit_and_wait(model, payload, timeout_s=timeout)
+    logger.info("pixelbin %s via %s (%s)", kind, model,
+                ", ".join(f"{k}={v}" for k, v in payload.items() if k != "prompt"))
+    return {"url": urls[0], "model": f"pixelbin:{model}",
+            "params": {k: v for k, v in payload.items() if k != "prompt"}}

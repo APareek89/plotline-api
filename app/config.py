@@ -97,11 +97,14 @@ PIXELBIN_DOMAIN = os.environ.get("PIXELBIN_DOMAIN", "https://api.pixelbin.io")
 # PixelBin prediction names are "<plugin>_<operation>" and are a DIFFERENT
 # namespace from fal's model slugs — the two maps are deliberately separate so
 # a fallback never silently sends a fal slug to PixelBin or vice versa.
+# Names verified against the live catalogue on 2026-08-26 (97 predictions).
+# Veo is `veo31_*`, NOT `veo3_*` — the latter does not exist and would 404 at
+# generation time, i.e. after the user had already approved a cost gate.
 PIXELBIN_MODELS = {
     "image_draft": os.environ.get("PLOTLINE_PB_IMAGE_DRAFT", "nanoBanana_generate"),
     "image_final": os.environ.get("PLOTLINE_PB_IMAGE_FINAL", "nanoBanana2_generate"),
     "image_pro": os.environ.get("PLOTLINE_PB_IMAGE_PRO", "nanoBananaPro_generate"),
-    "video": os.environ.get("PLOTLINE_PB_VIDEO", "veo3Fast_generate"),
+    "video": os.environ.get("PLOTLINE_PB_VIDEO", "veo31_generate"),
 }
 FAL_KEY = os.environ.get("FAL_KEY", "")
 # MOCK_MEDIA=1 → deterministic placeholder assets, zero spend; the full flow
