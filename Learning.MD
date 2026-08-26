@@ -314,3 +314,69 @@ dead end at the FIRST gate a user reaches. An API test proves the server can
 produce an artifact; it says nothing about whether the artifact is reachable.
 Any flow with a UI needs at least one pass driven through the UI — the same
 lesson as "the tests call save_block(), they never type", one layer up.
+
+## 2026-08-26 — Three cards, one button, two of them unreachable
+
+**Symptom.** Driving the new two-pane UI, the options turn offered a single
+`Approve` above the composer. Three campaign options were on screen; only
+option THREE could ever be approved, and the button did not say so.
+
+**Why-chain.**
+1. Why one button? `_options_from()` was handed `artifacts[-1]`.
+2. Why the last one? The CTA lift was written against turns that post ONE
+   actioned card, which is every turn except this one.
+3. Why did the acceptance check miss it? It compared the EVENT NAMES a card
+   declares against the event names offered, as sets. All three cards declare
+   `approve`, so `{"approve"} ⊆ {"approve"}` held while two of the three cards
+   had no reachable button.
+4. **Deepest why: `design`** — the check compared verbs and ignored objects.
+   An action's identity is (what it does, what it does it TO); dropping the
+   object made three different CTAs look like one.
+
+**Action (aimed at why-4).** The lift covers every actioned artifact in the
+turn, and labels carry the artifact id when more than one card is in play —
+three buttons reading `Approve` cannot say what they approve. The guard now
+compares `(artifact_id, event)` PAIRS, and a second test asserts each option is
+separately approvable and that no two approve labels are identical.
+
+**Preventive action for the class.** When a check compares two representations
+of an action, the comparison key must include the target, not just the verb.
+A set of verbs is the smallest thing that looks like a valid check and isn't:
+it passes exactly when the objects differ, which is the case worth catching.
+
+## 2026-08-26 — The board refused honestly and the real fault was two stages back
+
+**Symptom.** `shot_board` burned all 3 attempts. Its first reply was literally
+`{"error": "INCOMPLETE INPUT — …resubmit"}`; the next returned zero shots. The
+run escalated with "The shot board kept failing its lints."
+
+**Why-chain.**
+1. Why did the board fail? Its input was `{"brief": {}, "option": null}`.
+2. Why was it empty? The in-memory workspace was lost — the API had been
+   restarted mid-campaign.
+3. Why didn't `_rehydrate()` restore it? It handles `campaign_option`,
+   `campaign_detail`, `model_confirm`, `creative_set` and `ad_card` — the v2
+   artifacts. It was never taught `campaign_brief`, `hook_rack`, `canon_sheet`
+   or `keyframe_board`.
+4. Why not? v3 added five stages and their artifacts; the rehydrator lives in a
+   different part of the file and nothing forced the two to agree.
+5. **Deepest why: `design`** — the same one-fact-two-representations family.
+   The set of artifacts the workspace DEPENDS ON grew, and the code that
+   restores them from the transcript did not.
+
+**Action (aimed at why-5).** The four v3 artifacts are rehydrated. A test kills
+every in-memory workspace mid-flow and asserts the brief, the hook rack and the
+approved option all survive. Verified it bites: without the fix it fails with
+`brief = None`, which is exactly what the live run hit.
+
+**Preventive action for the class.** An agent that refuses because its INPUT is
+incomplete is reporting a fault upstream of itself, and the retry loop will
+faithfully repeat the bad input three times and then blame the last node. When
+a node fails on validation, read what it was GIVEN before reading what it
+returned — `node_input` in the run log answers that in one look, and it is the
+reason this took one run to find rather than three.
+
+**Second lesson.** Both of today's bugs were invisible to 165 passing tests and
+visible within minutes of clicking through the app. That is now the fourth
+time. The rule stands: a flow with a UI needs one pass driven through the UI,
+every time, no exceptions.

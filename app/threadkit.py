@@ -97,36 +97,49 @@ def _say(
             multi=multi, free_text=free_text, note=note,
         )
     if q is not None and not q.options and artifacts:
-        q.options = _options_from(artifacts[-1])
+        q.options = _options_from(artifacts)
     msg = AgentMessage(thread_id=thread_id, text=text, artifacts=artifacts or [], question=q)
     store.append_message(thread_id, "agent", msg.model_dump(mode="json"))
 
 
-def _options_from(artifact: Any) -> list[QuestionOption]:
-    """Lift an artifact's actions into the question's options.
+def _unpack(artifact: Any) -> tuple[str, list[dict[str, Any]]]:
+    if isinstance(artifact, ArtifactEnvelope):
+        return artifact.id, [a.model_dump() for a in artifact.actions]
+    if isinstance(artifact, dict):
+        return artifact.get("id", ""), list(artifact.get("actions") or [])
+    return "", []
+
+
+def _options_from(artifacts: list[Any]) -> list[QuestionOption]:
+    """Lift EVERY actioned artifact's actions into the question's options.
 
     Since 2026-08-26 the artifact panel is READ-ONLY and every CTA is answered
     in the chat. The actions are still declared exactly once — on the artifact
     that owns them — and lifted here, so the card and the composer cannot
-    disagree about what the user is allowed to do. Hand-writing the same
-    buttons in both places is the two-representations bug this codebase has
-    now hit four times.
+    disagree about what the user is allowed to do.
+
+    Every artifact in the turn, not just the last one. The options turn posts
+    THREE campaign_option cards, each declaring its own approve/regenerate;
+    lifting only the last one left options 1 and 2 with no way to approve them
+    — a dead end reachable in the browser while every API test passed, which is
+    precisely the bug class this lift exists to prevent.
+
+    When more than one card is in play the labels carry the artifact id, because
+    three buttons all reading "Approve" cannot tell you what you are approving.
     """
-    if isinstance(artifact, ArtifactEnvelope):
-        aid, actions = artifact.id, [a.model_dump() for a in artifact.actions]
-    elif isinstance(artifact, dict):
-        aid, actions = artifact.get("id", ""), artifact.get("actions") or []
-    else:
-        return []
+    actioned = [(aid, acts) for aid, acts in (_unpack(a) for a in artifacts) if acts and aid]
+    name_them = len(actioned) > 1
     out: list[QuestionOption] = []
-    for a in actions:
-        label, event = a.get("label"), a.get("event")
-        if not label or not event:
-            continue
-        out.append(QuestionOption(
-            label=label, event=event, artifact_id=aid,
-            primary=a.get("style") == "primary",
-        ))
+    for aid, actions in actioned:
+        for a in actions:
+            label, event = a.get("label"), a.get("event")
+            if not label or not event:
+                continue
+            out.append(QuestionOption(
+                label=f"{label} {aid}" if name_them else label,
+                event=event, artifact_id=aid,
+                primary=a.get("style") == "primary",
+            ))
     return out
 
 

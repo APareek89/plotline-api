@@ -2944,19 +2944,55 @@ def test_every_cta_a_card_declares_is_answerable_in_the_chat():
     inspected, unreachable = 0, []
     for env in _envelopes(tid):
         question = env.get("question") or {}
-        offered = {o["event"] for o in question.get("options", []) if o.get("event")}
+        # (artifact_id, event) PAIRS, not events alone. Comparing bare event
+        # names hid a real dead end: the options turn posts three cards that
+        # each declare "approve", so the name set matched while only the LAST
+        # card's approve was actually offered — options 1 and 2 could not be
+        # approved at all. An identity has to include what it acts ON.
+        offered = {
+            (o.get("artifact_id"), o["event"])
+            for o in question.get("options", []) if o.get("event")
+        }
         for card in env.get("artifacts", []):
-            declared = {a["event"] for a in card.get("actions", []) if a.get("event")}
+            declared = {
+                (card["id"], a["event"]) for a in card.get("actions", []) if a.get("event")
+            }
             if not declared:
                 continue
             inspected += 1
             if not declared <= offered:
-                unreachable.append((card["type"], sorted(declared - offered)))
+                unreachable.append(
+                    (card["type"], card["id"], sorted(e for _, e in declared - offered)))
 
     assert inspected, "no actioned cards on this walk — the test would pass vacuously"
     assert not unreachable, (
         "these CTAs are declared on a card but cannot be answered in the chat, "
         f"so the user has no way to press them: {unreachable}")
+
+
+def test_three_options_are_each_separately_approvable():
+    """The options turn posts one card per option, and a user must be able to
+    approve ANY of them. Found by driving the browser: the chat offered a
+    single unlabelled 'Approve' that always meant option three, so options one
+    and two were unreachable while every API test passed.
+
+    Labels have to name the option too — three buttons all reading 'Approve'
+    cannot tell you what you are approving.
+    """
+    cid, tid = _ruminated("Pick any option")
+    turn = next(e for e in reversed(_envelopes(tid))
+                if any(a["type"] == "campaign_option" for a in e.get("artifacts", [])))
+
+    option_ids = [a["id"] for a in turn["artifacts"] if a["type"] == "campaign_option"]
+    assert len(option_ids) >= 2, "need at least two options for this to prove anything"
+
+    options = (turn.get("question") or {}).get("options", [])
+    approvable = {o["artifact_id"] for o in options if o.get("event") == "approve"}
+    assert set(option_ids) <= approvable, (
+        f"only {sorted(approvable)} can be approved, but the turn offered {option_ids}")
+
+    labels = [o["label"] for o in options if o.get("event") == "approve"]
+    assert len(set(labels)) == len(labels), f"approve labels are ambiguous: {labels}"
 
 
 def test_deleting_a_campaign_takes_its_thread_and_messages_with_it():
@@ -3048,3 +3084,35 @@ def test_confirming_zero_claims_is_still_a_confirmation(monkeypatch):
     assert brand["approved_claims"] == []
     assert campaign._confirmed_claims(CampaignContext.model_validate(
         store.get_series(cid)["context"])) == set()
+
+
+def test_a_restart_mid_campaign_does_not_lose_the_brief():
+    """Found by driving the browser, not by the suite: restarting the API
+    between approving the brief and reaching the board handed shot_board an
+    EMPTY brief and a null option. The agent refused honestly with 'INCOMPLETE
+    INPUT' and the run escalated — so the visible failure was three wasted
+    attempts at the board, and the real cause was upstream.
+
+    _rehydrate was written for the v2 artifacts and never taught the five v3
+    ones. Same species as the renderer allowlist and the R2 lexicon: a list
+    grew and the thing that reads it did not. This asserts every v3 artifact
+    the workspace depends on survives losing the process.
+    """
+    cid, tid = _ruminated("Restart safe")
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+
+    before = campaign._ws(tid)
+    assert before.get("brief"), "no brief on the workspace — the test would prove nothing"
+    keys = [k for k in ("brief", "hook_rack") if before.get(k)]
+
+    # the process dies: every in-memory workspace goes with it
+    campaign._WORKSPACES.clear()
+
+    after = campaign._ws(tid)
+    campaign._rehydrate(tid, after)
+
+    for key in keys:
+        assert after.get(key), f"{key} did not survive a restart — the stage after it gets nothing"
+    assert after["brief"] == before["brief"]
+    assert after.get("approved_option") is not None, "the approved option did not survive either"

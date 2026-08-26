@@ -191,6 +191,21 @@ def _rehydrate(thread_id: str, ws: dict[str, Any]) -> None:
                 ws["options"][option.option_id] = option
                 if option.option_id not in ws["option_order"]:
                     ws["option_order"].append(option.option_id)
+            # ---- v3 gates. These were added when the five new stages landed and
+            # this rehydrator was not updated with them, so a restart between the
+            # brief and the board handed shot_board an EMPTY brief and a null
+            # option. The agent refused honestly ("INCOMPLETE INPUT") and the run
+            # escalated — the failure was upstream, in what it was given.
+            # Same species as every other drift here: the artifact list grew and
+            # the thing that reads it did not.
+            elif kind == "campaign_brief" and payload.get("brief"):
+                ws["brief"] = payload["brief"]
+            elif kind == "hook_rack" and payload.get("rack"):
+                ws["hook_rack"] = payload["rack"]
+            elif kind == "canon_sheet" and payload.get("sheets"):
+                ws["canon"] = payload["sheets"]
+            elif kind == "keyframe_board" and payload.get("board"):
+                ws["keyframes"] = payload["board"]
             elif kind == "campaign_detail" and payload.get("detail"):
                 ws["detail"] = payload["detail"]
                 style = payload["detail"].get("style_ref")
