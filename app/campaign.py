@@ -953,10 +953,26 @@ def _progress_turn(thread_id: str, context: CampaignContext,
              note="Anything you don't confirm becomes a kill flag at QC — I won't "
                   "quietly drop it. Confirming none of them is allowed.")
     elif complete:
-        _say(thread_id, "That's everything I need.",
+        # Assumptions can arrive by EITHER route — the explicit assume pass, or
+        # the model deciding on its own that it had enough to fill the gaps.
+        # Surface them the same way whichever way they got here: an assumption
+        # the user cannot see is one they cannot correct at the brief.
+        notes = list(context.assumptions or [])
+        _say(thread_id,
+             "I filled the gaps so we can get moving." if notes else "That's everything I need.",
              [_progress_artifact(context, actions=_actions(("begin", "Start", "primary")))],
-             question="Start the rumination — evidence, options, council review?")
+             question="Start the rumination — evidence, options, council review?",
+             note=("Assumed — correct any of these at the brief: " + " · ".join(notes[:4]))
+                  if notes else None)
+    elif _ws(thread_id).get("intake_asks", 0) >= MAX_INTAKE_ASKS:
+        # Stop interrogating and MOVE. An agent that asks a fourth question is
+        # doing the user's job for them badly; the brief gate is a real
+        # approval surface, so the cheapest way to be wrong is to state an
+        # assumption there and let it be corrected in one click.
+        _assume_and_proceed(thread_id, campaign_id_of(thread_id), context)
+        return
     else:
+        _ws(thread_id)["intake_asks"] = _ws(thread_id).get("intake_asks", 0) + 1
         filled = [
             _BLOCK_LABEL[b] for b in _BLOCKS
             if getattr(context, b) is not None
@@ -967,6 +983,77 @@ def _progress_turn(thread_id: str, context: CampaignContext,
              question=_combined_question(context))
     store.log_artifact_activity(thread_id, "intake", "proposed",
                                 "complete" if complete else f"next: {_next_field(context)}")
+
+
+# How many times intake may ask before it stops asking and decides.
+# Owner decision 2026-08-26: "the flow should not stop — the agent should ask,
+# and after 2-3 questions take it forward. The user approves the brief anyway,
+# so if they want a change they will ask for it." An approval gate downstream
+# is worth more than an interrogation upstream: it is one click to correct,
+# where a fourth question is another turn of work for the user.
+MAX_INTAKE_ASKS = 2
+
+
+def campaign_id_of(thread_id: str) -> str:
+    ws = _ws(thread_id)
+    if ws.get("campaign_id"):
+        return str(ws["campaign_id"])
+    thread = store.get_thread(thread_id)
+    return str(thread["series_id"]) if thread else ""
+
+
+def _assume_and_proceed(thread_id: str, campaign_id: str, context: CampaignContext) -> None:
+    """Fill what is still missing, SAY what was assumed, and keep moving.
+
+    The assumptions are the point. Anything decided for the user is written to
+    `context.assumptions` in plain words and shown on the intake card and in
+    the brief, because the brief gate is where they get corrected and nobody
+    can correct what they cannot see. Assuming silently would be the dishonest
+    version of this and is worse than asking a fourth question.
+    """
+    try:
+        _working[thread_id] = "filling the gaps so we can get moving"
+        filled, _log = run_agent(
+            agent="campaign_intake.assume",
+            prompt_name="campaign_intake",
+            model=config.STAGE_MODELS["intake"],
+            user_payload={
+                "context": context.model_dump(mode="json"),
+                "message": "",
+                "transcript": _transcript(thread_id),
+                "filled": context_filled(context),
+                "attached_upload_ids": list(_ws(thread_id).get("pending_uploads") or []),
+                # the flag the prompt's ASSUME MODE section reads
+                "assume_mode": True,
+                "still_missing": missing_blocks(context),
+            },
+            schema=CampaignContext,
+            dispatcher=None,
+            use_tools=False,
+            validate=lambda c: _validate_intake(c, context),
+            mock_fn=getattr(campaign_mock, "mock_campaign_intake", None),
+        )
+    except Exception as exc:
+        # Even assuming failed. Do not strand the user — say so and ask once
+        # more rather than posting an error card with nothing to click.
+        logger.warning("assume-mode intake failed on %s: %s", thread_id, exc)
+        _say(thread_id, "I still need one thing before I can draft this.",
+             [_progress_artifact(context)],
+             question=_combined_question(context) or "What are we making, and who is it for?")
+        return
+    finally:
+        _working.pop(thread_id, None)
+
+    filled = _apply_pending_uploads(thread_id, filled)
+    store.update_series_context(campaign_id, filled.model_dump(mode="json"))
+    notes = list(filled.assumptions or [])
+    store.log_artifact_activity(thread_id, "intake", "refined",
+                                f"assumed: {'; '.join(notes)[:200]}" if notes else "assumed the gaps")
+    _say(thread_id,
+         "I filled the gaps so we can get moving — correct anything at the brief.",
+         [_progress_artifact(filled, actions=_actions(("begin", "Start", "primary")))],
+         question="Start the rumination — evidence, options, council review?",
+         note=("Assumed: " + " · ".join(notes[:4])) if notes else None)
 
 
 def _claims_awaiting_confirmation(context: CampaignContext) -> list[str]:
@@ -1011,7 +1098,8 @@ def _progress_artifact(context: CampaignContext,
                        actions: Optional[list[dict[str, Any]]] = None) -> ArtifactEnvelope:
     return ArtifactEnvelope(
         type="intake_progress", id="intake", title="Campaign brief",
-        payload={"filled": context_filled(context), "next_field": _next_field(context)},
+        payload={"filled": context_filled(context), "next_field": _next_field(context),
+                 "assumptions": list(context.assumptions or [])},
         actions=actions or [],
     )
 

@@ -725,6 +725,11 @@ class CampaignContext(Strict):
     product: Optional[ProductBlock] = None
     campaign: Optional[CampaignBlock] = None
     brand: Optional[BrandBlock] = None
+    # What the agent decided FOR the user rather than being told, in plain
+    # words. An agent that assumes is doing its job; one that assumes silently
+    # is not — the brief gate is where these get corrected, and the user can
+    # only correct what they can see.
+    assumptions: list[str] = Field(default_factory=list)
 
     @property
     def complete(self) -> bool:

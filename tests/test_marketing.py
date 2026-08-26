@@ -3450,3 +3450,54 @@ def test_a_person_typing_in_fragments_reaches_a_startable_campaign(monkeypatch):
         a["type"] == "escalation"
         for env in _envelopes(tid) for a in env.get("artifacts", [])
     ), "the conversation escalated on input that was actually sufficient"
+
+
+def test_intake_stops_asking_after_two_questions_and_decides(monkeypatch):
+    """Owner decision 2026-08-26: the flow must not stall. The agent asks a
+    couple of questions, then makes assumptions and moves — because the brief
+    is a real approval gate, and correcting a stated assumption there is one
+    click where a fourth question is another turn of work.
+
+    The assumptions must be VISIBLE. An agent that assumes is doing its job;
+    one that assumes silently is not, and the user can only correct what they
+    can see.
+    """
+    calls = {"n": 0}
+
+    def scripted(*, agent, user_payload, **kw):
+        calls["n"] += 1
+        ctx = dict(user_payload["context"])
+        if user_payload.get("assume_mode"):
+            ctx["product"] = ctx.get("product") or {
+                "name": "Everyday wear top", "description": "a comfortable everyday wear top"}
+            ctx["campaign"] = ctx.get("campaign") or {
+                "objective": "awareness", "target_audience": "young women",
+                "platforms": ["instagram_feed"]}
+            ctx["assumptions"] = ["Assumed awareness — you didn't name an objective",
+                                  "Assumed Instagram feed, since that's where this audience is"]
+        return CampaignContext.model_validate(ctx), type("L", (), {"searched": []})()
+
+    monkeypatch.setattr(campaign, "run_agent", scripted)
+
+    started = campaign.start_campaign("Never stalls")
+    cid, tid = started["campaign_id"], started["thread"]["id"]
+
+    # three vague turns that fill nothing on their own
+    for _ in range(3):
+        _text(tid, "not sure yet")
+
+    context = CampaignContext.model_validate(store.get_series(cid)["context"])
+    assert campaign.missing_blocks(context) == [], (
+        "the agent was still asking instead of deciding — the flow stalled")
+    assert context.assumptions, "it decided silently; the user cannot correct what they cannot see"
+
+    last = _envelopes(tid)[-1]
+    assert "Start" in [o["label"] for o in (last.get("question") or {}).get("options", [])], (
+        "after assuming, the next move must be offered")
+    # assumptions reach the chat by EITHER route — the explicit assume pass, or
+    # the model filling the gaps itself. Both must surface them.
+    note = (last.get("question") or {}).get("note") or ""
+    assert "Assumed" in note, "the assumptions were not surfaced in the turn that used them"
+    assert any(a["payload"].get("assumptions")
+               for a in last.get("artifacts", []) if a["type"] == "intake_progress"), (
+        "the intake card does not carry the assumptions")
