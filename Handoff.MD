@@ -169,6 +169,16 @@ scenes → shots → keyframes → video. Ours: options → templates → detail
 - 2026-08-25 — Local only: Render autoDeploy off
 - 2026-08-26 — P0-2 deferred by owner: Render stays live, public, real keys. Logged so a
   future session does not re-raise it as new; it is a known accepted risk, not an oversight
+- 2026-08-26 — **v4 interaction pivot (owner), detailed spec still pending.** The campaign
+  flow becomes conversation-first: (a) enrich the brief with Anthropic's NATIVE
+  `web_search` tool — no new vendor or key, citations arrive in a shape the existing
+  evidence validators can consume; (b) the structured 3-card detail path is removed
+  ENTIRELY, cards and block routes included — the agent becomes the only way to populate a
+  campaign, and this re-points ~30 tests by owner decision, not by weakening them;
+  (c) the left campaign rail is deleted outright. The STAGES do not change — only how
+  input is gathered. ⚠️ Removing the brand card orphans `claims_confirmed`, which intake
+  may not self-confirm (`test_path_b_intake_may_not_rename_drop_or_self_confirm`); it
+  needs a new home or the compliance chain breaks. Await the owner's flow/UI prompt.
 
 **Session efficiency (2026-08-25):** 🎯 ~55% feature · 🔧 ~25% support · 🔁 ~20% rework
 (rework was self-inflicted: unpinned langgraph broke the Render build; unisolated LOG_DIR
