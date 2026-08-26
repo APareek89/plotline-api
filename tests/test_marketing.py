@@ -3185,3 +3185,37 @@ def test_pixelbin_snaps_ratio_and_duration_into_the_model_enum():
     assert pb._snap_duration(5, veo["durations"]) in {"4", "6"}
     assert pb._snap_duration(30, veo["durations"]) == "8"      # clamps, never passes 30 through
     assert isinstance(pb._snap_duration(6, veo["durations"]), str), "the enum is strings, not ints"
+
+
+def test_per_stage_models_default_to_the_slot_they_already_used(monkeypatch):
+    """A new dial, not a new behaviour: every stage falls through to the broad
+    slot it shared before, so an unset environment changes nothing. Six agents
+    on one PLANNER_MODEL meant paying planner rates to lint a shot board."""
+    import importlib
+    monkeypatch.delenv("PLOTLINE_MODEL_BOARD", raising=False)
+    monkeypatch.setenv("PLOTLINE_PLANNER_MODEL", "planner-x")
+    monkeypatch.setenv("PLOTLINE_INTAKE_MODEL", "intake-x")
+    monkeypatch.setenv("PLOTLINE_FEEDBACK_MODEL", "council-x")
+    fresh = importlib.reload(config)
+    try:
+        assert fresh.STAGE_MODELS["board"] == "planner-x"
+        assert fresh.STAGE_MODELS["options"] == "planner-x"
+        assert fresh.STAGE_MODELS["intake"] == "intake-x"
+        assert fresh.STAGE_MODELS["council"] == "council-x"
+
+        # …and an explicit override wins for that stage ALONE
+        monkeypatch.setenv("PLOTLINE_MODEL_BOARD", "cheap-board")
+        fresh = importlib.reload(config)
+        assert fresh.STAGE_MODELS["board"] == "cheap-board"
+        assert fresh.STAGE_MODELS["options"] == "planner-x", "overriding one stage moved another"
+    finally:
+        importlib.reload(config)
+
+
+def test_no_stage_model_leaks_into_the_public_api(monkeypatch):
+    """The settings gear is honestly-inert and the whole API is swept for
+    anything naming a model. Per-stage models are an OPERATOR knob in .env;
+    exposing them as a request field would quietly make that sweep a lie."""
+    spec = main.app.openapi()
+    body_props = {p for _, p in _request_body_properties(spec)}
+    assert not [p for p in body_props if "model" in p.lower() or "stage_model" in p.lower()]

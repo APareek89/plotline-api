@@ -78,7 +78,7 @@ def run_seat(
     review, _ = run_agent(
         agent=f"council.{seat}",
         prompt_name=seat_prompt_name(seat),
-        model=config.FEEDBACK_MODEL,
+        model=config.STAGE_MODELS["council"],
         user_payload={**campaign_payload, "draft": plan.model_dump(mode="json"), "seat": seat},
         schema=SeatReview,
         preludes=[DOCTRINE_PROMPT],
@@ -123,7 +123,7 @@ def run_council(
     feedback, _ = run_agent(
         agent=REVIEWER_AGENT,
         prompt_name=REVIEWER_PROMPT,
-        model=config.FEEDBACK_MODEL,
+        model=config.STAGE_MODELS["council"],
         user_payload=payload,
         schema=Feedback,
         preludes=[DOCTRINE_PROMPT],

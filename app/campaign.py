@@ -796,7 +796,7 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
         context, log = run_agent(
             agent="campaign_intake",
             prompt_name="campaign_intake",
-            model=config.INTAKE_MODEL,
+            model=config.STAGE_MODELS["intake"],
             user_payload={
                 "context": current.model_dump(mode="json"),
                 "message": text,
@@ -1167,7 +1167,7 @@ def _run_options(context: CampaignContext, shadow: CreatorContext, retrieved: se
     options, _log = run_agent(
         agent="campaign_planner.options" if previous is None else "campaign_planner.options_refine",
         prompt_name="campaign_planner",
-        model=config.PLANNER_MODEL,
+        model=config.STAGE_MODELS["options"],
         user_payload=payload,
         schema=CampaignOptions,
         dispatcher=_dispatcher(retrieved, context=shadow),
@@ -1759,7 +1759,7 @@ def _run_detail(context: CampaignContext, shadow: CreatorContext, option: Any,
     detail, _log = run_agent(
         agent="campaign_planner.detail" if previous is None else "campaign_planner.refine",
         prompt_name="campaign_planner",
-        model=config.PLANNER_MODEL,
+        model=config.STAGE_MODELS["detail"],
         user_payload=payload,
         schema=CampaignDetail,
         dispatcher=_dispatcher(retrieved, context=shadow),
@@ -2835,7 +2835,7 @@ def _brief_turn(thread_id: str, campaign_id: str) -> None:
         context = _context_of(campaign_id)
         brief, _log = run_agent(
             agent="campaign_brief", prompt_name="campaign_brief",
-            model=config.PLANNER_MODEL,
+            model=config.STAGE_MODELS["brief"],
             user_payload={"context": context.model_dump(mode="json")},
             schema=CampaignBrief, dispatcher=None, use_tools=False,
             validate=lambda b: _validate_brief(b, context),
@@ -2871,7 +2871,7 @@ def _script_turn(thread_id: str, campaign_id: str) -> None:
         ws = _ws(thread_id)
         brief = ws.get("brief") or {}
         rack, _log = run_agent(
-            agent="hook_rack", prompt_name="hook_rack", model=config.PLANNER_MODEL,
+            agent="hook_rack", prompt_name="hook_rack", model=config.STAGE_MODELS["script"],
             user_payload={"brief": brief, "option": ws.get("approved_option_json"),
                           "hooks_wanted": _policy_of(campaign_id).hooks_count},
             schema=HookRack, dispatcher=None, use_tools=False,
@@ -2917,7 +2917,7 @@ def _board_turn(thread_id: str, campaign_id: str) -> None:
         style = ws.get("style_block") or neutral_style_block().model_dump(mode="json")
         ws["style_block"] = style
         board, _log = run_agent(
-            agent="shot_board", prompt_name="shot_board", model=config.PLANNER_MODEL,
+            agent="shot_board", prompt_name="shot_board", model=config.STAGE_MODELS["board"],
             user_payload={"brief": brief, "option": ws.get("approved_option_json"),
                           "hook_rack": ws.get("hook_rack"),
                           "style_block_id": style.get("id"),
@@ -3011,7 +3011,7 @@ def _canon_turn(thread_id: str, campaign_id: str) -> None:
             return
 
         plan, _log = run_agent(
-            agent="canon_plan", prompt_name="canon_plan", model=config.PLANNER_MODEL,
+            agent="canon_plan", prompt_name="canon_plan", model=config.STAGE_MODELS["canon"],
             user_payload={"board": board, "context": _context_of(campaign_id).model_dump(mode="json")},
             schema=CanonPlan, dispatcher=None, use_tools=False,
             validate=lambda p: _validate_canon_plan(p, board),

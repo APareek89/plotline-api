@@ -46,6 +46,37 @@ FEEDBACK_MODEL = os.environ.get("PLOTLINE_FEEDBACK_MODEL", "claude-sonnet-4-6")
 INTAKE_MODEL = os.environ.get("PLOTLINE_INTAKE_MODEL", "claude-haiku-4-5")
 INTAKE_VISION_MODEL = os.environ.get("PLOTLINE_INTAKE_VISION_MODEL", "claude-sonnet-4-6")
 
+
+def _stage_model(stage: str, fallback: str) -> str:
+    """Per-stage model override, defaulting to the broad slot.
+
+    Six agents used to share PLANNER_MODEL, which meant paying planner rates to
+    lint a shot board. Each stage now has its own env key and each one DEFAULTS
+    to the slot it already used, so nothing moves unless it is set — this is a
+    new dial, not a new behaviour.
+
+    Deliberately NOT exposed in the product UI: the settings gear is
+    honestly-inert and `test_settings_icon_is_disabled_and_hides_no_live_capability`
+    sweeps the whole API for anything that names a model. This is an operator
+    knob in `.env`, which is a different thing from a user-facing choice.
+    """
+    return os.environ.get(f"PLOTLINE_MODEL_{stage.upper()}", fallback)
+
+
+# The stages that call an LLM, each independently switchable. Cheap stages are
+# mechanical (lint a board, name four canon views); expensive ones are the ones
+# that argue (options, the reviewer).
+STAGE_MODELS = {
+    "intake": _stage_model("intake", INTAKE_MODEL),
+    "brief": _stage_model("brief", PLANNER_MODEL),
+    "options": _stage_model("options", PLANNER_MODEL),
+    "detail": _stage_model("detail", PLANNER_MODEL),
+    "script": _stage_model("script", PLANNER_MODEL),
+    "board": _stage_model("board", PLANNER_MODEL),
+    "canon": _stage_model("canon", PLANNER_MODEL),
+    "council": _stage_model("council", FEEDBACK_MODEL),
+}
+
 # MOCK_LLM=1 → deterministic agent outputs built from fixtures; the full
 # orchestrator + validators + retrieval still run. For UI dev and tests
 # without an API key. Real mode needs ANTHROPIC_API_KEY in .env.
