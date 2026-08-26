@@ -1696,7 +1696,7 @@ def test_a_dropped_connection_retries_instead_of_discarding_the_run(monkeypatch)
     calls = {"n": 0}
     sent: list = []
 
-    def flaky(model, system, messages, dispatcher, use_tools):
+    def flaky(model, system, messages, dispatcher, use_tools, **kw):
         calls["n"] += 1
         sent.append(messages)
         if calls["n"] == 1:
@@ -1736,7 +1736,7 @@ def test_an_api_status_error_is_not_retried_as_a_blip(monkeypatch):
 
     calls = {"n": 0}
 
-    def refused(model, system, messages, dispatcher, use_tools):
+    def refused(model, system, messages, dispatcher, use_tools, **kw):
         calls["n"] += 1
         raise RuntimeError("401 authentication_error")
 

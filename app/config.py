@@ -67,6 +67,14 @@ def llm_unavailable_reason() -> Optional[str]:
                 "deterministic sample output.")
     return None
 
+# Anthropic's NATIVE server-side web_search tool. No second vendor and no
+# extra key — it bills to the same ANTHROPIC_API_KEY. Opt-in per agent (only
+# intake asks for it today), because enrichment is an INPUT-gathering job: the
+# planner and the council still argue from the retrieval corpus alone, so a web
+# result can never quietly become the evidence behind a claim.
+WEB_SEARCH = _truthy("PLOTLINE_WEB_SEARCH", "1")
+WEB_SEARCH_MAX_USES = int(os.environ.get("PLOTLINE_WEB_SEARCH_MAX_USES", "3"))
+
 MAX_VALIDATION_RETRIES = 2  # §3.9: re-run with the error, max 2 retries
 
 # Output cap for one agent call. This is a CAP, not spend — you pay only for

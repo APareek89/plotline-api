@@ -778,7 +778,7 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
     try:
         _working[thread_id] = "filing what you told me"
         current = _context_of(campaign_id)
-        context, _log = run_agent(
+        context, log = run_agent(
             agent="campaign_intake",
             prompt_name="campaign_intake",
             model=config.INTAKE_MODEL,
@@ -799,10 +799,23 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
             # honest error here rather than faking an intake (mock lives in
             # app/agents/campaign_mock.py the day it exists).
             mock_fn=getattr(campaign_mock, "mock_campaign_intake", None),
+            # Enrichment is an INPUT-gathering job: look up the brand or product
+            # the user named so the brief starts from facts instead of the
+            # user's shorthand. Deliberately NOT given to the planner or the
+            # council — a web result must never become the evidence behind a
+            # claim, which is what the retrieval corpus is for.
+            web_search=True,
         )
         context = _apply_pending_uploads(thread_id, context)
         store.update_series_context(campaign_id, context.model_dump(mode="json"))
         store.log_artifact_activity(thread_id, "intake", "refined", "conversational turn")
+        searched = list(getattr(log, "searched", []) or [])
+        if searched:
+            # Say what was actually looked up. The queries come off the response,
+            # so this can never claim a search that did not happen.
+            store.log_artifact_activity(
+                thread_id, "intake", "refined", "web: " + " · ".join(searched[:3]))
+            _ws(thread_id)["searched"] = searched
         _progress_turn(thread_id, context, before=current, conversational=True)
     except AgentHardFail as exc:
         _fail(thread_id, "Intake couldn't produce a valid context after retries — nothing was guessed.", str(exc))

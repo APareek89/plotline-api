@@ -98,6 +98,11 @@ class RunLog:
     node_input: Optional[dict[str, Any]] = None
     node_output: Optional[dict[str, Any]] = None
     started_at: float = 0.0
+    # The web queries this node actually issued, captured from the response
+    # rather than assumed. "I searched the web" with nothing behind it is a
+    # claim, and an unverifiable claim is the thing this codebase refuses to
+    # ship — so an empty list here means no search happened, and says so.
+    searched: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -110,6 +115,7 @@ class RunLog:
             "validation_errors": self.validation_errors,
             "tool_calls": self.tool_calls,
             "cited_source_ids": self.cited_source_ids,
+            "searched": self.searched,
             "duration_s": round(self.duration_s, 2),
             "thread_id": self.thread_id,
             "node_input": self.node_input,
@@ -212,12 +218,21 @@ def unwrap_envelope(data: Any, schema: Type[BaseModel]) -> Any:
     return data
 
 
+WEB_SEARCH_TOOL = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": config.WEB_SEARCH_MAX_USES,
+}
+
+
 def _llm_call(
     model: str,
     system: str,
     messages: list[dict[str, Any]],
     dispatcher: Optional[ToolDispatcher],
     use_tools: bool,
+    web_search: bool = False,
+    searched: Optional[list[str]] = None,
 ) -> str:
     import anthropic
     import httpx
@@ -226,8 +241,15 @@ def _llm_call(
     kwargs: dict[str, Any] = dict(model=model, max_tokens=config.MAX_OUTPUT_TOKENS, system=system)
     if "sonnet-4-6" in model:
         kwargs["thinking"] = {"type": "adaptive"}
-    if use_tools:
-        kwargs["tools"] = TOOL_DEFS
+    tools = list(TOOL_DEFS) if use_tools else []
+    if web_search and config.WEB_SEARCH:
+        # A SERVER tool: Anthropic runs the search and hands back results, so
+        # there is no dispatcher branch for it and no key of our own. It bills
+        # to the same ANTHROPIC_API_KEY, which is why it is opt-in per agent
+        # rather than on for everything.
+        tools.append(WEB_SEARCH_TOOL)
+    if tools:
+        kwargs["tools"] = tools
 
     convo = list(messages)
     for _ in range(16):  # tool-loop cap
@@ -261,6 +283,17 @@ def _llm_call(
                     )
             convo.append({"role": "user", "content": results})
             continue
+        if searched is not None:
+            # Record what was actually searched, not what we hoped would be.
+            # "Searched the web" with nothing behind it is the kind of claim
+            # this codebase treats as dishonesty, so the queries are captured
+            # from the response and shown to the user verbatim.
+            for block in resp.content:
+                if getattr(block, "type", "") == "server_tool_use" and block.name == "web_search":
+                    query = dict(getattr(block, "input", {}) or {}).get("query")
+                    if query and query not in searched:
+                        searched.append(query)
+
         if resp.stop_reason == "pause_turn":
             convo.append({"role": "assistant", "content": resp.content})
             continue
@@ -294,6 +327,7 @@ def run_agent(
     mock_fn: Optional[Callable[[dict[str, Any], Optional[ToolDispatcher]], dict[str, Any]]] = None,
     use_tools: bool = True,
     extra_content_blocks: Optional[list[dict[str, Any]]] = None,
+    web_search: bool = False,
 ) -> tuple[T, RunLog]:
     """Validation retry loop (§3.9): invalid output → re-run with the error
     (max 2 retries) → AgentHardFail. Applies to mock output too — the mock
@@ -345,7 +379,10 @@ def run_agent(
                             ),
                         }
                     )
-                text = _llm_call(model, system, messages, dispatcher, use_tools)
+                searched: list[str] = []
+                text = _llm_call(model, system, messages, dispatcher, use_tools,
+                                 web_search=web_search, searched=searched)
+                log.searched = searched
                 raw_text = text
                 data = unwrap_envelope(extract_json(text), schema)
 
