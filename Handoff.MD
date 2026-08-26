@@ -78,8 +78,10 @@ of the four council calls, which is the main reason it exists.
   floor — never weaken one; re-point it only when an INVARIANT changed by owner decision.
 - ✅ Local stack: api :8600 · rag :8788 · devrag :8787 · web :3100. `MOCK_LLM=0`,
   real key in `.env`.
-  **Start it:** `bash run-detached.sh` (all three, survives the shell that started them) +
-  `npm run dev` in plotline-web. `bash run.sh` still works but runs in the FOREGROUND and
+  **Start it — ONE command:** `cd ~/Documents/plotline-web && npm run dev`. Its `predev`
+  runs the API repo's `run-detached.sh`, which is idempotent, so this brings up all four
+  from cold. `npm run stack:status` / `stack:stop` for the rest.
+  `bash run.sh` still works but runs in the FOREGROUND and
   traps EXIT to kill devrag — right for a terminal you are watching, fatal for anything that
   starts it from a tool call, because the whole stack dies with that shell.
   `bash run-detached.sh --status | --stop` for the rest.
