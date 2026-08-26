@@ -221,7 +221,6 @@ def edit_prompt(thread_id: str, slot: str, body: PromptEditBody) -> dict[str, An
 
 # --------------------------- Addendum-03: Marketing Studio — campaigns ------
 
-CAMPAIGN_BLOCKS = ("product", "campaign", "brand")
 
 
 def _campaign_or_404(campaign_id: str) -> dict[str, Any]:
@@ -282,23 +281,25 @@ def get_campaign(campaign_id: str) -> dict[str, Any]:
         "name": series["name"],
         "context": series["context"],
         "status": series["status"],
-        "cards_done": campaign.cards_done(series["context"]),
+        "context_filled": campaign.context_filled(series["context"]),
         "threads": store.get_series_threads(campaign_id),
         "ad_cards": store.list_ad_cards(campaign_id),
     }
 
 
-@app.put("/api/campaigns/{campaign_id}/blocks/{block}")
-def put_campaign_block(campaign_id: str, block: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """Step 2 cards / path-b elicitation — both write the identical schema."""
+@app.delete("/api/campaigns/{campaign_id}")
+def delete_campaign(campaign_id: str) -> dict[str, Any]:
+    """Remove a campaign and everything hanging off it.
+
+    The grid needs a working per-card action, and until now there was none —
+    which is why a dev database accumulated 31 QA campaigns with no way to
+    clear them. Deletion is genuinely destructive, so it is a DELETE with no
+    'archive' fallback pretending to be one: the row is gone, and the response
+    says what went with it rather than a bare ok.
+    """
     _campaign_or_404(campaign_id)
-    if block not in CAMPAIGN_BLOCKS:
-        raise HTTPException(422, f"unknown block '{block}' — expected one of {list(CAMPAIGN_BLOCKS)}")
-    try:
-        context = campaign.save_block(campaign_id, block, body)
-    except ValueError as exc:  # pydantic ValidationError included
-        raise HTTPException(422, f"{block} details invalid: {exc}") from exc
-    return {"context": context, "cards_done": campaign.cards_done(context)}
+    removed = store.delete_series(campaign_id)
+    return {"deleted": campaign_id, **removed}
 
 
 class BrandFetchBody(BaseModel):

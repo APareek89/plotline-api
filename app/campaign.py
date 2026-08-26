@@ -111,8 +111,7 @@ logger = logging.getLogger("plotline.campaign")
 # upgraded in place into the shot board rather than being replaced.
 CAMPAIGN_STAGES = [
     "name",       # step 0 — the blank landing's only block (owned by POST /api/campaigns)
-    "paths",      # step 1 — two path cards
-    "cards",      # step 2 — three detail cards (path a) / elicitation (path b)
+    "intake",     # conversation — the ONLY way in since 2026-08-26
     "brief",      # v3 — "are we making the right ad?"; locks the format constraints
     "options",    # step 3 — rumination output, 2-3 campaign options
     "templates",  # step 4 — optional style reference (+ the style block)
@@ -251,7 +250,18 @@ def _spawn(thread_id: str, fn: Callable[..., None], *args: Any) -> None:
 
 
 def start_campaign(name: str) -> dict[str, Any]:
-    """Step 0 → step 1: name the campaign, open its thread, offer both paths."""
+    """Name the campaign, open its thread, and hand straight to the agent.
+
+    There is no longer a path fork or a card screen (owner decision
+    2026-08-26). Naming is the ONLY form in the product; everything else is
+    said in the thread. The opening turn states what the agent needs, and the
+    intake card beside it is a READ-ONLY checklist of the same four things —
+    it is not a form, and it carries no actions.
+
+    The four asks ride in the artifact rather than the envelope on purpose:
+    `AgentMessage.text` is capped at two sentences, and one question per turn
+    is an invariant. Four requests as prose would break both.
+    """
     clean = (name or "").strip()
     if not clean:
         raise ValueError("Naming is required: give the campaign a name")
@@ -267,64 +277,46 @@ def start_campaign(name: str) -> dict[str, Any]:
     # would blow the <=2-sentence envelope rule; it belongs in the payload.
     _say(
         thread_id,
-        "Campaign open — two ways in.",
+        "Tell me what we're making and who it's for.",
         [ArtifactEnvelope(
-            type="intake_progress", id="paths", title="How do you want to brief me?",
+            type="intake_progress", id="intake", title="What I need to start",
             payload={
                 "name": clean,
                 "filled": {b: False for b in _BLOCKS},
-                "next_field": "path",
-                "paths": [
-                    {"id": "path_structured", "label": "Provide campaign details",
-                     "note": "three cards: product, campaign, brand"},
-                    {"id": "path_conversational", "label": "Help me define the campaign",
-                     "note": "I ask one question at a time — same fields, same schema"},
-                ],
+                "next_field": "opening",
+                "asks": INTAKE_ASKS,
             },
-            actions=_actions(("path_structured", "Provide campaign details", "primary"),
-                             ("path_conversational", "Help me define the campaign", "secondary")),
         )],
-        question="Fill the cards yourself, or have me ask?",
+        question="What are we making, and who is it for?",
+        note="Answer in any order, or ignore the list and just talk — I'll ask for whatever is still missing.",
     )
-    store.set_thread_stage(thread_id, "paths")
-    store.log_artifact_activity(thread_id, "paths", "proposed")
-    return {"campaign_id": campaign_id, "thread": {**thread, "stage": "paths"}}
+    store.set_thread_stage(thread_id, "intake")
+    store.log_artifact_activity(thread_id, "intake", "proposed")
+    return {"campaign_id": campaign_id, "thread": {**thread, "stage": "intake"}}
 
 
-def save_block(campaign_id: str, block: str, data: dict[str, Any]) -> dict[str, Any]:
-    """Path a's save-per-card. Merges into the stored CampaignContext (so
-    half-filled cards persist), validates with pydantic, persists, and mirrors
-    progress into the thread. Returns the full context."""
-    if block not in _BLOCKS:
-        raise ValueError(f"unknown block '{block}' — expected one of {list(_BLOCKS)}")
-    series = store.get_series(campaign_id)
-    if not series:
-        raise ValueError("campaign not found")
-
-    raw = dict(series["context"])
-    raw[block] = {**(raw.get(block) or {}), **(data or {})}
-    context = CampaignContext.model_validate(raw)  # ValidationError is a ValueError
-    store.update_series_context(campaign_id, context.model_dump(mode="json"))
-
-    thread_id = _campaign_thread_id(campaign_id)
-    if thread_id:
-        store.log_artifact_activity(thread_id, "intake", "refined", f"{block} card saved")
-        _progress_turn(thread_id, context)
-    return context.model_dump(mode="json")
+# The opening checklist. Read-only: it tells the user what the agent is
+# listening for, and nothing here is a field the user types into.
+INTAKE_ASKS = [
+    {"id": "images", "label": "Product images",
+     "note": "Drop them in the composer — I read them rather than guess.", "need": "optional"},
+    {"id": "what", "label": "What we're making", "note": "One line is enough.", "need": "needed"},
+    {"id": "where", "label": "Where it runs", "note": "Sets ratio and duration.", "need": "needed"},
+    {"id": "who", "label": "Who it's for", "note": "Drives hook and pacing.", "need": "needed"},
+]
 
 
-def cards_done(context: Any) -> dict[str, bool]:
-    """Step 2 ✓ state.
+def context_filled(context: Any) -> dict[str, bool]:
+    """Which context blocks the conversation has managed to fill.
 
-    Confirming claims is NOT required to finish the Brand card. It used to be,
-    which meant a brand with nothing quotable could never start a campaign. The
+    Confirming claims is NOT required for the brand block. It used to be, which
+    meant a brand with nothing quotable could never start a campaign. The
     compliance invariant does not need the gate: an unconfirmed brand simply has
     an EMPTY approved_claims list, so every persuasion claim is unmapped and
     _validate_detail rejects it / the council kill-flags it. Confirming claims
     GRANTS permission to make them; it is not a toll on getting started."""
     ctx = _as_dict(context)
-    done = {block: bool(ctx.get(block)) for block in _BLOCKS}
-    return done
+    return {block: bool(ctx.get(block)) for block in _BLOCKS}
 
 
 _REQUIRED_BLOCKS = ("product", "campaign")   # brand has NO required field
@@ -389,7 +381,10 @@ def handle_event(event: UserEvent) -> None:
     stage = thread["stage"]
 
     if event.type == "action":
-        _dispatch(thread, stage, event.action.event, event.action.artifact_id, None)
+        # A multi-select answer travels as `values`; everything else has none,
+        # so `extra` stays None exactly as before.
+        _dispatch(thread, stage, event.action.event, event.action.artifact_id,
+                  event.action.values or None)
         return
 
     text = (event.text or "").strip()
@@ -422,31 +417,9 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
         _say(thread_id, "Nothing to retry on this thread yet.")
         return
 
-    # ---- step 1: path choice
-    if stage == "paths" and event == "brief":
-        ws["sub_mode"] = "conversational"
-        store.set_thread_stage(thread_id, "cards")
-        store.log_artifact_activity(thread_id, "paths", "approved", "brief-first")
-        _spawn(thread_id, _intake_turn, thread_id, campaign_id, extra if isinstance(extra, str) else "")
-        return
-
-    if stage == "paths" and event in ("path_structured", "path_conversational"):
-        ws["sub_mode"] = "structured" if event == "path_structured" else "conversational"
-        store.set_thread_stage(thread_id, "cards")
-        store.log_artifact_activity(thread_id, "paths", "approved", ws["sub_mode"])
-        context = _context_of(campaign_id)
-        opener = ("Three cards, then I ruminate — half-filled cards keep their draft."
-                  if ws["sub_mode"] == "structured"
-                  else "Tell me about it in your own words and attach the product image — "
-                       "I'll fill the cards and only come back for what I genuinely can't proceed without.")
-        _say(thread_id, opener, [_progress_artifact(context)],
-             question=(_combined_question(context) if ws["sub_mode"] == "conversational"
-                       else _next_question(context)))
-        return
-
-    # ---- step 2: elicitation + the start gate
-    if stage == "cards":
-        if event == "intake" and isinstance(extra, str):
+    # ---- intake: conversation is the only way in
+    if stage == "intake":
+        if event in ("intake", "brief") and isinstance(extra, str):
             _spawn(thread_id, _intake_turn, thread_id, campaign_id, extra)
             return
         if event == "begin":
@@ -455,6 +428,10 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
             except ValueError as exc:
                 _say(thread_id, "Not ready yet.", [_progress_artifact(_context_of(campaign_id))],
                      question=str(exc))
+            return
+        if event in ("confirm_claims", "confirm_claims_none"):
+            _confirm_claims(thread_id, campaign_id,
+                            [] if event == "confirm_claims_none" else extra)
             return
 
     # ---- v3 gates. Each approval advances per the review policy; `regenerate`
@@ -651,8 +628,7 @@ _COUNT_RE = re.compile(r"\b([23])\b")
 _NOTE_RE = re.compile(r"[,—-]\s*(.+)$")
 
 _HINTS = {
-    "paths": 'Say "details" to fill the cards yourself, or "help me" and I\'ll ask.',
-    "cards": "Tell me about the product, the campaign or the brand — I'll file it.",
+    "intake": "Tell me about the product, the campaign or the brand — I'll file it.",
     "options": 'Approve one ("approve o2"), or name what to change ("regenerate o1 — harder proof").',
     "templates": 'Pick a template ("use t2") or "skip" — skipping means no style constraint.',
     "detail": 'Name what to change ("tighten shot 2 copy") or say "generate creative".',
@@ -670,19 +646,11 @@ def _parse(stage: str, text: str, ws: dict[str, Any], panel_focus: Optional[str]
         return None
     note = (_NOTE_RE.search(text).group(1).strip() if _NOTE_RE.search(text) else None)
 
-    if stage == "paths":
-        if any(w in low for w in ("detail", "structured", "myself", "cards", "path a")) or low.strip() == "a":
-            return {"event": "path_structured", "artifact_id": "paths"}
-        if any(w in low for w in ("help", "define", "ask me", "conversation", "path b")) or low.strip() == "b":
-            return {"event": "path_conversational", "artifact_id": "paths"}
-        # Anything else is the user ALREADY briefing us. Demanding they first
-        # pick a path is asking a question they have just answered by typing —
-        # take the message as the opening conversational turn instead.
-        return {"event": "brief", "artifact_id": "paths", "extra": text}
-
-    if stage == "cards":
+    if stage == "intake":
         if re.match(r"^\s*(start|begin|go|ruminate|ready)\b", low):
             return {"event": "begin", "artifact_id": "intake"}
+        # Everything else is the user briefing us. There is no path to pick and
+        # no card to fill — typing IS the intake.
         return {"event": "intake", "artifact_id": "intake", "extra": text}
 
     if stage == "options":
@@ -818,7 +786,7 @@ def _intake_turn(thread_id: str, campaign_id: str, text: str) -> None:
                 "context": current.model_dump(mode="json"),
                 "message": text,
                 "transcript": _transcript(thread_id),
-                "filled": cards_done(current),
+                "filled": context_filled(current),
                 # ids of images the user attached to this message or an earlier
                 # one; the agent puts them in product.image_upload_ids
                 "attached_upload_ids": list(_ws(thread_id).get("pending_uploads") or []),
@@ -917,8 +885,27 @@ def _progress_turn(thread_id: str, context: CampaignContext,
     turn — the transcript is the user's record of the conversation, and four
     identical lines tell them nothing about which card moved."""
     complete = not missing_blocks(context)
-    if complete:
-        _say(thread_id, "All three cards are in.",
+    unconfirmed = _claims_awaiting_confirmation(context)
+
+    if complete and unconfirmed:
+        # The compliance gate, asked while it is still free. An unconfirmed
+        # claim is a kill flag at QC, so the cheapest place to settle it is
+        # here — before a single option has been ruminated, let alone rendered.
+        # This is where claims_confirmed lives now that the Brand card is gone;
+        # the agent still may not set it for the user (see _validate_intake).
+        _say(thread_id, "Found claims in what you told me.",
+             [_progress_artifact(context)],
+             question="Which of these may I use on screen?",
+             options=[{"label": c, "event": None} for c in unconfirmed]
+                     + [{"label": "Confirm selected", "event": "confirm_claims",
+                         "artifact_id": "intake", "primary": True},
+                        {"label": "None of them", "event": "confirm_claims_none",
+                         "artifact_id": "intake"}],
+             multi=True,
+             note="Anything you don't confirm becomes a kill flag at QC — I won't "
+                  "quietly drop it. Confirming none of them is allowed.")
+    elif complete:
+        _say(thread_id, "That's everything I need.",
              [_progress_artifact(context, actions=_actions(("begin", "Start", "primary")))],
              question="Start the rumination — evidence, options, council review?")
     else:
@@ -928,17 +915,55 @@ def _progress_turn(thread_id: str, context: CampaignContext,
             and (before is None or getattr(before, b) is None)
         ]
         text = f"{', '.join(filled)} filed." if filled else "Noted."
-        question = _combined_question(context) if conversational else _next_question(context)
-        _say(thread_id, text, [_progress_artifact(context)], question=question)
+        _say(thread_id, text, [_progress_artifact(context)],
+             question=_combined_question(context))
     store.log_artifact_activity(thread_id, "intake", "proposed",
                                 "complete" if complete else f"next: {_next_field(context)}")
+
+
+def _claims_awaiting_confirmation(context: CampaignContext) -> list[str]:
+    """Extracted claims the user has not yet ruled on.
+
+    Candidates land in brand.approved_claims but mean nothing until
+    claims_confirmed is true — `_confirmed_claims()` returns an EMPTY set while
+    it is false, so an unconfirmed list grants no permission at all."""
+    brand = context.brand
+    if brand is None or brand.claims_confirmed:
+        return []
+    return [c for c in (brand.approved_claims or []) if c and c.strip()]
+
+
+def _confirm_claims(thread_id: str, campaign_id: str, chosen: Any) -> None:
+    """The user's one-tap. `chosen` is the subset they ticked; an empty list is
+    a legitimate answer and must still confirm, or an optional input is once
+    again wired to a mandatory output (Learning.MD 2026-08-25)."""
+    context = _context_of(campaign_id)
+    if context.brand is None:
+        raise ValueError("no brand block to confirm claims against")
+
+    offered = _claims_awaiting_confirmation(context)
+    picked = [c for c in (chosen or []) if c in offered] if chosen else []
+    raw = context.model_dump(mode="json")
+    raw["brand"] = {**raw["brand"], "approved_claims": picked, "claims_confirmed": True}
+    context = CampaignContext.model_validate(raw)
+    store.update_series_context(campaign_id, context.model_dump(mode="json"))
+
+    dropped = [c for c in offered if c not in picked]
+    store.log_artifact_activity(
+        thread_id, "intake", "approved",
+        f"claims confirmed: {len(picked)} approved, {len(dropped)} banned")
+    _say(thread_id,
+         f"{len(picked)} approved, {len(dropped)} off the table."
+         if dropped else f"{len(picked)} approved.",
+         [_progress_artifact(context, actions=_actions(("begin", "Start", "primary")))],
+         question="Start the rumination — evidence, options, council review?")
 
 
 def _progress_artifact(context: CampaignContext,
                        actions: Optional[list[dict[str, Any]]] = None) -> ArtifactEnvelope:
     return ArtifactEnvelope(
         type="intake_progress", id="intake", title="Campaign brief",
-        payload={"filled": cards_done(context), "next_field": _next_field(context)},
+        payload={"filled": context_filled(context), "next_field": _next_field(context)},
         actions=actions or [],
     )
 
@@ -969,23 +994,14 @@ def _critical_gaps(context: CampaignContext) -> list[str]:
 
 def _combined_question(context: CampaignContext) -> Optional[str]:
     """ONE question covering everything still blocking, rather than a queue of
-    them. Path b is meant to be faster than the cards, not the same work asked
-    slowly — if it interrogates block by block there is no reason to pick it."""
+    them. Intake is meant to be faster than a form, not the same work asked
+    slowly — interrogating block by block would be a form with extra steps."""
     gaps = _critical_gaps(context)
     if not gaps:
         return None
     if len(gaps) == 1:
         return f"Still need {gaps[0]}. What is it?"
     return "Still need " + "; and ".join(gaps) + "."
-
-
-def _next_question(context: CampaignContext) -> Optional[str]:
-    return {
-        "product": "What's the product — name, one-line description, and at least one image for the consistency pack (up to 8)?",
-        "campaign": "What's the objective (awareness, traffic or conversions), who's it for, and which platforms?",
-        "brand": "What's the brand URL? I'll pull palette, font, logo and tagline for you to confirm.",
-        None: "Start the rumination?",
-    }[_next_field(context)]
 
 
 # ---------------------------------------------------- step 3: rumination ----

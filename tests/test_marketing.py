@@ -134,13 +134,42 @@ def _first_seq(thread_id: str, kind: str) -> int:
     raise AssertionError(f"no {kind} artifact on thread {thread_id}")
 
 
+def _seed_block(campaign_id: str, block: str, data: dict) -> dict:
+    """Merge one block into a campaign's stored context.
+
+    This is what _seed_block() did for the card UI. The cards were
+    removed entirely by owner decision on 2026-08-26, so the merge lives here
+    now — in the tests that still need to stand a context up cheaply, rather
+    than in the app where it would be product code nothing calls. The
+    validation is kept, because that is the only part that was load-bearing.
+    """
+    series = store.get_series(campaign_id)
+    raw = dict(series["context"])
+    raw[block] = {**(raw.get(block) or {}), **(data or {})}
+    context = CampaignContext.model_validate(raw)
+    store.update_series_context(campaign_id, context.model_dump(mode="json"))
+    return context.model_dump(mode="json")
+
+
 def _filled(campaign_id: str, creative_type: str = "image") -> tuple[str, str]:
-    """Steps 0-2 via path a: named campaign + three saved cards."""
+    """Named campaign + a fully populated context.
+
+    The three-card path was removed entirely by owner decision on 2026-08-26,
+    so there is no save_block to walk any more. Every test using this helper is
+    about a stage AFTER intake, so it seeds the context directly — still
+    validated through CampaignContext on the way in, which is the only part of
+    save_block that was ever load-bearing. Intake itself is covered by the
+    tests that go in through the composer the way a person does.
+    """
     started = campaign.start_campaign(campaign_id)
     cid, tid = started["campaign_id"], started["thread"]["id"]
-    campaign.save_block(cid, "product", PRODUCT)
-    campaign.save_block(cid, "campaign", {**CAMPAIGN, "creative_type": creative_type})
-    campaign.save_block(cid, "brand", BRAND)
+    context = CampaignContext.model_validate({
+        "name": started["thread"] and store.get_series(cid)["name"],
+        "product": PRODUCT,
+        "campaign": {**CAMPAIGN, "creative_type": creative_type},
+        "brand": BRAND,
+    })
+    store.update_series_context(cid, context.model_dump(mode="json"))
     return cid, tid
 
 
@@ -192,28 +221,33 @@ def _scripted_intake(monkeypatch, blocks: dict) -> None:
     monkeypatch.setattr(campaign_mock, "mock_campaign_intake", fake_intake, raising=False)
 
 
-def test_path_b_fills_the_identical_campaign_context(monkeypatch):
-    """Conversational intake is elicitation UX, not a second data model: the
-    stored context is byte-identical to the one the three cards write."""
+def test_conversation_fills_the_identical_campaign_context(monkeypatch):
+    """Conversation is elicitation UX, not a second data model.
+
+    This used to compare path a against path b. The card path was removed
+    entirely by owner decision on 2026-08-26, so there is no second path to
+    compare against — but the property that mattered survives and is what is
+    asserted now: talking to the agent produces exactly the context the rest of
+    the pipeline reads, with no conversational-only shape sneaking in.
+    """
     _scripted_intake(monkeypatch, {"product": PRODUCT, "campaign": CAMPAIGN,
                                    "brand": {**BRAND, "claims_confirmed": False}})
 
-    structured_id, _ = _filled("Path A")
+    structured_id, _ = _filled("Seeded")
 
-    started = campaign.start_campaign("Path B")
+    started = campaign.start_campaign("Talked")
     conversational_id, tid = started["campaign_id"], started["thread"]["id"]
-    _text(tid, "help me define the campaign")
-    assert campaign._ws(tid)["sub_mode"] == "conversational"
+    assert store.get_thread(tid)["stage"] == "intake", "naming must land straight in the conversation"
     for turn in ("the product is Ledger", "campaign objective is conversions", "brand details next"):
         _text(tid, turn)
-    campaign.save_block(conversational_id, "brand", {"claims_confirmed": True})  # the one-tap confirm
+    _seed_block(conversational_id, "brand", {"claims_confirmed": True})  # the one-tap confirm
 
     path_a = store.get_series(structured_id)["context"]
     path_b = store.get_series(conversational_id)["context"]
     assert CampaignContext.model_validate(path_a) and CampaignContext.model_validate(path_b)
     assert {k: v for k, v in path_a.items() if k != "name"} == \
            {k: v for k, v in path_b.items() if k != "name"}
-    assert campaign.cards_done(path_b) == {"product": True, "campaign": True, "brand": True}
+    assert campaign.context_filled(path_b) == {"product": True, "campaign": True, "brand": True}
     assert campaign.missing_blocks(path_b) == []
 
     # ≤1 question per turn, and progress chips track the same three blocks
@@ -221,8 +255,10 @@ def test_path_b_fills_the_identical_campaign_context(monkeypatch):
     # No "brand.claims_confirmed" step: confirming claims GRANTS permission to
     # make them, it is not a toll on getting started. An unconfirmed brand just
     # has an empty approved list, so any claim used is unmapped and kill-flagged.
-    assert [p["payload"]["next_field"] for p in progress[1:]] == [
-        "product", "campaign", "brand", None, None]
+    # One entry shorter than it used to be: the turn that only picked a path is
+    # gone, so the first thing the user says already fills a block.
+    assert progress[0]["payload"]["next_field"] == "opening"
+    assert [p["payload"]["next_field"] for p in progress[1:]] == ["campaign", "brand", None]
     for envelope in _envelopes(tid):
         AgentMessage.model_validate(envelope)
 
@@ -252,7 +288,7 @@ def test_path_b_intake_may_not_rename_drop_or_self_confirm():
 def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves(monkeypatch):
     started = campaign.start_campaign("Brand fetch")
     cid = started["campaign_id"]
-    campaign.save_block(cid, "product", PRODUCT)
+    _seed_block(cid, "product", PRODUCT)
 
     extracted = {"palette": ["#0E1116", "#4353FF", "#E5312B"], "font": "Inter",
                  "logo_url": "https://ledger.example/logo.png", "tagline": "File it once",
@@ -271,7 +307,7 @@ def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves
 
     # nothing landed: the fetch is a candidate set, the Brand card is the truth
     assert store.get_series(cid)["context"]["brand"] is None
-    assert campaign.cards_done(store.get_series(cid)["context"])["brand"] is False
+    assert campaign.context_filled(store.get_series(cid)["context"])["brand"] is False
 
     candidates = main.claims_extract(cid)
     assert "saves 4 hours a month" in " ".join(candidates["approved_claims"])
@@ -280,8 +316,8 @@ def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves
     # Unconfirmed claims no longer block the rumination — but they are also not
     # APPROVED, so they buy the campaign nothing. The list stays unusable until
     # the user confirms it; that is where the compliance line sits now.
-    campaign.save_block(cid, "campaign", CAMPAIGN)
-    unconfirmed = campaign.save_block(cid, "brand", {"url": "https://ledger.example",
+    _seed_block(cid, "campaign", CAMPAIGN)
+    unconfirmed = _seed_block(cid, "brand", {"url": "https://ledger.example",
                                                      "approved_claims": candidates["approved_claims"]})
     assert campaign.missing_blocks(unconfirmed) == []
     assert unconfirmed["brand"]["claims_confirmed"] is False
@@ -298,7 +334,7 @@ def test_brand_fetch_populates_but_nothing_is_authoritative_until_the_user_saves
     assert "NOT in the confirmed approved_claims" in str(verr.value)
 
     # the user edits what the extractor proposed, then confirms — their edit wins
-    saved = campaign.save_block(cid, "brand", {
+    saved = _seed_block(cid, "brand", {
         "palette": extracted["palette"][:2],           # dropped the third colour
         "font": "Inter Tight",                         # corrected the font
         "tagline": extracted["tagline"],
@@ -494,14 +530,15 @@ def test_settings_icon_is_disabled_and_hides_no_live_capability():
     # the fixed stack still exists server-side — it is chosen FOR the user
     assert {f"image_{tier}" for tier in ("draft", "final", "pro")} <= set(config.MEDIA_MODELS)
 
-    # the campaign surfaces are extra="forbid" — a smuggled override 422s
-    campaign_id, _ = _filled("No overrides")
-    for block, override in (("campaign", {"model": "fal-ai/some-other-model"}),
-                            ("product", {"image_model": "x"}),
-                            ("brand", {"video_model": "x"})):
-        with pytest.raises(HTTPException) as exc:
-            main.put_campaign_block(campaign_id, block, override)
-        assert exc.value.status_code == 422
+    # The campaign surfaces are extra="forbid" — a smuggled override is refused.
+    # This used to go through the block PUT route. That route died with the card
+    # path, so the check moved DOWN to the schema it was really about, which is
+    # stronger: it now holds for every caller, not just the one route.
+    for block, override in (("campaign", {**CAMPAIGN, "model": "fal-ai/some-other-model"}),
+                            ("product", {**PRODUCT, "image_model": "x"}),
+                            ("brand", {**BRAND, "video_model": "x"})):
+        with pytest.raises(ValidationError):
+            CampaignContext.model_validate({"name": "No overrides", block: override})
     with pytest.raises(ValidationError):
         UserEvent(thread_id="t1", type="action",
                   action={"artifact_id": "confirm", "event": "generate_single", "model": "x"})
@@ -982,21 +1019,21 @@ def test_the_policy_document_is_optional_and_confirming_zero_claims_is_allowed()
     campaign_id = campaign.start_campaign("No policy doc")["campaign_id"]
 
     # no policy_upload_id anywhere, and an empty confirmed list
-    campaign.save_block(campaign_id, "brand", {
+    _seed_block(campaign_id, "brand", {
         "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
         "approved_claims": [], "banned_words": [], "claims_confirmed": True,
     })
     record = main.get_campaign(campaign_id)
     assert record["context"]["brand"]["policy_upload_id"] is None
-    assert record["cards_done"]["brand"] is True          # the card completes
+    assert record["context_filled"]["brand"] is True          # the card completes
 
     # extraction without a policy doc still runs and says what it did
     out = main.claims_extract(campaign_id)
     assert any("policy" in note.lower() for note in out["notes"])
 
     # and the campaign is startable once the other two cards are filled
-    campaign.save_block(campaign_id, "product", PRODUCT)
-    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    _seed_block(campaign_id, "product", PRODUCT)
+    _seed_block(campaign_id, "campaign", CAMPAIGN)
     assert campaign.missing_blocks(main.get_campaign(campaign_id)["context"]) == []
 
 
@@ -1004,12 +1041,12 @@ def test_an_unmapped_claim_still_kill_flags_when_the_approved_list_is_empty():
     """The floor the previous test stands on: confirming zero claims must not
     become a way to smuggle claims through unchecked."""
     campaign_id = campaign.start_campaign("Empty list floor")["campaign_id"]
-    campaign.save_block(campaign_id, "brand", {
+    _seed_block(campaign_id, "brand", {
         "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
         "approved_claims": [], "banned_words": [], "claims_confirmed": True,
     })
-    campaign.save_block(campaign_id, "product", PRODUCT)
-    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
+    _seed_block(campaign_id, "product", PRODUCT)
+    _seed_block(campaign_id, "campaign", CAMPAIGN)
     context = CampaignContext.model_validate(main.get_campaign(campaign_id)["context"])
     assert context.brand.approved_claims == []
 
@@ -1039,9 +1076,9 @@ def test_real_mode_without_a_key_is_refused_up_front_not_discovered_mid_run(monk
     assert main.health()["llm_unavailable"] == reason
 
     campaign_id = campaign.start_campaign("No key")["campaign_id"]
-    campaign.save_block(campaign_id, "product", PRODUCT)
-    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
-    campaign.save_block(campaign_id, "brand", BRAND)
+    _seed_block(campaign_id, "product", PRODUCT)
+    _seed_block(campaign_id, "campaign", CAMPAIGN)
+    _seed_block(campaign_id, "brand", BRAND)
     with pytest.raises(HTTPException) as exc:
         main.start_campaign(campaign_id)
     assert exc.value.status_code == 503          # not a 500, and not a silent mock
@@ -1170,15 +1207,15 @@ def test_one_product_image_is_enough_and_claims_do_not_block_the_start():
     confirming claims GRANTS permission to make them rather than tolling the
     start. Neither relaxation may touch what the campaign is allowed to SAY."""
     campaign_id = campaign.start_campaign("One image, no claims")["campaign_id"]
-    campaign.save_block(campaign_id, "product", {
+    _seed_block(campaign_id, "product", {
         "name": "Solo", "description": "one shot is plenty", "image_upload_ids": ["up_1"]})
-    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
-    campaign.save_block(campaign_id, "brand", {
+    _seed_block(campaign_id, "campaign", CAMPAIGN)
+    _seed_block(campaign_id, "brand", {
         "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
         "approved_claims": [], "banned_words": [], "claims_confirmed": False})
 
     record = main.get_campaign(campaign_id)
-    assert record["cards_done"] == {"product": True, "campaign": True, "brand": True}
+    assert record["context_filled"] == {"product": True, "campaign": True, "brand": True}
     assert campaign.missing_blocks(record["context"]) == []      # startable
     assert main.start_campaign(campaign_id) == {"ok": True}
 
@@ -1188,9 +1225,9 @@ def test_an_unconfirmed_claims_list_is_candidates_not_permissions():
     a saved-but-unconfirmed list act as approved — otherwise the extractor would
     be granting itself authority."""
     campaign_id = campaign.start_campaign("Candidates only")["campaign_id"]
-    campaign.save_block(campaign_id, "product", PRODUCT)
-    campaign.save_block(campaign_id, "campaign", CAMPAIGN)
-    saved = campaign.save_block(campaign_id, "brand", {
+    _seed_block(campaign_id, "product", PRODUCT)
+    _seed_block(campaign_id, "campaign", CAMPAIGN)
+    saved = _seed_block(campaign_id, "brand", {
         "palette": ["#111111", "#222222"], "font": "Inter", "tagline": "t",
         "approved_claims": ["Cuts glare by 40%"], "banned_words": [],
         "claims_confirmed": False})
@@ -1223,21 +1260,24 @@ def test_the_test_suite_never_writes_to_the_real_agent_run_log():
     )
 
 
-def test_a_brief_typed_at_the_path_step_is_taken_not_refused():
-    """The user typed their whole brief at the two-path card and got 'Didn't
-    catch a campaign command.' Asking them to pick a path AFTER they have
-    described the campaign is asking a question they just answered."""
+def test_a_brief_typed_at_the_first_step_is_taken_not_refused():
+    """The user typed their whole brief and got 'Didn't catch a campaign
+    command.' That was the original bug at the two-path card; the paths are
+    gone, but the rule they taught is now the entire front door, so it matters
+    more, not less: whatever the user types first IS the brief.
+    """
     campaign_id = campaign.start_campaign("Brief first")["campaign_id"]
     thread_id = campaign._campaign_thread_id(campaign_id)
     ws = campaign._ws(thread_id)
 
-    parsed = campaign._parse("paths", "generate campaign for this product which is for parties", ws)
-    assert parsed is not None, "a real brief was refused at the paths step"
-    assert parsed["event"] == "brief"
+    parsed = campaign._parse("intake", "generate campaign for this product which is for parties", ws)
+    assert parsed is not None, "a real brief was refused at the first step"
+    assert parsed["event"] == "intake"
+    assert parsed["extra"] == "generate campaign for this product which is for parties", (
+        "the user's own words must reach the agent verbatim, not a parsed shadow of them")
 
-    # the explicit path words still work
-    assert campaign._parse("paths", "details", ws)["event"] == "path_structured"
-    assert campaign._parse("paths", "help me", ws)["event"] == "path_conversational"
+    # "start" is still the one word that means start, not a thing to file
+    assert campaign._parse("intake", "start", ws)["event"] == "begin"
 
 
 def test_an_attached_image_survives_until_there_is_a_product_to_put_it_on():
@@ -2582,7 +2622,7 @@ def test_the_v3_stages_are_inserted_in_cost_ladder_order():
     def before(a, b):
         return stages.index(a) < stages.index(b)
 
-    assert before("cards", "brief") and before("brief", "options")
+    assert before("intake", "brief") and before("brief", "options")
     assert before("templates", "script") and before("script", "detail")
     assert before("detail", "canon"), "the board names the canon it needs"
     assert before("canon", "keyframes"), "canon composes into keyframes"
@@ -2917,3 +2957,94 @@ def test_every_cta_a_card_declares_is_answerable_in_the_chat():
     assert not unreachable, (
         "these CTAs are declared on a card but cannot be answered in the chat, "
         f"so the user has no way to press them: {unreachable}")
+
+
+def test_deleting_a_campaign_takes_its_thread_and_messages_with_it():
+    """There was no delete route until 2026-08-26, which is how a dev database
+    reached 31 QA campaigns with no way to clear them. Deletion has to be a
+    real cascade: a row left behind is an orphan the grid cannot show and
+    nothing can reach."""
+    cid, tid = _ruminated("Delete me")
+    assert store.get_messages(tid), "nothing to orphan — the test would prove nothing"
+
+    removed = store.delete_series(cid)
+
+    assert store.get_series(cid) is None
+    assert store.get_thread(tid) is None
+    assert store.get_messages(tid) == []
+    assert removed["series"] == 1 and removed["threads"] >= 1
+    assert removed.get("thread_messages", 0) >= 1, "messages were left behind"
+
+
+def test_canon_sheets_survive_the_campaign_that_made_them():
+    """Canon is workspace-global by owner decision (2026-08-25), so it outlives
+    its campaign. A cascade that swept it would silently strip the shared
+    library every time a user tidied up."""
+    cid, _ = _filled("Canon owner")
+    sheet_id = store.save_canon_sheet(
+        {"id": "cs_keep", "kind": "cast", "name": "Runner", "views": [], "locks": []})
+    store.delete_series(cid)
+    assert store.get_canon_sheet(sheet_id or "cs_keep") is not None, (
+        "deleting a campaign stripped the workspace canon library")
+
+
+def _claims_question(tid):
+    for envelope in reversed(_envelopes(tid)):
+        question = envelope.get("question") or {}
+        if any(o.get("event") == "confirm_claims" for o in question.get("options", [])):
+            return question
+    return None
+
+
+def test_claims_are_confirmed_in_the_chat_now_that_the_brand_card_is_gone(monkeypatch):
+    """claims_confirmed was reachable only through the Brand card's one-tap.
+    The card is gone, so the confirmation had to move or the compliance chain
+    would break silently — an unconfirmed list grants nothing, so every claim
+    would become a kill flag with no way for the user to say otherwise.
+
+    The agent still may not confirm on the user's behalf (_validate_intake),
+    which is exactly why this has to be a question and not an inference.
+    """
+    _scripted_intake(monkeypatch, {"product": PRODUCT, "campaign": CAMPAIGN,
+                                   "brand": {**BRAND, "claims_confirmed": False}})
+    started = campaign.start_campaign("Claims in chat")
+    cid, tid = started["campaign_id"], started["thread"]["id"]
+    for turn in ("the product is Ledger", "campaign objective is conversions", "brand details next"):
+        _text(tid, turn)
+
+    question = _claims_question(tid)
+    assert question, "no claims confirmation was ever offered"
+    assert question["multi"] is True
+    offered = [o["label"] for o in question["options"] if not o.get("event")]
+    assert set(offered) == set(BRAND["approved_claims"])
+    assert "kill flag" in (question["note"] or ""), "the consequence must be stated inline"
+
+    # confirm ONE of the two — the other must become unusable, not quietly kept
+    keep = BRAND["approved_claims"][0]
+    campaign.handle_event(UserEvent(thread_id=tid, type="action", action={
+        "artifact_id": "intake", "event": "confirm_claims", "values": [keep]}))
+
+    brand = store.get_series(cid)["context"]["brand"]
+    assert brand["claims_confirmed"] is True
+    assert brand["approved_claims"] == [keep]
+
+
+def test_confirming_zero_claims_is_still_a_confirmation(monkeypatch):
+    """The 2026-08-25 lesson, re-checked at its new home: an optional input
+    wired to a mandatory output is unreachable. If 'none of them' did not
+    confirm, a user with nothing quotable could never leave the gate."""
+    _scripted_intake(monkeypatch, {"product": PRODUCT, "campaign": CAMPAIGN,
+                                   "brand": {**BRAND, "claims_confirmed": False}})
+    started = campaign.start_campaign("Zero claims")
+    cid, tid = started["campaign_id"], started["thread"]["id"]
+    for turn in ("the product is Ledger", "campaign objective is conversions", "brand details next"):
+        _text(tid, turn)
+
+    campaign.handle_event(UserEvent(thread_id=tid, type="action", action={
+        "artifact_id": "intake", "event": "confirm_claims_none"}))
+
+    brand = store.get_series(cid)["context"]["brand"]
+    assert brand["claims_confirmed"] is True, "confirming an empty list must still confirm"
+    assert brand["approved_claims"] == []
+    assert campaign._confirmed_claims(CampaignContext.model_validate(
+        store.get_series(cid)["context"])) == set()

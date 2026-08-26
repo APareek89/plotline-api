@@ -367,6 +367,46 @@ def delete_canon_sheet(sheet_id: str) -> bool:
     return cur.rowcount > 0
 
 
+# Everything that hangs off a campaign, and by which key. Written as data
+# rather than a run of DELETEs so a new table is one line here instead of a
+# silent orphan — the failure mode of a hand-written cascade is that it keeps
+# working while quietly leaving rows behind.
+_BY_THREAD = ("run_checkpoints", "thread_messages", "artifact_activity",
+              "assets", "generation_log")
+_BY_SERIES = ("campaign_settings", "series_plan", "concept_state",
+              "pipeline_runs", "performance_log", "post_cards")
+
+
+def delete_series(series_id: str) -> dict[str, int]:
+    """Delete a campaign and everything hanging off it. Returns per-table counts.
+
+    canon_sheets are deliberately NOT touched: they were made workspace-global
+    by owner decision on 2026-08-25, so they outlive the campaign that produced
+    them and deleting one here would silently strip the shared library.
+    """
+    counts: dict[str, int] = {}
+    with _lock:
+        conn = get_conn()
+        threads = [r["id"] for r in conn.execute(
+            "SELECT id FROM threads WHERE series_id = ?", (series_id,)).fetchall()]
+        if threads:
+            marks = ",".join("?" * len(threads))
+            for table in _BY_THREAD:
+                cur = conn.execute(f"DELETE FROM {table} WHERE thread_id IN ({marks})", threads)
+                counts[table] = cur.rowcount
+        for table in _BY_SERIES:
+            cur = conn.execute(f"DELETE FROM {table} WHERE series_id = ?", (series_id,))
+            counts[table] = cur.rowcount
+        counts["ad_cards"] = conn.execute(
+            "DELETE FROM ad_cards WHERE campaign_id = ?", (series_id,)).rowcount
+        counts["threads"] = conn.execute(
+            "DELETE FROM threads WHERE series_id = ?", (series_id,)).rowcount
+        counts["series"] = conn.execute(
+            "DELETE FROM series WHERE id = ?", (series_id,)).rowcount
+        conn.commit()
+    return {k: v for k, v in counts.items() if v}
+
+
 # ------------------------------------------------- run checkpoints (v3) --
 
 

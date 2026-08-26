@@ -423,6 +423,10 @@ class AgentMessage(Strict):
 class UserAction(Strict):
     artifact_id: str
     event: str
+    # What a multi-select question actually chose. Without this a question like
+    # "which of these claims may I use?" can only report THAT it was answered,
+    # never WITH WHAT — and the compliance chain needs the subset, not the tap.
+    values: list[str] = Field(default_factory=list)
 
 
 class UserEvent(Strict):
