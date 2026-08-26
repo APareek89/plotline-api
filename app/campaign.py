@@ -208,6 +208,15 @@ def _rehydrate(thread_id: str, ws: dict[str, Any]) -> None:
                 ws["keyframes"] = payload["board"]
             elif kind == "campaign_detail" and payload.get("detail"):
                 ws["detail"] = payload["detail"]
+                # The BOARD is the source of truth and `detail` is its
+                # projection, so restoring only the projection left canon,
+                # keyframes and qc reading `ws["board"]` as {} — which meant
+                # `shots = []` and a keyframe stage that silently rendered
+                # NOTHING rather than failing. Both travel in this payload.
+                if payload.get("board"):
+                    ws["board"] = payload["board"]
+                if payload.get("style_block"):
+                    ws["style_block"] = payload["style_block"]
                 style = payload["detail"].get("style_ref")
                 ws["template"] = TemplateRef.model_validate(style) if style else None
                 ws["items"] = []  # a new detail starts a new creative — its own asset set
@@ -2749,6 +2758,65 @@ def _escalation(title: str, reason: str, *actions: tuple[str, str, str],
     )
 
 
+# ------------------------------------------------- workspace preconditions --
+#
+# What each stage needs ON THE WORKSPACE before it may run, and which stage is
+# supposed to have put it there. Declared ONCE: the guard reads this and so does
+# the acceptance check, so a new stage cannot quietly acquire an unchecked
+# dependency.
+#
+# This exists because of a real failure. `shot_board` was handed
+# `{"brief": {}, "option": null}` after a mid-campaign restart, refused honestly
+# with "INCOMPLETE INPUT", burned three attempts and escalated as "the shot
+# board kept failing its lints" — blaming the last node for a fault two stages
+# back. Note that TYPING the workspace would not have caught it: `{}` is a
+# perfectly valid dict. What catches it is saying out loud what a stage
+# requires, and refusing to spend a model call without it.
+STAGE_REQUIRES: dict[str, tuple[str, ...]] = {
+    "script": ("brief",),
+    "board": ("brief", "approved_option"),
+    "canon": ("board",),
+    "keyframes": ("board",),
+    "generate": ("detail",),
+    "qc": ("brief", "board"),
+}
+
+# Who fills each slot — so the error names the stage to go back to rather than
+# leaving the reader to grep for it.
+_SLOT_SOURCE = {
+    "brief": "the brief gate",
+    "approved_option": "approving an option",
+    "board": "the shot board",
+    "detail": "the shot board",
+    "hook_rack": "the script gate",
+    "canon": "the canon gate",
+    "keyframes": "the keyframe gate",
+}
+
+
+class WorkspaceIncomplete(RuntimeError):
+    """A stage was reached without the state it depends on."""
+
+
+def _require(ws: dict[str, Any], stage: str) -> None:
+    """Refuse to start a stage whose inputs are missing.
+
+    Raised BEFORE the model call, so an incomplete workspace costs nothing and
+    says which stage to go back to — instead of an agent being asked to reason
+    about an empty object and the retry loop repeating the empty object twice
+    more.
+    """
+    missing = [slot for slot in STAGE_REQUIRES.get(stage, ()) if not ws.get(slot)]
+    if not missing:
+        return
+    parts = [f"{slot} (from {_SLOT_SOURCE.get(slot, 'an earlier stage')})" for slot in missing]
+    raise WorkspaceIncomplete(
+        f"the {stage} stage needs " + ", and ".join(parts) +
+        " — nothing was generated. This usually means the server restarted "
+        "mid-campaign; reopening the thread rebuilds it from the transcript."
+    )
+
+
 def _fail(thread_id: str, summary: str, detail: str) -> None:
     """§04: what broke in plain words + ONE Retry action — never a stack trace
     in the card (the trace goes to the server log)."""
@@ -2869,6 +2937,7 @@ def _script_turn(thread_id: str, campaign_id: str) -> None:
     try:
         _working[thread_id] = "writing the script"
         ws = _ws(thread_id)
+        _require(ws, "script")
         brief = ws.get("brief") or {}
         rack, _log = run_agent(
             agent="hook_rack", prompt_name="hook_rack", model=config.STAGE_MODELS["script"],
@@ -2913,6 +2982,7 @@ def _board_turn(thread_id: str, campaign_id: str) -> None:
     try:
         _working[thread_id] = "building the shot board"
         ws = _ws(thread_id)
+        _require(ws, "board")
         brief = ws.get("brief") or {}
         style = ws.get("style_block") or neutral_style_block().model_dump(mode="json")
         ws["style_block"] = style
@@ -2999,6 +3069,7 @@ def _canon_turn(thread_id: str, campaign_id: str) -> None:
     try:
         _working[thread_id] = "planning the canon sheets"
         ws = _ws(thread_id)
+        _require(ws, "canon")
         board = ws.get("board") or {}
         if "canon" in skipped_stages(campaign_id):
             # A costed, RECORDED choice — never a silent default.
@@ -3073,6 +3144,7 @@ def _keyframes_turn(thread_id: str, campaign_id: str) -> None:
     try:
         _working[thread_id] = "rendering keyframes"
         ws = _ws(thread_id)
+        _require(ws, "keyframes")
         board = ws.get("board") or {}
         shots = board.get("shots", [])
         policy = _policy_of(campaign_id)
@@ -3137,6 +3209,7 @@ def _qc_turn(thread_id: str, campaign_id: str) -> None:
     try:
         _working[thread_id] = "running QC"
         ws = _ws(thread_id)
+        _require(ws, "qc")
         context = _context_of(campaign_id)
         brief = ws.get("brief") or {}
         board = ws.get("board") or {}

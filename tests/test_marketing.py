@@ -3219,3 +3219,58 @@ def test_no_stage_model_leaks_into_the_public_api(monkeypatch):
     spec = main.app.openapi()
     body_props = {p for _, p in _request_body_properties(spec)}
     assert not [p for p in body_props if "model" in p.lower() or "stage_model" in p.lower()]
+
+
+def test_a_stage_refuses_to_run_without_the_state_it_depends_on():
+    """`shot_board` was once handed {"brief": {}, "option": null}, refused with
+    "INCOMPLETE INPUT", burned three attempts and escalated as "the shot board
+    kept failing its lints" — blaming the last node for a fault two stages back.
+
+    Note that TYPING the workspace would not catch this: {} is a valid dict.
+    What catches it is declaring what a stage requires and refusing to spend a
+    model call without it. The error must name the stage to go back to.
+    """
+    empty: dict = {}
+    with pytest.raises(campaign.WorkspaceIncomplete) as exc:
+        campaign._require(empty, "board")
+    message = str(exc.value)
+    assert "brief" in message and "the brief gate" in message
+    assert "nothing was generated" in message, "the user must be told they were not charged"
+
+    # a present-but-EMPTY slot is still missing — this is the actual bug shape
+    with pytest.raises(campaign.WorkspaceIncomplete):
+        campaign._require({"brief": {}, "approved_option": None}, "board")
+
+    # …and a satisfied stage passes silently
+    campaign._require({"brief": {"x": 1}, "approved_option": object()}, "board")
+
+
+def test_every_required_slot_has_a_named_source():
+    """The error's whole value is naming where to go back to. A slot with no
+    source silently degrades to 'an earlier stage', which is the message the
+    guard exists to replace."""
+    declared = {slot for slots in campaign.STAGE_REQUIRES.values() for slot in slots}
+    unnamed = declared - set(campaign._SLOT_SOURCE)
+    assert not unnamed, f"these required slots have no named source: {sorted(unnamed)}"
+
+
+def test_the_board_survives_a_restart_not_just_its_projection():
+    """The board is the source of truth; `detail` is its projection. _rehydrate
+    restored only the projection, so canon, keyframes and qc read ws["board"]
+    as {} — which meant shots == [] and a keyframe stage that rendered NOTHING
+    rather than failing. A silent no-op is worse than an error."""
+    cid, tid = _ruminated("Board survives")
+    _act(tid, "o1", "approve")
+    _pass_script(tid)
+    _approve(tid, "board", "approve_board")
+
+    before = campaign._ws(tid)
+    assert before.get("board", {}).get("shots"), "no board to lose — the test would prove nothing"
+
+    campaign._WORKSPACES.clear()
+    after = campaign._ws(tid)
+    campaign._rehydrate(tid, after)
+
+    assert after.get("board"), "the board did not survive; canon and keyframes would render nothing"
+    assert after["board"]["shots"] == before["board"]["shots"]
+    assert after.get("style_block"), "the style block rides the same payload and was dropped"
