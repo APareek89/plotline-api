@@ -653,3 +653,50 @@ def all_agent_runs(limit: int = 200) -> dict[str, Any]:
         tid = row.get("thread_id")
         row["campaign_name"] = names.get(tid or "", None)
     return {"runs": runs[-limit:]}
+
+
+def _provider_of(model: str) -> str:
+    """Which provider served a render.
+
+    New rows carry a "pixelbin:" / "fal:" prefix. Rows written before that
+    prefix existed still name a fal slug ("fal-ai/nano-banana-2"), which is
+    unambiguous — reading it is recovering a fact, not guessing one. Anything
+    genuinely unrecognised stays "?" rather than being assigned a plausible
+    provider, because a wrong attribution in a cost view is worse than none.
+    """
+    if ":" in model:
+        return model.split(":", 1)[0]
+    if model == "mock":
+        return "mock"
+    if model.startswith("fal-ai/"):
+        return "fal"
+    return "?"
+
+
+@app.get("/api/media-runs")
+def all_media_runs(limit: int = 200) -> dict[str, Any]:
+    """Every media generation across all threads, newest first.
+
+    The agent-runs surface answers "which NODE failed". This answers "which
+    PROVIDER actually served that render, and what did it charge" — a distinct
+    question since 2026-08-26, when PixelBin became primary and fal became the
+    fallback. `model` carries its provider prefix, so a silent failover is
+    visible in the row instead of being inferred from timing.
+
+    Same gate as agent-runs: prompts travel in these rows.
+    """
+    if not _debug_enabled():
+        raise HTTPException(404, "observability is disabled on this deployment")
+
+    series_names = {row["id"]: row["name"] for row in store.list_series()}
+    rows = store.recent_generations(limit)
+    for row in rows:
+        row["campaign_name"] = series_names.get(row.get("series_id") or "", None)
+        row["provider"] = _provider_of(row.get("model") or "")
+    spent = sum(float(r.get("cost") or 0) for r in rows)
+    by_provider: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        bucket = by_provider.setdefault(row["provider"], {"renders": 0, "usd": 0.0})
+        bucket["renders"] += 1
+        bucket["usd"] = round(bucket["usd"] + float(row.get("cost") or 0), 4)
+    return {"runs": rows, "total_usd": round(spent, 4), "by_provider": by_provider}

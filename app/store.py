@@ -770,6 +770,24 @@ def log_generation(thread_id: Optional[str], asset_id: Optional[str], event: str
         get_conn().commit()
 
 
+def recent_generations(limit: int = 200) -> list[dict[str, Any]]:
+    """Every media generation across ALL threads, newest first.
+
+    The per-thread log answers "what did this campaign cost". This answers
+    "which provider actually served the last N renders, and what did each one
+    charge" — which is the question you ask when a fallback fires, or when a
+    model name silently 404s after a cost gate. The model column carries its
+    provider prefix, so the answer is in the row rather than inferred.
+    """
+    with _lock:
+        rows = get_conn().execute(
+            "SELECT g.*, t.series_id FROM generation_log g "
+            "LEFT JOIN threads t ON t.id = g.thread_id "
+            "ORDER BY g.created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_generation_log(thread_id: str) -> list[dict[str, Any]]:
     with _lock:
         rows = get_conn().execute(
