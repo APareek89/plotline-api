@@ -36,7 +36,7 @@ from pydantic import ValidationError
 
 from app.schemas import (GATEABLE_STAGES, KEYFRAME_CHECKS, POLICY_PRESETS, CanonPlan,
                          CanonSheet, HookRack, KeyframeBoard, ReviewPolicy, ShotBoard,
-                         REALISM_TEXTURE, TAKE_FIXES, StyleBlock, TakeReject,
+                         REALISM_TEXTURE, TAKE_FIXES, VIEW_LABELS, StyleBlock, TakeReject,
                          VariantCell, VariantMatrix, neutral_style_block,
                          policy_from_preset)
 from app.seats import SeatConfigError, SeatSpec
@@ -497,6 +497,12 @@ def _dispatch(thread: dict[str, Any], stage: str, event: str, artifact_id: str, 
                 else "skipped by the user — expect identity drift after roughly three shots")
             store.set_thread_stage(thread_id, advance_from(campaign_id, "canon"))
             _spawn(thread_id, _keyframes_turn, thread_id, campaign_id)
+            return
+        if event == "resheet_canon":
+            # The upgrade the gate offers instead of the question it used to
+            # ask. It SPENDS, so it is an explicit event with its price quoted
+            # — assuming forward never means assuming a second charge.
+            _spawn(thread_id, _resheet_turn, thread_id, campaign_id)
             return
 
     if stage == "keyframes":
@@ -3213,13 +3219,25 @@ def _canon_turn(thread_id: str, campaign_id: str) -> None:
         sheets = _render_canon_views(thread_id, plan.sheets, campaign_id)
         ws["canon"] = [s.model_dump(mode="json") for s in sheets]
         _say(thread_id,
-             f"{len(sheets)} canon sheet(s) — reusable across every future campaign.",
+             f"{len(sheets)} canon sheet(s) — one labelled sheet each, reusable across "
+             "every future campaign.",
              [ArtifactEnvelope(
                  type="canon_sheet", id="canon", title="Canon sheets",
                  payload={"sheets": ws["canon"]},
                  actions=_actions(("approve_canon", "Approve canon", "primary"),
+                                  ("resheet_canon", "Re-render sharper", "secondary"),
                                   ("skip_canon", "Skip sheets", "secondary")))],
-             question="Approve these sheets, or skip them and accept the drift?")
+             question="Approve these sheets, or skip them and accept the drift?",
+             # Assumed forward rather than asked. The angle question the master
+             # prompt specified was another interrogation before the user had
+             # seen anything; the owner's rule is assume the cheap option, state
+             # it, and let the gate correct it in one click.
+             note=(_canon_summary(sheets)
+                   + f" Rendered at {config.IMAGE_RESOLUTION_DEFAULT} — enough to approve "
+                     f"from; 'Re-render sharper' redoes them at "
+                     f"{config.IMAGE_RESOLUTION_SHARP} and charges again. Check every panel "
+                     "is really there before approving — nothing here inspects the image.")
+             .strip())
         store.log_artifact_activity(thread_id, "canon", "proposed",
                                     ", ".join(s.id for s in sheets) or "none needed")
         _stage_done(thread_id, campaign_id, "canon",
@@ -3230,6 +3248,49 @@ def _canon_turn(thread_id: str, campaign_id: str) -> None:
         _fail(thread_id, "The canon plan kept failing validation.", str(exc))
     except Exception as exc:
         _fail(thread_id, f"Canon planning failed: {exc}", traceback.format_exc())
+    finally:
+        _working.pop(thread_id, None)
+
+
+def _resheet_turn(thread_id: str, campaign_id: str) -> None:
+    """Re-render the sheets at the higher resolution the gate offered.
+
+    The library copy is DROPPED first. `_render_canon_views` reuses anything
+    already stored — that is the retention mechanic — so without this the
+    upgrade would silently hand back the same 1K sheet and charge for it.
+    """
+    try:
+        _working[thread_id] = "re-rendering the canon sheets"
+        ws = _ws(thread_id)
+        planned = [CanonSheet.model_validate(s) for s in (ws.get("canon") or [])]
+        if not planned:
+            _say(thread_id, "There are no canon sheets to re-render yet.")
+            return
+        for sheet in planned:
+            store.delete_canon_sheet(sheet.id)
+            sheet.asset_ids, sheet.coverage = [], {}
+            sheet.sheet_asset_id = sheet.sheet_url = None
+
+        prev = config.IMAGE_RESOLUTION_DEFAULT
+        sheets = _render_canon_views(thread_id, planned, campaign_id,
+                                     resolution=config.IMAGE_RESOLUTION_SHARP)
+        ws["canon"] = [s.model_dump(mode="json") for s in sheets]
+        store.log_artifact_activity(thread_id, "canon", "refined",
+                                    f"re-rendered at {config.IMAGE_RESOLUTION_SHARP}")
+        _say(thread_id,
+             f"Re-rendered the canon sheets at {config.IMAGE_RESOLUTION_SHARP}.",
+             [ArtifactEnvelope(
+                 type="canon_sheet", id="canon", title="Canon sheets",
+                 payload={"sheets": ws["canon"]},
+                 actions=_actions(("approve_canon", "Approve canon", "primary"),
+                                  ("skip_canon", "Skip sheets", "secondary")))],
+             question="Approve these sheets, or skip them and accept the drift?",
+             note=(_canon_summary(sheets)
+                   + f" Was {prev}; this render was paid for on top of the first.").strip())
+    except MediaError as exc:
+        _media_fail(thread_id, exc, None, "canon")
+    except Exception as exc:
+        _fail(thread_id, f"Re-rendering the canon sheets failed: {exc}", traceback.format_exc())
     finally:
         _working.pop(thread_id, None)
 
@@ -3460,8 +3521,89 @@ def _detail_from_board(board: ShotBoard, rack: Optional[dict[str, Any]]) -> dict
     }
 
 
-def _render_canon_views(thread_id: str, sheets: list, campaign_id: str) -> list:
-    """Generate each sheet's required views, then save it to the workspace library.
+_SHEET_STYLE: dict[str, str] = {
+    "product": ("a technical product reference sheet on a pure white catalog background, "
+                "panels separated by thin light-gray dividers, each panel captioned in "
+                "small uppercase type beneath it"),
+    "character": ("a character reference sheet on a light neutral studio background, "
+                  "panels separated by thin crisp dividers, each panel captioned in small "
+                  "uppercase type above it, the figure at consistent scale across every "
+                  "full-figure panel"),
+    "environment": ("a location reference sheet on a neutral dark background, panels "
+                    "separated by thin crisp dividers, each panel captioned in small "
+                    "uppercase type in its top-left corner"),
+}
+
+
+def _canon_summary(sheets: list) -> str:
+    """What the sheets cost and what they would have cost one-render-per-view.
+
+    Said at the gate because the saving is the reason the sheet exists and a
+    number the user never sees is a number they cannot weigh. Both figures come
+    from `config.MEDIA_COST_USD`, never from the model.
+    """
+    rendered = [s for s in sheets if s.sheet_asset_id]
+    if not rendered:
+        return ""
+    each = estimate_cost("image", tier=config.CANON_SHEET_TIER)
+    views = sum(len(s.required_views()) for s in rendered)
+    return (f"One labelled sheet each, {views} view(s) in total, "
+            f"${each * len(rendered):.2f} — a render per view would have been "
+            f"${each * views:.2f}, and the views would only agree by luck.")
+
+
+def _canon_sheet_prompt(sheet: "CanonSheet", views: tuple[str, ...]) -> str:
+    """One prompt for ONE image holding every required view as a labelled panel.
+
+    The layout comes first and the NEGATIVES come second, which is the order the
+    owner's own reference sheets use. Product fidelity lives in the negatives:
+    a generator will happily reproduce a backdrop seam or a stray overlay from
+    the reference photo as if it were part of the product, and the only reliable
+    defence is naming that class of thing and refusing it.
+
+    `locks` and `risk_notes` are already the campaign's own answer to "what must
+    not change" and "what mutates between generations" — they are injected here
+    rather than restated, so the sheet and the board cannot disagree about the
+    product.
+    """
+    labelled = [f"{i}. {VIEW_LABELS.get(v, v.replace('_', ' ').upper())}"
+                for i, v in enumerate(views, start=1)]
+    parts = [
+        f"{_SHEET_STYLE.get(sheet.kind, _SHEET_STYLE['product'])}, "
+        f"laid out as a clean grid of exactly {len(views)} panels, "
+        f"reading left to right, top to bottom.",
+        f"SUBJECT: {sheet.brief}",
+        "PANELS, in this exact order, each showing the SAME subject from the named "
+        "viewpoint: " + " · ".join(labelled) + ".",
+    ]
+    if sheet.locks:
+        parts.append("IDENTICAL IN EVERY PANEL — do not vary: " + "; ".join(sheet.locks) + ".")
+    if sheet.risk_notes:
+        # v3 §6: a product whose geometry mutates needs an explicit do-not-change
+        # instruction in every prompt that references it, not just extra views.
+        parts.append("DO NOT CHANGE — these mutate between generations and must be "
+                     "reproduced exactly as described: " + "; ".join(sheet.risk_notes) + ".")
+    parts.append(
+        "CRITICAL — negatives. Any photographic artifact in a reference image "
+        "(a diagonal stripe or band, an overlay, a watermark, a backdrop seam, a "
+        "reflection, a colour cast) is a property of the PHOTO and is NOT part of the "
+        "subject: do not reproduce it. No text anywhere except the panel captions listed "
+        "above. No logo, wordmark or copy that is not already on the subject. No "
+        "duplicate panels, no extra panels, no empty panels."
+    )
+    return " ".join(parts)
+
+
+def _render_canon_views(thread_id: str, sheets: list, campaign_id: str,
+                        resolution: Optional[str] = None) -> list:
+    """Generate ONE labelled reference sheet per canon sheet, then save it.
+
+    It was one render PER VIEW until 2026-08-26 — seven renders on the last QA
+    run for a single product. One sheet is cheaper by the number of views, but
+    the reason that matters least: views composed in a SINGLE pass agree with
+    each other by construction, and seven independent calls agree only by luck.
+    The sheet is about to become the reference for every keyframe downstream,
+    so its internal agreement is the whole point of having one.
 
     A sheet ALREADY IN THE LIBRARY is reused, not re-rendered. That is the whole
     retention mechanic — campaign two is cheaper because the canon exists — and
@@ -3477,25 +3619,35 @@ def _render_canon_views(thread_id: str, sheets: list, campaign_id: str) -> list:
                 {k: v for k, v in existing.items() if not k.startswith("_")})
             store.log_artifact_activity(
                 thread_id, "canon", "reused",
-                f"{reused.id} reused from the library — {len(reused.asset_ids)} view(s), no new spend")
+                f"{reused.id} reused from the library — no new spend")
             out.append(reused)
             continue
 
-        for view in sheet.required_views():
-            prompt = f"{sheet.brief}, {view.replace('_', ' ')} view, neutral background"
-            frame = generate("image", prompt, ratio="1:1", tier="draft")
-            asset_id = store.add_asset(thread_id, f"canon_{sheet.id}_{view}",
-                                       frame.get("kind", "image"), frame["path"],
-                                       {"model": frame["model"], "prompt": prompt,
-                                        "canon_id": sheet.id, "view": view},
-                                       frame["cost"])
+        views = sheet.required_views()
+        if views:
+            prompt = _canon_sheet_prompt(sheet, views)
+            want = resolution or config.IMAGE_RESOLUTION_DEFAULT
+            frame = generate("image", prompt, ratio="16:9",
+                             tier=config.CANON_SHEET_TIER, resolution=want)
+            asset_id = store.add_asset(
+                thread_id, f"canon_{sheet.id}", frame.get("kind", "image"), frame["path"],
+                {"model": frame["model"], "prompt": prompt, "canon_id": sheet.id,
+                 "views": list(views), "resolution": want,
+                 # The PROVIDER url, kept because a local /api/assets path is not
+                 # fetchable by a generator's servers — Stage 3 needs this one.
+                 "url": frame.get("url")},
+                frame["cost"])
             store.log_generation(thread_id, asset_id, "generate", prompt=prompt,
                                  model=frame["model"], seed=str(frame.get("seed")),
                                  cost=frame["cost"])
-            sheet.asset_ids.append(asset_id)
-            sheet.coverage[view] = True
+            sheet.asset_ids = [asset_id]
+            sheet.sheet_asset_id = asset_id
+            sheet.sheet_url = frame.get("url")
+            # Composed, not detected. The canon gate is where a human confirms
+            # the panels are really in there; nothing here inspects the pixels.
+            for view in views:
+                sheet.coverage[view] = True
 
-        # Coverage is real now, so the full check applies.
         validate_canon_sheet(sheet)
         store.save_canon_sheet(sheet.model_dump(mode="json"), campaign_id)
         out.append(sheet)

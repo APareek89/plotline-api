@@ -244,7 +244,7 @@ def _generate_fal(
 
 def _generate_pixelbin(
     kind: str, prompt: str, *, ratio: str, duration_s: float, tier: str,
-    image_urls: list[str],
+    image_urls: list[str], resolution: Optional[str],
 ) -> tuple[str, str, list[dict[str, str]]]:
     """One asset via PixelBin. Returns (url, model, dropped). Raises MediaError,
     so the router does not have to know two exception types.
@@ -259,7 +259,8 @@ def _generate_pixelbin(
 
     try:
         out = pixelbin_client.generate(
-            kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_urls=image_urls,
+            kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier,
+            image_urls=image_urls, resolution=resolution,
         )
     except pixelbin_client.PixelbinError as exc:
         raise MediaError(str(exc), policy=exc.policy) from exc
@@ -287,6 +288,7 @@ def generate(
     tier: str = "final",
     voice: Optional[str] = None,
     image_urls: Optional[list[str]] = None,
+    resolution: Optional[str] = None,
     seed: Optional[int] = None,
 ) -> dict[str, Any]:
     """Returns {path?, url?, model, cost, seed, mock, fallback?, refs_used,
@@ -350,7 +352,8 @@ def generate(
         try:
             if provider == "pixelbin":
                 url, model, by_provider = _generate_pixelbin(
-                    kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier, image_urls=kept)
+                    kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier,
+                    image_urls=kept, resolution=resolution)
             else:
                 url, model, by_provider = _generate_fal(
                     kind, prompt, ratio=ratio, duration_s=duration_s, tier=tier,

@@ -247,7 +247,7 @@ def generate(
     duration_s: float = 4.0,
     tier: str = "final",
     image_urls: Optional[list[str]] = None,
-    resolution: str = "2K",
+    resolution: Optional[str] = None,
 ) -> dict[str, Any]:
     """One image or video via PixelBin. Returns {url, model, params}.
 
@@ -288,7 +288,11 @@ def generate(
         payload["duration"] = _snap_duration(duration_s, caps["durations"])
         payload["resolution"] = "720p"
     elif caps.get("resolution"):
-        payload["output_resolution"] = resolution if resolution in caps["resolution"] else "2K"
+        # An unsupported value must not travel: output_resolution is a hard enum
+        # and a stray "1K" against a model that only knows 2K/4K is a 400 the
+        # user reads as an outage. Unset means "let the model decide".
+        want = resolution or config.IMAGE_RESOLUTION_DEFAULT
+        payload["output_resolution"] = want if want in caps["resolution"] else "2K"
     refs = [u for u in (image_urls or []) if u]
     if refs:
         # `_as_form` repeats a list under the same field name — a JSON-encoded

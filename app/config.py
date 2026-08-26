@@ -172,6 +172,20 @@ MEDIA_REF_SLOTS = {
 }
 MEDIA_REF_SLOTS_DEFAULT = int(os.environ.get("PLOTLINE_REF_SLOTS_DEFAULT", "2"))
 
+# Output resolution for image renders that do not ask for one. Owner decision
+# 2026-08-26: "keep 1K for now" — a canon sheet at 1K is legible enough to
+# APPROVE from, and approving is what the sheet is for. A print-fidelity
+# re-render is an upgrade offered at the gate, never a question asked before the
+# user has seen anything.
+IMAGE_RESOLUTION_DEFAULT = os.environ.get("PLOTLINE_IMAGE_RESOLUTION", "1K")
+# What "re-render sharper" means at the gate. Both values must exist in the
+# target model's output_resolution enum or the client falls back and says so.
+IMAGE_RESOLUTION_SHARP = os.environ.get("PLOTLINE_IMAGE_RESOLUTION_SHARP", "2K")
+# The tier a reference sheet renders at. NOT the draft tier: draft is
+# nanoBanana v1, which declares no output_resolution at all, and a sheet whose
+# panel labels are unreadable cannot be approved from.
+CANON_SHEET_TIER = os.environ.get("PLOTLINE_CANON_TIER", "final")
+
 
 def media_key(kind: str, tier: str = "final") -> str:
     """The ONE key a (kind, tier) pair resolves to.

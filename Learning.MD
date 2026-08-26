@@ -451,3 +451,42 @@ or typed ONE well-formed sentence containing everything. Real users type in frag
 The new test asserts the SHAPE of a fragmented conversation reaching a startable
 campaign, not the wording of any turn. This is the third time this file has recorded
 "the tests never type like a person", and the first time a test actually does.
+
+## 2026-08-26 — The zero-spend rehearsal cannot get past its own front door
+
+**Symptom.** Driving the new canon gate under `MOCK_LLM=1` — deliberately, to QA a
+media change without paying for Haiku — intake never completed. Four fragments in,
+the app said "I filled the gaps so we can get moving" and offered **Start**. Start
+answered "Not ready yet. Campaign context incomplete — still needed: product,
+campaign." A CTA that refuses itself.
+
+**Why-chain.**
+1. Why did Start refuse? `begin_rumination` found `product`/`campaign` still null.
+2. Why were they null? The assume pass ran and filled nothing.
+3. Why nothing? `_assume_and_proceed` calls `run_agent(...)` with `assume_mode: True`,
+   and under MOCK_LLM that resolves to `campaign_mock.mock_campaign_intake`, which
+   **has no concept of assume_mode**. It fills at most the one block the CURRENT
+   message names by keyword — and the assume pass deliberately sends `message: ""`.
+   So the stand-in returns the context unchanged, by construction.
+4. Why did the turn then offer Start? `_assume_and_proceed` posts its "I filled the
+   gaps" message and the Start action **unconditionally**, without asserting that the
+   context it got back is actually complete.
+5. **Deepest why: `design`** — a prompt-level behaviour was added without its
+   stand-in, and the code that consumed it trusted the result instead of checking it.
+   The mock is not a test fixture here; it is the ONLY zero-cost path through the
+   product, so a behaviour it cannot reproduce is a behaviour that cannot be
+   rehearsed for free.
+
+**Not fixed — reported to the owner.** This lives in freshly-shipped intake work
+(`7a806ce`) and the right fix is a decision, not a patch: either the mock learns
+assume_mode, or `_assume_and_proceed` refuses to offer Start on an incomplete
+context, or both. Point 4 matters in REAL mode too — a model that under-fills in
+assume mode produces the same dead end, and that is the failure the owner's own
+"never strand the user" rule exists to prevent.
+
+**Preventive action for the class.** When a new agent behaviour is added behind a
+prompt flag, the mock has to learn it in the same commit. MOCK_LLM is not a test
+convenience — it is the free rung of the loop, and a rung that cannot reach the
+stage under test silently promotes every QA pass to a paid one. And a turn that
+posts a "we're ready" CTA must assert readiness from the DATA it just received,
+never from the fact that the call returned.

@@ -825,6 +825,22 @@ CANON_COVERAGE: dict[str, tuple[str, ...]] = {
 # be trusted in a shot.
 PRODUCT_RISK_VIEWS = ("three_quarter_fl", "three_quarter_fr", "three_quarter_rl")
 
+# Human labels for the panel captions burned into a reference sheet. The KEYS
+# stay the vocabulary of CANON_COVERAGE — coverage, `complete` and the validator
+# all read those — so this maps one vocabulary to its readable form rather than
+# introducing a second one nothing compares.
+VIEW_LABELS: dict[str, str] = {
+    "front": "FRONT", "rear": "REAR", "left": "LEFT PROFILE", "right": "RIGHT PROFILE",
+    "top": "TOP-DOWN", "base": "BASE / UNDERSIDE",
+    "three_quarter_l": "3/4 LEFT", "three_quarter_r": "3/4 RIGHT",
+    "three_quarter_fl": "3/4 FRONT-LEFT", "three_quarter_fr": "3/4 FRONT-RIGHT",
+    "three_quarter_rl": "3/4 REAR-LEFT",
+    "profile_l": "LEFT PROFILE", "profile_r": "RIGHT PROFILE",
+    "full_front": "FULL FIGURE — FRONT", "full_rear": "FULL FIGURE — REAR",
+    "establishing": "ESTABLISHING", "angle_a": "ANGLE A",
+    "angle_b": "ANGLE B", "angle_c": "ANGLE C",
+}
+
 
 class CanonSheet(Strict):
     """v3 §6 — "is this the right cast, and is this actually our product?"
@@ -839,6 +855,19 @@ class CanonSheet(Strict):
     label: str
     brief: str                  # casting / product / location / voice descriptor
     asset_ids: list[str] = Field(default_factory=list)
+    # ONE image holding every required view as a labelled panel (v5 Stage 2).
+    # It was N separate renders until 2026-08-26 — which cost N times as much
+    # and, worse, produced N views that agree only by luck. Views composed in a
+    # single pass agree by construction, which is the whole reason the sheet is
+    # worth being the reference for everything downstream.
+    sheet_asset_id: Optional[str] = None
+    # The PROVIDER's own URL for that sheet. The local /api/assets path is not
+    # fetchable by a generator's servers, so the public one is what can actually
+    # be passed back as a reference — see _render_keyframe.
+    sheet_url: Optional[str] = None
+    # What the sheet was COMPOSED to contain, per view. The human canon gate is
+    # where a user confirms the panels are really there; this is not a detector
+    # and must not be read as one.
     coverage: dict[str, bool] = Field(default_factory=dict)
     locks: list[str] = Field(default_factory=list)
     slot_cost: int = Field(default=1, ge=1)     # how many B3 reference slots it eats

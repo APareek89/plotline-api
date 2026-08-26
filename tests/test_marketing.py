@@ -3628,3 +3628,118 @@ def test_every_model_route_declares_a_reference_budget():
     assert config.ref_slots("image", "pro") == config.MEDIA_REF_SLOTS["image_pro"]
     assert config.ref_slots("image", "final") == config.MEDIA_REF_SLOTS["image_final"]
     assert config.ref_slots("video") == config.MEDIA_REF_SLOTS["video"]
+
+
+# --- Stage 2 · one sheet, many labelled views --------------------------------
+
+
+def test_a_canon_sheet_is_one_render_not_one_per_view(monkeypatch):
+    """It was a render PER VIEW — seven for a single product on the last QA run.
+
+    Cost is the least of it. Views composed in ONE pass agree with each other by
+    construction; seven independent calls agree only by luck, and the sheet is
+    about to become the reference for every keyframe downstream. A sheet whose
+    own panels disagree cannot make anything else consistent.
+    """
+    from app import media
+
+    calls: list[dict] = []
+    real = media.generate
+
+    def counting(kind, prompt, **kw):
+        calls.append({"kind": kind, "prompt": prompt, **kw})
+        return real(kind, prompt, **kw)
+
+    monkeypatch.setattr(campaign, "generate", counting)
+
+    cid, tid = _ruminated("One sheet", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+    _approve(tid, "hook_rack", "approve_script")
+    _approve(tid, "board", "approve_board")
+
+    sheets = _artifacts(tid, "canon_sheet")[-1]["payload"]["sheets"]
+    assert sheets, "no canon sheets were produced"
+
+    rendered = [s for s in sheets if s.get("sheet_asset_id")]
+    assert rendered, "no sheet carries a sheet_asset_id — nothing was composed"
+
+    canon_calls = [c for c in calls if "PANELS, in this exact order" in c["prompt"]]
+    assert len(canon_calls) == len(rendered), (
+        f"{len(canon_calls)} renders for {len(rendered)} sheet(s) — "
+        "a sheet is ONE image, not one per view")
+
+    for sheet in rendered:
+        views = [v for v, present in sheet["coverage"].items() if present]
+        assert len(views) > 1, "a sheet with one view proves nothing about composition"
+        assert sheet["asset_ids"] == [sheet["sheet_asset_id"]], (
+            "asset_ids should name the one sheet, so downstream reads one thing")
+
+
+def test_the_sheet_prompt_states_the_layout_then_refuses_the_photo_artifacts():
+    """The owner's own reference sheets put the layout first and the NEGATIVES
+    second, and the negatives are where product fidelity lives: a generator will
+    reproduce a backdrop seam or a stray diagonal overlay from the reference as
+    though it were part of the product.
+
+    The campaign's own `locks` and `risk_notes` are INJECTED rather than
+    restated, so the sheet and the board cannot disagree about the product —
+    the same rule as the R2 lexicon and the B3 slot caps.
+    """
+    from app.schemas import CanonSheet
+
+    sheet = CanonSheet(
+        id="@shoe", kind="product", label="Trail shoe",
+        brief="a teal-and-orange trail running shoe",
+        locks=["white midsole", "orange toe cap"],
+        risk_notes=["lug pattern density", "heel wordmark"],
+        rights="owned")
+    views = sheet.required_views()
+    prompt = campaign._canon_sheet_prompt(sheet, views)
+
+    assert f"exactly {len(views)} panels" in prompt, "the panel count is not stated"
+    for view in views:
+        assert campaign.VIEW_LABELS.get(view, "").upper() in prompt.upper() or view in prompt, (
+            f"view {view} has no labelled panel")
+
+    for lock in sheet.locks:
+        assert lock in prompt, "a lock the board enforces is missing from the sheet prompt"
+    for risk in sheet.risk_notes:
+        assert risk in prompt, "a geometry risk was not turned into a do-not-change"
+
+    low = prompt.lower()
+    assert "not part of the subject" in low and "watermark" in low, (
+        "the photo-artifact negative is missing — this is where product fidelity lives")
+    assert prompt.index("PANELS") < low.index("negatives"), "layout must precede negatives"
+
+
+def test_the_canon_gate_assumes_the_cheap_render_and_says_so(monkeypatch):
+    """Owner addendum 2026-08-26, superseding the master prompt: do NOT ask the
+    angle question. Asking is another interrogation before the user has seen
+    anything, and the same reasoning that gave intake MAX_INTAKE_ASKS applies —
+    assume the cheap option, state it, and let the gate correct it in one click.
+
+    The cost gate is untouched: the sharper render is a SEPARATE, priced event.
+    """
+    cid, tid = _ruminated("Assume cheap", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+    _approve(tid, "hook_rack", "approve_script")
+    _approve(tid, "board", "approve_board")
+
+    turn = [e for e in _envelopes(tid)
+            if any(a["type"] == "canon_sheet" for a in e.get("artifacts", []))][-1]
+    question = turn.get("question") or {}
+    labels = [o["label"] for o in question.get("options", [])]
+
+    assert not any("angle" in lab.lower() for lab in labels), (
+        "the angle question is back — the addendum removed it")
+    note = question.get("note") or ""
+    assert config.IMAGE_RESOLUTION_DEFAULT in note, (
+        "the assumed resolution was not stated; an assumption the user cannot see "
+        "is one they cannot correct")
+    assert config.IMAGE_RESOLUTION_SHARP in note, "the upgrade was never offered"
+
+    # and the upgrade is a real, routed event — not a button that does nothing
+    assert any("sharper" in lab.lower() for lab in labels), "no upgrade CTA"
+    assert "resheet_canon" in [o["event"] for o in question["options"]]
