@@ -43,7 +43,7 @@ from app.seats import SeatConfigError, SeatSpec
 from app.seats import resolve as resolve_seats
 from app.seats import slugs as seat_slugs
 from app.agents.runner import AgentHardFail, _cited_ids, current_thread, run_agent
-from app.media import MediaError, estimate_cost, generate
+from app.media import MediaError, estimate_cost, generate, stitch
 from app.graph import RuminationDeps, RuminationState, build_rumination_graph
 from app.rag_client import RagUnavailable, rag
 from app.schemas import (
@@ -2678,6 +2678,11 @@ def _assemble_turn(thread_id: str, campaign_id: str) -> None:
                 ))
             if not media:
                 continue
+            film = _stitch_variant(thread_id, vdetail, accepted, variant_id, ws)
+            if film:
+                # The FILM is the deliverable, so it leads. The clips stay under
+                # it because a re-roll addresses one shot, not the cut.
+                media.insert(0, film)
             ratios = list(dict.fromkeys(m.ratio for m in media))
             card_id = store.new_id("ad")
             card = AdCard(
@@ -2720,6 +2725,66 @@ def _assemble_turn(thread_id: str, campaign_id: str) -> None:
         _fail(thread_id, f"Ad Card assembly failed: {exc}", traceback.format_exc())
     finally:
         _working.pop(thread_id, None)
+
+
+def _stitch_variant(thread_id: str, vdetail: dict[str, Any], accepted: list[dict[str, Any]],
+                    variant_id: Optional[str], ws: dict[str, Any]) -> Optional[PostMedia]:
+    """Join this variant's accepted clips into ONE film, in board order.
+
+    v3 deferred the stitch and the product has handed over N clips ever since —
+    which is N files the user has to assemble themselves, from a tool whose
+    whole promise is a finished spot.
+
+    It DEGRADES rather than failing: a missing clip is named and the rest are
+    still cut together, and a machine with no ffmpeg (Render has none) gets the
+    clips it already paid for with that said plainly. Returning None means "no
+    film", never "no delivery".
+    """
+    if vdetail.get("creative_type") != "video":
+        return None
+    order = {shot["slot"]: i for i, shot in enumerate(vdetail.get("shots", []))}
+    clips = []
+    for item in sorted((i for i in accepted if i["variant_id"] == variant_id),
+                       key=lambda i: order.get(i["slot"], 999)):
+        if item.get("kind") != "video":
+            continue
+        asset = store.get_asset(item["asset_id"])
+        clips.append({"slot": item["slot"], "path": (asset or {}).get("path")})
+    if len(clips) < 2:
+        return None      # one clip is already the film
+
+    # No audio is generated in this flow yet, so the bed is whatever the
+    # workspace actually holds. Passing a path that does not exist would make
+    # stitch() report a silent film, which is true but noisier than saying
+    # nothing was asked for.
+    bed = ws.get("voice_asset_path")
+    result = stitch(clips, audio_path=bed, name=f"film_{variant_id or 'v1'}")
+    if not result.get("path"):
+        _say(thread_id, "The clips are ready but I could not join them into one film.",
+             note=result.get("note") or "")
+        store.log_artifact_activity(thread_id, "creative", "degraded",
+                                    result.get("note") or "stitch unavailable")
+        return None
+
+    asset_id = store.add_asset(
+        thread_id, f"film_{variant_id or 'v1'}", "video", result["path"],
+        {"model": "ffmpeg:concat", "prompt": "stitched from the accepted clips",
+         "joined": result["joined"], "missing": result["missing"],
+         "audio": result["audio"], "note": result["note"]},
+        0.0)   # joining costs nothing; the clips were already paid for
+    store.log_generation(thread_id, asset_id, "stitch",
+                         prompt=f"joined {len(result['joined'])} clip(s)",
+                         model="ffmpeg:concat", cost=0.0)
+    if result["degraded"]:
+        _say(thread_id, "The film is cut, with one thing worth knowing.",
+             note=result["note"])
+    return PostMedia(
+        kind="video", ratio=(accepted[0]["ratio"] if accepted else "9:16"),
+        duration_s=result["duration_s"], url=_asset_url(asset_id), cover_url=None,
+        params={"model": "ffmpeg:concat", "prompt_id": "film",
+                "joined": result["joined"], "missing": result["missing"],
+                "audio": result["audio"], "cost": 0.0, "variant_id": variant_id},
+    )
 
 
 def _placements(vdetail: dict[str, Any], campaign_block: Any, brand: Any) -> tuple[dict[str, str], Optional[str]]:

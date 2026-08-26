@@ -425,3 +425,120 @@ def _record_orphan_spend(kind: str, model: str, cost: float, url: str, prompt: s
                      kind, cost, model, url)
     except Exception:  # noqa: BLE001 — logging a loss must never mask the loss
         logger.exception("could not even record the orphaned %s spend (~$%.2f)", kind, cost)
+
+
+# ------------------------------------------------------------------ stitch --
+
+
+def ffmpeg_available() -> bool:
+    """ffmpeg exists on this machine but NOT on Render, so every path that uses
+    it has to have an answer for its absence rather than a traceback."""
+    try:
+        subprocess.run(["ffmpeg", "-version"], check=True, timeout=10,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
+def _probe_duration(path: Path) -> float:
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", str(path)],
+            check=True, timeout=30, capture_output=True, text=True)
+        return round(float(out.stdout.strip()), 3)
+    except Exception:
+        return 0.0
+
+
+def stitch(clips: list[dict[str, Any]], *, audio_path: Optional[str] = None,
+           name: str = "film") -> dict[str, Any]:
+    """Concatenate N clips into ONE film, degrading honestly.
+
+    `clips` is [{slot, path}] in cut order. Returns
+    {path, duration_s, joined, missing, audio, degraded, note}.
+
+    Two rules, both taken from precedent in this module rather than invented:
+
+    1. **It degrades, it does not crash.** A clip whose file is gone is skipped
+       and NAMED; the rest are still delivered. Handing back nothing because one
+       of six shots is missing throws away five paid renders, which is the same
+       failure `_partial_fail` exists to prevent on the render path.
+    2. **No ffmpeg is a supported state.** It exists on this machine and not on
+       Render, exactly as `_mock_video` already assumes. Without it there is no
+       film, and the clips are handed over individually with that said out loud
+       — never a half-file that looks like a delivery.
+
+    The concat DEMUXER is used rather than the filter, because these clips come
+    from one model at one ratio and re-encoding N clips to join them would cost
+    quality for nothing. If a stream mismatch makes the demuxer fail, it falls
+    back to re-encoding once and says so.
+    """
+    ordered = [c for c in clips if c.get("path")]
+    missing = [c.get("slot") or "?" for c in clips if not c.get("path")]
+    present: list[dict[str, Any]] = []
+    for clip in ordered:
+        if Path(clip["path"]).exists():
+            present.append(clip)
+        else:
+            missing.append(clip.get("slot") or "?")
+
+    if not present:
+        return {"path": None, "duration_s": 0.0, "joined": [], "missing": missing,
+                "audio": False, "degraded": True,
+                "note": "nothing to stitch — no clip file was on disk"}
+
+    if not ffmpeg_available():
+        return {"path": None, "duration_s": 0.0, "joined": [], "missing": missing,
+                "audio": False, "degraded": True,
+                "note": ("ffmpeg is not installed here, so the clips are handed over "
+                         "individually rather than as one film")}
+
+    dest = config.ASSET_DIR / f"{name}_{_slug(''.join(c['path'] for c in present))}.mp4"
+    listing = dest.with_suffix(".txt")
+    listing.write_text("".join(
+        "file '{}'\n".format(str(Path(c["path"]).resolve()).replace("'", r"'\''"))
+        for c in present))
+
+    def _run(args: list[str]) -> None:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args],
+                       check=True, timeout=600)
+
+    concat = ["-f", "concat", "-safe", "0", "-i", str(listing)]
+    degraded = bool(missing)
+    note_bits: list[str] = []
+    try:
+        _run([*concat, "-c", "copy", str(dest)])
+    except Exception:
+        # Streams that do not match cannot be copied; one re-encode is worth a
+        # film, but the user is told the quality was touched.
+        _run([*concat, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(dest)])
+        degraded = True
+        note_bits.append("clips did not share a stream format, so they were re-encoded once")
+
+    audio_ok = False
+    if audio_path and Path(audio_path).exists():
+        with_audio = dest.with_name(dest.stem + "_av.mp4")
+        try:
+            _run(["-i", str(dest), "-i", str(audio_path), "-c:v", "copy", "-c:a", "aac",
+                  "-shortest", "-map", "0:v:0", "-map", "1:a:0", str(with_audio)])
+            dest, audio_ok = with_audio, True
+        except Exception:
+            # A film with no bed is still the film. Losing the cut because the
+            # audio would not mux is the tail wagging the dog.
+            degraded = True
+            note_bits.append("the audio bed could not be muxed, so the film is silent")
+    elif audio_path:
+        degraded = True
+        note_bits.append("the audio bed file was missing, so the film is silent")
+
+    listing.unlink(missing_ok=True)
+    if missing:
+        note_bits.insert(0, "missing " + ", ".join(missing))
+    return {
+        "path": str(dest), "duration_s": _probe_duration(dest),
+        "joined": [c.get("slot") or "?" for c in present], "missing": missing,
+        "audio": audio_ok, "degraded": degraded,
+        "note": "; ".join(note_bits),
+    }

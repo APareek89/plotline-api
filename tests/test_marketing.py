@@ -3838,3 +3838,98 @@ def test_the_product_reference_outranks_the_rest_when_slots_run_out():
     # and duplicates collapse rather than eating two slots for one sheet
     assert campaign._shot_canon_ids(
         {"product_refs": ["@shoe", "@shoe"], "cast_refs": ["@shoe"]}) == ["@shoe"]
+
+
+# --- Stage 4 · stitching -----------------------------------------------------
+
+
+def _clip(tmp_path, name: str, seconds: float):
+    """A real, tiny mp4 — stitching a fixture that is not a video proves nothing."""
+    import subprocess
+    dest = tmp_path / f"{name}.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+         "-i", f"color=c=0x101010:s=64x64:d={seconds}", "-pix_fmt", "yuv420p", str(dest)],
+        check=True, timeout=60)
+    return dest
+
+
+def test_stitching_two_clips_yields_one_film_of_the_summed_duration(tmp_path, monkeypatch):
+    """v3 deferred the stitch, so the product has handed over N clips ever
+    since — N files the user assembles themselves, from a tool whose promise is
+    a finished spot."""
+    from app import media
+
+    if not media.ffmpeg_available():
+        pytest.skip("ffmpeg is absent here; the no-ffmpeg path is covered separately")
+    monkeypatch.setattr(config, "ASSET_DIR", tmp_path)
+
+    out = media.stitch([{"slot": "s1", "path": str(_clip(tmp_path, "a", 1))},
+                        {"slot": "s2", "path": str(_clip(tmp_path, "b", 2))}],
+                       name="film_test")
+
+    assert out["path"] and Path(out["path"]).exists(), "no film came out"
+    assert out["joined"] == ["s1", "s2"], "the cut order is not the board order"
+    assert out["missing"] == [] and out["degraded"] is False
+    assert 2.7 <= out["duration_s"] <= 3.3, (
+        f"expected roughly 1s + 2s, got {out['duration_s']}s")
+
+
+def test_a_missing_clip_still_produces_a_film_and_names_the_gap(tmp_path, monkeypatch):
+    """DEGRADES HONESTLY. Handing back nothing because one of six shots is
+    missing throws away five paid renders — the same failure `_partial_fail`
+    exists to prevent on the render path."""
+    from app import media
+
+    if not media.ffmpeg_available():
+        pytest.skip("ffmpeg is absent here")
+    monkeypatch.setattr(config, "ASSET_DIR", tmp_path)
+
+    out = media.stitch([{"slot": "s1", "path": str(_clip(tmp_path, "c", 1))},
+                        {"slot": "s2", "path": str(tmp_path / "never_rendered.mp4")},
+                        {"slot": "s3", "path": None}],
+                       name="film_gap")
+
+    assert out["path"] and Path(out["path"]).exists(), "one absent clip killed the delivery"
+    assert out["joined"] == ["s1"]
+    assert set(out["missing"]) == {"s2", "s3"}, "a gap went unnamed"
+    assert out["degraded"] is True
+    assert "s2" in out["note"] and "s3" in out["note"], (
+        "the note has to say WHICH shot is absent — 'degraded' alone is not a fact")
+
+
+def test_no_ffmpeg_hands_over_the_clips_rather_than_half_a_file(tmp_path, monkeypatch):
+    """ffmpeg is on this machine and NOT on Render. Its absence is a supported
+    state, exactly as `_mock_video` already assumes — and the answer is the
+    clips the user already paid for, never a partial file that looks delivered.
+    """
+    from app import media
+
+    monkeypatch.setattr(config, "ASSET_DIR", tmp_path)
+    monkeypatch.setattr(media, "ffmpeg_available", lambda: False)
+
+    out = media.stitch([{"slot": "s1", "path": str(tmp_path / "x.mp4")}], name="film_none")
+    (tmp_path / "x.mp4").write_bytes(b"not empty")
+    out = media.stitch([{"slot": "s1", "path": str(tmp_path / "x.mp4")}], name="film_none")
+
+    assert out["path"] is None, "a file was produced with no ffmpeg to produce it"
+    assert out["degraded"] is True
+    assert "ffmpeg" in out["note"], "the reason there is no film was not given"
+
+
+def test_a_silent_bed_is_reported_rather_than_dropping_the_cut(tmp_path, monkeypatch):
+    """A film with no bed is still the film. Losing the cut because the audio
+    would not mux is the tail wagging the dog — but the user is told."""
+    from app import media
+
+    if not media.ffmpeg_available():
+        pytest.skip("ffmpeg is absent here")
+    monkeypatch.setattr(config, "ASSET_DIR", tmp_path)
+
+    out = media.stitch([{"slot": "s1", "path": str(_clip(tmp_path, "d", 1))},
+                        {"slot": "s2", "path": str(_clip(tmp_path, "e", 1))}],
+                       audio_path=str(tmp_path / "no_such_bed.wav"), name="film_silent")
+
+    assert out["path"] and Path(out["path"]).exists(), "the cut was lost over an audio file"
+    assert out["audio"] is False
+    assert "silent" in out["note"].lower()
