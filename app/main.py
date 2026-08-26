@@ -185,6 +185,50 @@ class ProduceBody(BaseModel):
     option: str = "A"
 
 
+@app.get("/api/assets/{asset_id}")
+def asset_meta(asset_id: str):
+    """What the artifact detail rail reads: the prompt that made this, the
+    settings it was made with, and what it cost. Everything here is already in
+    the generation record — the panel shows it, it does not re-derive it."""
+    asset = store.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(404, "asset not found")
+    params = asset.get("params") or {}
+    return {
+        "id": asset["id"], "kind": asset["kind"], "slot": asset["slot"],
+        "status": asset["status"], "cost": asset["cost"],
+        "name": params.get("name"),
+        "prompt": params.get("prompt"),
+        "settings": {
+            "model": params.get("model"),
+            "aspect_ratio": params.get("ratio"),
+            "resolution": params.get("resolution"),
+            "seed": params.get("seed"),
+        },
+        "refs": params.get("refs") or [],
+        "refs_dropped": params.get("refs_dropped") or [],
+        "file_url": f"/api/assets/{asset['id']}/file",
+    }
+
+
+class AssetPatch(BaseModel):
+    name: str
+
+
+@app.patch("/api/assets/{asset_id}")
+def asset_rename(asset_id: str, body: AssetPatch):
+    if not store.set_asset_name(asset_id, body.name):
+        raise HTTPException(404, "asset not found")
+    return {"ok": True, "name": body.name.strip()}
+
+
+@app.delete("/api/assets/{asset_id}")
+def asset_delete(asset_id: str):
+    if not store.delete_asset(asset_id):
+        raise HTTPException(404, "asset not found")
+    return {"ok": True}
+
+
 @app.get("/api/assets/{asset_id}/file")
 def asset_file(asset_id: str):
     from fastapi.responses import FileResponse

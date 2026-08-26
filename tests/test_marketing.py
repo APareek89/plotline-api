@@ -3933,3 +3933,87 @@ def test_a_silent_bed_is_reported_rather_than_dropping_the_cut(tmp_path, monkeyp
     assert out["path"] and Path(out["path"]).exists(), "the cut was lost over an audio file"
     assert out["audio"] is False
     assert "silent" in out["note"].lower()
+
+
+# --- Stage 5 · the artifact detail view --------------------------------------
+
+
+def test_every_spending_action_is_stamped_as_spending():
+    """The detail panel is read-only for anything that COSTS, and it decides
+    that from a server-stamped flag rather than by pattern-matching event names
+    in TypeScript. One fact, one place — this repo has been bitten four times by
+    the other arrangement."""
+    from app.schemas import SPENDING_EVENTS
+
+    safe = threadkit._actions(("approve_canon", "Approve canon", "primary"),
+                              ("skip_canon", "Skip sheets", "secondary"))
+    assert [a["spends"] for a in safe] == [False, False]
+
+    costly = threadkit._actions(("resheet_canon", "Re-render sharper", "secondary"),
+                                ("regenerate_keyframes", "Re-render", "secondary"),
+                                ("reroll_hook", "Re-roll", "secondary"))
+    assert all(a["spends"] for a in costly), (
+        "a cost event was offered as safe — the read-only panel would render it")
+
+    # the set is the declaration; a regenerate_* that nobody added to it is
+    # still caught by prefix, so forgetting one fails safe rather than cheap
+    assert "resheet_canon" in SPENDING_EVENTS
+
+
+def test_the_detail_panel_reads_the_flag_and_does_not_keep_its_own_list():
+    """A Python test reading TypeScript — the same guard shape as the renderer
+    allowlist, for the same reason: two representations of one fact need
+    something comparing them, even across a language boundary."""
+    src = (Path(__file__).resolve().parents[2] / "plotline-web"
+           / "components" / "artifact-detail.tsx")
+    if not src.exists():
+        pytest.skip("web repo not present next to this one")
+    text = src.read_text()
+    # Comments are prose, not behaviour. A note saying "Select & edit is Phase 2
+    # and is not built" must not read as the control being built — a guard that
+    # cannot tell code from a comment about code is worse than none.
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("//"))
+
+    assert "a.spends === false" in code, (
+        "the panel must FAIL CLOSED: an action with no flag is possibly-spending. "
+        "`!a.spends` would offer every pre-flag envelope's re-render here, with no price")
+    for event in ("regenerate_keyframes", "resheet_canon", "reroll"):
+        assert f'"{event}"' not in code, (
+            f"{event} is hard-coded in the panel — that is a second copy of "
+            "SPENDING_EVENTS and it will drift")
+    # Phase 2 must stay unbuilt: the reference screenshots show it, we do not
+    assert "Select & edit" not in code and "inpaint" not in code.lower(), (
+        "in-place editing is PHASE 2 and was explicitly deferred")
+
+
+def test_the_asset_rail_serves_the_prompt_and_settings_that_made_the_asset():
+    """Everything in the rail already exists in the generation record. The panel
+    SHOWS it; it must never re-derive or guess it."""
+    asset_id = store.add_asset(
+        None, "canon_@shoe", "image", "/tmp/x.png",
+        {"model": "pixelbin:nanoBanana2_generate", "prompt": "a labelled sheet",
+         "ratio": "16:9", "resolution": "1K", "refs": ["@shoe"],
+         "refs_dropped": ["@priya (sheet has no fetchable url)"]},
+        0.08)
+
+    meta = main.asset_meta(asset_id)
+    assert meta["prompt"] == "a labelled sheet"
+    assert meta["settings"]["model"] == "pixelbin:nanoBanana2_generate"
+    assert meta["settings"]["aspect_ratio"] == "16:9"
+    assert meta["settings"]["resolution"] == "1K"
+    assert meta["refs"] == ["@shoe"]
+    assert meta["refs_dropped"], "a dropped reference is invisible in the image; say it here"
+
+    # rename is SAFE, so the read-only panel may do it
+    main.asset_rename(asset_id, main.AssetPatch(name="Shoe sheet v1"))
+    assert main.asset_meta(asset_id)["name"] == "Shoe sheet v1"
+
+    # delete forgets the row and KEEPS the file: it was paid for, and the
+    # generation_log still has to be able to account for the charge
+    before = len(store.recent_generations(500))
+    main.asset_delete(asset_id)
+    assert store.get_asset(asset_id) is None
+    assert len(store.recent_generations(500)) == before, (
+        "deleting an asset erased its spend record — the money became invisible")
+    with pytest.raises(HTTPException):
+        main.asset_meta(asset_id)

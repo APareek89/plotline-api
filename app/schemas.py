@@ -385,11 +385,26 @@ ArtifactType = Literal[
 ActionStyle = Literal["primary", "secondary", "danger"]
 
 
+# Events that COST MONEY when fired. Declared in one place because two
+# surfaces now offer actions — the chat composer and the artifact detail view —
+# and the detail panel is read-only for anything that spends: a re-render is a
+# cost event and belongs in the chat with its price attached. A per-surface
+# guess about which events those are would be the same one-fact-two-
+# representations bug this codebase keeps stamping out.
+SPENDING_EVENTS = frozenset({
+    "regenerate", "regenerate_brief", "regenerate_script", "regenerate_board",
+    "regenerate_keyframes", "resheet_canon", "generate", "generate_rest",
+    "reroll", "use_reference",
+})
+
+
 class ArtifactAction(Strict):
     id: str
     label: str
     style: ActionStyle
     event: str  # e.g. approve | feedback | regenerate | pick_format
+    # Stamped server-side from SPENDING_EVENTS, never inferred by a client.
+    spends: bool = False
 
 
 class ArtifactEnvelope(Strict):

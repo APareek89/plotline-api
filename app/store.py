@@ -750,6 +750,35 @@ def set_asset_status(asset_id: str, status: str) -> None:
         get_conn().commit()
 
 
+def set_asset_name(asset_id: str, name: str) -> bool:
+    """A user-given name for one asset, kept in params.
+
+    Renaming is SAFE — it spends nothing and destroys nothing — which is why
+    the read-only detail panel is allowed to offer it while a re-render stays
+    in the chat with its price attached.
+    """
+    asset = get_asset(asset_id)
+    if not asset:
+        return False
+    params = {**asset["params"], "name": name.strip()}
+    with _lock:
+        get_conn().execute("UPDATE assets SET params = ? WHERE id = ?",
+                           (json.dumps(params), asset_id))
+        get_conn().commit()
+    return True
+
+
+def delete_asset(asset_id: str) -> bool:
+    """Forget the asset row. The FILE is deliberately left on disk: it was paid
+    for, the generation_log still points at it, and a delete in the UI means
+    'take it out of my way', not 'destroy the evidence of what I was charged'.
+    """
+    with _lock:
+        cur = get_conn().execute("DELETE FROM assets WHERE id = ?", (asset_id,))
+        get_conn().commit()
+    return cur.rowcount > 0
+
+
 def list_assets(thread_id: Optional[str] = None) -> list[dict[str, Any]]:
     with _lock:
         if thread_id:

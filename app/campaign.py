@@ -3772,7 +3772,7 @@ def _render_canon_views(thread_id: str, sheets: list, campaign_id: str,
             asset_id = store.add_asset(
                 thread_id, f"canon_{sheet.id}", frame.get("kind", "image"), frame["path"],
                 {"model": frame["model"], "prompt": prompt, "canon_id": sheet.id,
-                 "views": list(views), "resolution": want,
+                 "views": list(views), "resolution": want, "ratio": "16:9",
                  # The PROVIDER url, kept because a local /api/assets path is not
                  # fetchable by a generator's servers — Stage 3 needs this one.
                  "url": frame.get("url")},

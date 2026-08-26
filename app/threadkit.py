@@ -27,6 +27,7 @@ from app.schemas import (
     Feedback,
     ObjectiveFamily,
     QuestionOption,
+    SPENDING_EVENTS,
 )
 from app.tools import ToolDispatcher
 
@@ -144,7 +145,12 @@ def _options_from(artifacts: list[Any]) -> list[QuestionOption]:
 
 
 def _actions(*pairs: tuple[str, str, str]) -> list[dict[str, Any]]:
-    return [{"id": e, "label": label, "style": style, "event": e} for e, label, style in pairs]
+    """Declare an artifact's actions once. `spends` is stamped HERE, from the
+    one set that says which events cost money, so the chat and the read-only
+    detail panel cannot disagree about what is safe to offer."""
+    return [{"id": e, "label": label, "style": style, "event": e,
+             "spends": e in SPENDING_EVENTS or e.startswith(("regenerate", "reroll"))}
+            for e, label, style in pairs]
 
 
 # -------------------------------------------------------- thread workspace --
