@@ -2456,7 +2456,11 @@ def _render_slot(thread_id: str, context: CampaignContext, ws: dict[str, Any],
             "preview_url": _asset_url(clip_id), "status": "ready", "cost": clip["cost"],
             "ratio": ratio, "variant_id": variant_id, "cover_asset_id": frame_id,
             "cover_cost": frame["cost"],
-            "duration_s": float(shot.get("duration_s") or 4.0)}
+            # what the provider ACTUALLY produced. veo3.1's floor is 4s, so a
+            # 2-second beat comes back as four — reporting the request as the
+            # result made a 12-second film describe itself as six.
+            "duration_s": float(clip.get("duration_s") or shot.get("duration_s") or 4.0),
+            "duration_requested_s": float(shot.get("duration_s") or 4.0)}
 
 
 def _item_cost(item: dict[str, Any]) -> float:

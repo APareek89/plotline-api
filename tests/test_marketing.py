@@ -4296,3 +4296,35 @@ def _board_with(product_refs):
                      claims_used=[], style_block_id="s",
                      lints=BoardLints(runtime=ok, beats=ok, slots=ok, motion=ok),
                      est_total_usd=0.3)
+
+
+def test_a_clip_reports_the_duration_it_actually_is(monkeypatch, tmp_path):
+    """veo3.1's shortest clip is 4 seconds, so a board asking for a 2-second
+    beat gets four. Until this was probed the Ad Card reported the REQUEST as
+    the result — a 12-second film described itself as six, and the number the
+    user reads was the one nobody had checked.
+
+    Same rule as refs_used: report what happened, not what was asked for.
+    """
+    from app import media
+
+    if not media.ffmpeg_available():
+        pytest.skip("ffmpeg is absent here")
+    monkeypatch.setattr(config, "ASSET_DIR", tmp_path)
+    monkeypatch.setattr(config, "MOCK_MEDIA", False)
+    monkeypatch.setattr(config, "MEDIA_PROVIDER", "fal_only")
+    monkeypatch.setattr(config, "FAL_KEY", "k")
+    monkeypatch.setattr(media, "_submit_and_wait",
+                        lambda m, p, timeout_s=300: {"video": {"url": "https://c/o.mp4"}})
+
+    # the "provider" hands back a FOUR second file for a two second request
+    real_clip = _clip(tmp_path, "provider_output", 4)
+    monkeypatch.setattr(media, "_download",
+                        lambda url, dest: (dest.write_bytes(real_clip.read_bytes()), dest)[1])
+
+    out = media.generate("video", "a beat", ratio="9:16", duration_s=2.0)
+
+    assert out["duration_requested_s"] == 2.0
+    assert 3.7 <= out["duration_s"] <= 4.3, (
+        f"the clip reports {out['duration_s']}s; the file is 4s. The provider "
+        "snapped the duration and nobody wrote it down")

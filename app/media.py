@@ -452,7 +452,8 @@ def generate(
             _mock_video(prompt, ratio, duration_s, dest)
         logger.info("mock %s generated (%s) — $0.00", kind, dest.name)
         return {"path": str(dest), "model": "mock", "cost": 0.0, "seed": seed, "mock": True,
-                "kind": out_kind, "refs_used": kept, "dropped_refs": dropped}
+                "kind": out_kind, "refs_used": kept, "dropped_refs": dropped,
+                "duration_s": duration_s, "duration_requested_s": duration_s}
 
     order = _provider_order(kind)
     url = model = ""
@@ -504,6 +505,13 @@ def generate(
                 f"still at {url} — the spend is recorded so it is not invisible."
             ) from second
 
+    # What the file IS, not what was asked for. veo3.1's shortest clip is 4s, so
+    # a board asking for a 2-second beat gets four seconds — and until this was
+    # probed the Ad Card reported the REQUEST as the result, so a 6-second film
+    # was described as 6 seconds while being 12. The provider snapped; nobody
+    # wrote it down. Same rule as refs_used.
+    actual = _probe_duration(dest) if kind == "video" else 0.0
+
     if dropped:
         logger.warning("%s: %d reference(s) dropped — %s", model, len(dropped),
                        "; ".join(d["why"] for d in dropped))
@@ -511,7 +519,9 @@ def generate(
                 len(kept), "" if len(kept) == 1 else "s")
     return {"path": str(dest), "url": url, "model": model, "cost": cost, "seed": seed,
             "mock": False, "fallback": bool(failures),
-            "refs_used": kept, "dropped_refs": dropped}
+            "refs_used": kept, "dropped_refs": dropped,
+            "duration_s": actual or duration_s,
+            "duration_requested_s": duration_s}
 
 
 def _record_orphan_spend(kind: str, model: str, cost: float, url: str, prompt: str) -> None:
