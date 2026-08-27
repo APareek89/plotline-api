@@ -1,4 +1,4 @@
-<!-- prompt: campaign_planner | version: 1.3.0 -->
+<!-- prompt: campaign_planner | version: 1.4.0 -->
 CAMPAIGN PLANNER — Marketing Studio.
 
 Output the BARE JSON object for the requested pass. The server owns the
@@ -57,6 +57,18 @@ PASS "detail" — output exactly:
 - If a template style_ref is supplied, fold its style_descriptors into every
   visual_prompt (look and composition only — never its copy).
 
-PASS "refine" — same CampaignDetail shape. Edit ONLY what the user named,
-leave every other field byte-identical, set version = previous + 1, and add
-one line to changes[] saying what changed and why.
+PASS "refine" — the input carries "refine": true, "previous_options",
+"flagged_option_ids" and "council_fixes".
+
+Return the SAME `{"options": [...]}` WRAPPER as pass "options", with EVERY
+option in it — not a bare option, not a detail object, not only the ones you
+changed.
+
+EDIT ONLY THE OPTIONS NAMED IN "flagged_option_ids". Every other option must
+come back BYTE-IDENTICAL — copy it through character for character, do not
+re-punctuate, re-order or improve it. A check compares them and one changed
+character fails the whole pass, so copying is not laziness, it is the contract.
+
+The HARD LIMITS still apply to anything you rewrite: description and storyline
+are {max_len} characters each. A rewrite that fixes the note and busts the cap
+has not fixed anything. Count before you return.

@@ -995,7 +995,12 @@ def test_the_planner_prompt_quotes_the_same_receipt_lexicon_the_validator_enforc
         assert f'"{cue}"' in system, f"{cue!r} enforced but never shown to the planner"
     # and the prompt says the quiet part: intent is not enough
     assert "LITERALLY" in system
-    assert version == "1.3.0"
+    # A version, not THE version. Pinning an exact string made this test a
+    # chore to be edited on every prompt bump rather than a check — and a test
+    # that is routinely edited to make it pass has stopped guarding anything.
+    # What matters is that the prompt IS versioned, so a change is traceable.
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
+        f"the planner prompt carries no semantic version ({version!r})")
 
 
 def test_a_storyline_that_only_gestures_at_proof_still_fails_r2():
@@ -4198,3 +4203,32 @@ def test_a_second_reference_becomes_the_end_frame_where_a_model_takes_one(monkey
     assert sent["end_image_url"] == "https://c/end.png", "the tail frame was thrown away"
     assert sent["duration"] == "4", "seedance spells 4 seconds as '4'"
     assert [d["url"] for d in out["dropped_refs"]] == ["https://c/extra.png"]
+
+
+def test_the_refine_pass_is_told_to_return_the_schema_it_is_validated_against():
+    """A live run burned three attempts because the prompt said "same
+    CampaignDetail shape" while the validator wanted CampaignOptions. The model
+    returned a detail object — doing exactly what it was told — and was blamed
+    for it.
+
+    Same species as the R2 lexicon and the B3 slot caps: one rule with two
+    representations and nothing comparing them. The length cap is injected from
+    the SCHEMA's own number for the same reason.
+    """
+    from app.agents.runner import build_system
+    from app.schemas import CampaignOption
+
+    cap = CampaignOption.model_fields["storyline"].metadata[0].max_length
+    system, _ = build_system(
+        "campaign_planner",
+        {"receipt_cues": '"on-screen"', "max_len": str(cap)}, None)
+
+    refine = system[system.index('PASS "refine"'):]
+    assert "CampaignDetail" not in refine, (
+        "the refine pass is still told to return a CampaignDetail; the validator "
+        "wants CampaignOptions and a model that obeys the prompt will fail")
+    assert '{"options": [...]}' in refine or '"options"' in refine
+    assert "flagged_option_ids" in refine, "the model is not told WHICH options it may touch"
+    assert "BYTE-IDENTICAL" in refine.upper(), "the untouched-options rule is not stated"
+    assert f"{cap} characters" in refine, (
+        "the length cap is not injected from the schema — a hand-copied number drifts")

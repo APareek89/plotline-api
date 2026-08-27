@@ -1289,7 +1289,14 @@ def _run_options(context: CampaignContext, shadow: CreatorContext, retrieved: se
         # The prompt quotes the SAME lexicon the validator matches on, so the
         # two can never drift: R2 is a literal substring check, and describing
         # it in prose made the planner satisfy its spirit but fail the check.
-        prompt_replacements={"receipt_cues": ", ".join(f'"{c}"' for c in _RECEIPT_CUES)},
+        # Both replacements come from the CHECKS themselves, never hand-copied:
+        # R2 is a literal substring match, and the length cap is the schema's
+        # own number. A prompt that quotes a mechanism has to quote it from the
+        # mechanism, or it drifts and the model is blamed for the drift.
+        prompt_replacements={
+            "receipt_cues": ", ".join(f'"{c}"' for c in _RECEIPT_CUES),
+            "max_len": str(CampaignOption.model_fields["storyline"].metadata[0].max_length),
+        },
         mock_fn=campaign_mock.mock_campaign_options,
     )
     return options
