@@ -876,6 +876,10 @@ class CanonSheet(Strict):
     # single pass agree by construction, which is the whole reason the sheet is
     # worth being the reference for everything downstream.
     sheet_asset_id: Optional[str] = None
+    # The single canonical view the sheet was generated FROM. Panels drift when
+    # a sheet is asked for cold — same words, six different shoes — so one image
+    # fixes identity and the sheet references it (owner instruction 2026-08-26).
+    anchor_asset_id: Optional[str] = None
     # The PROVIDER's own URL for that sheet. The local /api/assets path is not
     # fetchable by a generator's servers, so the public one is what can actually
     # be passed back as a reference — see _render_keyframe.

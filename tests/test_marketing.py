@@ -3623,7 +3623,9 @@ def test_a_fal_fallback_says_which_references_it_cannot_carry(monkeypatch):
     assert sent["payload"]["image_url"] == refs[0]
     assert out["refs_used"] == [refs[0]]
     assert [d["url"] for d in out["dropped_refs"]] == [refs[1]]
-    assert "one image_url" in out["dropped_refs"][0]["why"].lower()
+    # wording follows the capability table now: a model with no tail field
+    # seeds from one START frame, and one that has a tail says so too
+    assert "one start frame" in out["dropped_refs"][0]["why"].lower()
 
 
 def test_every_model_route_declares_a_reference_budget():
@@ -3690,8 +3692,13 @@ def test_a_canon_sheet_is_one_render_not_one_per_view(monkeypatch):
     for sheet in rendered:
         views = [v for v, present in sheet["coverage"].items() if present]
         assert len(views) > 1, "a sheet with one view proves nothing about composition"
-        assert sheet["asset_ids"] == [sheet["sheet_asset_id"]], (
-            "asset_ids should name the one sheet, so downstream reads one thing")
+        # INVARIANT CHANGED by owner decision 2026-08-26: a sheet is an ANCHOR
+        # plus the sheet generated from it, so asset_ids carries both. The
+        # sheet is still the single thing downstream reads — sheet_asset_id
+        # names it, and the anchor is kept because a sheet whose identity
+        # source has been deleted cannot be explained.
+        assert sheet["asset_ids"] == [sheet["sheet_asset_id"], sheet["anchor_asset_id"]]
+        assert sheet["anchor_asset_id"] and sheet["anchor_asset_id"] != sheet["sheet_asset_id"]
 
 
 def test_the_sheet_prompt_states_the_layout_then_refuses_the_photo_artifacts():
@@ -4035,3 +4042,154 @@ def test_the_asset_rail_serves_the_prompt_and_settings_that_made_the_asset():
         "deleting an asset erased its spend record — the money became invisible")
     with pytest.raises(HTTPException):
         main.asset_meta(asset_id)
+
+
+def test_the_sheet_is_generated_FROM_an_anchor_not_from_the_words_again(monkeypatch):
+    """Owner instruction 2026-08-26: every panel has to be the SAME product or
+    person.
+
+    A sheet asked for cold gives six panels that are six readings of a
+    sentence — the same words, six different shoes. Describing harder does not
+    fix that; referencing does. So one canonical view is rendered FIRST and the
+    sheet is generated with that image as its reference, which makes each panel
+    a view OF something rather than a fresh guess at it.
+    """
+    calls: list[dict] = []
+    from app import media
+    real = media.generate
+
+    def watching(kind, prompt, **kw):
+        calls.append({"prompt": prompt, "image_urls": list(kw.get("image_urls") or [])})
+        return real(kind, prompt, **kw)
+
+    monkeypatch.setattr(campaign, "generate", watching)
+
+    cid, tid = _ruminated("Anchored sheet", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+    _approve(tid, "hook_rack", "approve_script")
+    _approve(tid, "board", "approve_board")
+
+    anchors = [c for c in calls if "straight-on" in c["prompt"] or "establishing view" in c["prompt"]]
+    sheets = [c for c in calls if "PANELS, in this exact order" in c["prompt"]]
+    assert anchors, "no anchor was rendered — the sheet was asked for cold"
+    assert sheets, "no sheet was rendered"
+
+    # ORDER matters: the anchor cannot be a reference if it does not exist yet
+    assert calls.index(anchors[0]) < calls.index(sheets[0])
+
+    for sheet_call in sheets:
+        assert sheet_call["image_urls"], (
+            "the sheet was generated with no reference — the anchor exists and was "
+            "not used, which leaves the panels free to drift")
+        assert "reference image" in sheet_call["prompt"].lower(), (
+            "a reference passed without being NAMED is treated as inspiration; "
+            "the prompt has to say the subject IS the one in the reference")
+
+
+def test_the_film_is_built_from_the_frame_the_user_approved(monkeypatch):
+    """The hard gate exists so nothing animates until a still is approved. It
+    was approving a still that was then THROWN AWAY: _render_slot rendered a
+    fresh one from _visual_prompt and seeded the clip from that, so the film
+    came from a frame nobody had ever seen — and it charged for the extra image.
+
+    A gate whose output is discarded protects nothing.
+    """
+    seen: list[dict] = []
+    from app import media
+    real = media.generate
+
+    def watching(kind, prompt, **kw):
+        seen.append({"kind": kind, "image_urls": list(kw.get("image_urls") or [])})
+        return real(kind, prompt, **kw)
+
+    monkeypatch.setattr(campaign, "generate", watching)
+
+    cid, tid = _ruminated("Approved frame ships", creative_type="video")
+    _act(tid, "o1", "approve")
+    _act(tid, "templates", "skip")
+    _approve(tid, "hook_rack", "approve_script")
+    _approve(tid, "board", "approve_board")
+    _approve(tid, "canon", "approve_canon")
+    _approve(tid, "keyframes", "approve_keyframes")
+
+    frames = _artifacts(tid, "keyframe_board")[-1]["payload"]["board"]["frames"]
+    approved_ids = {f["asset_id"] for f in frames}
+    approved_urls = {campaign._asset_url(a) for a in approved_ids}
+
+    before = len(seen)
+    _act(tid, "confirm", "generate_single")
+    during_generate = seen[before:]
+
+    videos = [c for c in during_generate if c["kind"] == "video"]
+    assert videos, "no clip was rendered"
+    for clip in videos:
+        assert clip["image_urls"], "a clip was generated with no seed frame at all"
+        assert set(clip["image_urls"]) <= approved_urls, (
+            "the clip was seeded from a still the user never approved — the hard "
+            "gate approved one frame and the film was built from another")
+
+    stills = [c for c in during_generate if c["kind"] == "image"]
+    assert not stills, (
+        f"{len(stills)} still(s) re-rendered at generate time. The approved keyframes "
+        "already exist; rendering them again pays twice and discards the approval")
+
+
+def test_every_fal_video_model_declares_its_own_parameter_set():
+    """Read from fal's live OpenAPI on 2026-08-26, not from memory.
+
+    These models do not share a parameter set and the differences decide what a
+    shot can do: seedance takes ANY duration 2-12 and an end frame, kling only
+    5 or 10, veo3.1 spells its durations WITH the unit ("4s") while everyone
+    else spells them without. Sending the wrong spelling is a 422 that reads
+    like an outage.
+    """
+    from app import media
+
+    caps = media._FAL_VIDEO_CAPS
+    assert config.MEDIA_MODELS["video"] in caps, (
+        "the configured video model has no capability row — the client would guess")
+
+    seedance = caps["fal-ai/bytedance/seedance/v1/pro/image-to-video"]
+    assert "4" in seedance["durations"] and seedance["end_field"] == "end_image_url"
+    assert media._nearest(4.0, seedance["durations"]) == "4"
+
+    veo = caps["fal-ai/veo3.1/image-to-video"]
+    assert veo["unit"] == "s", 'veo3.1 spells durations "4s", not "4"'
+    kling = caps["fal-ai/kling-video/v2.1/master/image-to-video"]
+    assert kling["durations"] == {"5", "10"} and kling["unit"] == ""
+    # a 4s brief against kling has to land DELIBERATELY, not 422
+    assert media._nearest(4.0, kling["durations"]) == "5"
+
+    # array-taking models are marked as such, or their reference never travels
+    assert caps["fal-ai/veo3.1/reference-to-video"]["array"] is True
+    assert caps["fal-ai/kling-video/v1.6/pro/elements"]["array"] is True
+
+
+def test_a_second_reference_becomes_the_end_frame_where_a_model_takes_one(monkeypatch):
+    """seedance and kling-1.6-pro accept a tail frame. A second reference is
+    not surplus there — it is the other half of the shot, and dropping it would
+    throw away the only control that makes a cut land."""
+    from app import media
+
+    monkeypatch.setitem(config.MEDIA_REF_SLOTS, "video", 3)
+    monkeypatch.setitem(config.MEDIA_MODELS, "video",
+                        "fal-ai/bytedance/seedance/v1/pro/image-to-video")
+    monkeypatch.setattr(config, "MOCK_MEDIA", False)
+    monkeypatch.setattr(config, "MEDIA_PROVIDER", "fal_only")
+    monkeypatch.setattr(config, "FAL_KEY", "k")
+
+    sent: dict = {}
+    monkeypatch.setattr(media, "_submit_and_wait",
+                        lambda m, p, timeout_s=300: (sent.update(p),
+                                                     {"video": {"url": "https://c/o.mp4"}})[1])
+    monkeypatch.setattr(media, "_download", lambda url, dest: dest)
+
+    out = media.generate("video", "she runs", ratio="9:16", duration_s=4.0,
+                         image_urls=["https://c/start.png", "https://c/end.png",
+                                     "https://c/extra.png"])
+
+    assert sent["image_url"] == "https://c/start.png"
+    assert sent["end_image_url"] == "https://c/end.png", "the tail frame was thrown away"
+    assert sent["duration"] == "4", "seedance spells 4 seconds as '4'"
+    assert [d["url"] for d in out["dropped_refs"]] == ["https://c/extra.png"]

@@ -145,7 +145,13 @@ MEDIA_MODELS = {
     "image_draft": os.environ.get("PLOTLINE_MODEL_IMAGE_DRAFT", "fal-ai/nano-banana"),
     "image_final": os.environ.get("PLOTLINE_MODEL_IMAGE_FINAL", "fal-ai/nano-banana-2"),
     "image_pro": os.environ.get("PLOTLINE_MODEL_IMAGE_PRO", "fal-ai/nano-banana-pro"),
-    "video": os.environ.get("PLOTLINE_MODEL_VIDEO", "fal-ai/veo3.1/fast/image-to-video"),
+    # Seedance, not veo3.1, on the fal side. Read from fal's live OpenAPI
+    # 2026-08-26: seedance is the only i2v model that honours an ARBITRARY
+    # duration (2-12s) rather than snapping a 4-second shot up to 5, and it
+    # takes an end_image_url so a cut can land on the next shot's approved
+    # frame. veo3.1 stays in the capability table and one env var away.
+    "video": os.environ.get("PLOTLINE_MODEL_VIDEO",
+                            "fal-ai/bytedance/seedance/v1/pro/image-to-video"),
     "tts_draft": os.environ.get("PLOTLINE_MODEL_TTS_DRAFT", "fal-ai/kokoro/american-english"),
     "tts_final": os.environ.get("PLOTLINE_MODEL_TTS_FINAL", "fal-ai/minimax/speech-02-hd"),
 }

@@ -2337,6 +2337,33 @@ def _generate_turn(thread_id: str, campaign_id: str, variant_count: int, draft_o
         _working.pop(thread_id, None)
 
 
+def _approved_keyframe(ws: dict[str, Any], shot_slot: str) -> Optional[dict[str, Any]]:
+    """The still the user approved at the hard gate for this shot, if any.
+
+    THE GATE HAS TO MEAN SOMETHING. `_render_slot` used to render a fresh still
+    from `_visual_prompt` and seed the clip from THAT, so the frame the user
+    approved was thrown away and the film was built from one nobody had ever
+    seen. A gate whose output is discarded protects nothing — and it charged for
+    a second image per shot to do it.
+    """
+    for frame in ((ws.get("keyframes") or {}).get("frames") or []):
+        if frame.get("shot_slot") == shot_slot and frame.get("approved"):
+            asset = store.get_asset(frame.get("asset_id"))
+            if asset:
+                return {"asset_id": frame["asset_id"], "asset": asset}
+    return None
+
+
+def _seed_url(asset_id: str, asset: dict[str, Any]) -> Optional[str]:
+    """A url a GENERATOR can fetch for this asset. Same rule as canon: the
+    provider's own url is the real one; under MOCK_MEDIA the local path stands
+    in so the rehearsal exercises the same wiring."""
+    url = (asset.get("params") or {}).get("url")
+    if not url and config.MOCK_MEDIA:
+        url = _asset_url(asset_id)
+    return url
+
+
 def _render_slot(thread_id: str, context: CampaignContext, ws: dict[str, Any],
                  vdetail: dict[str, Any], shot: dict[str, Any], ratio: str,
                  spec: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -2354,18 +2381,35 @@ def _render_slot(thread_id: str, context: CampaignContext, ws: dict[str, Any],
     ws["prompts"][key_slot] = prompt
     ws["last_prompt"], ws["last_slot"] = prompt, slot
 
-    _working[thread_id] = f"rendering {slot}"
-    # 'Use as reference' pins the seed as well as the text locks — that promise
-    # is only true if the seed actually rides here, not just on a re-roll.
-    seed = (ws.get("reference") or {}).get("seed")
-    frame = generate("image", prompt, ratio=ratio, tier="final",
-                     seed=int(seed) if seed is not None else None)
-    frame_id = store.add_asset(thread_id, key_slot, frame.get("kind", "image"), frame["path"],
-                               _params(context, ws, prompt, frame, ratio, variant_id, shot["slot"]),
-                               frame["cost"])
-    store.log_generation(thread_id, frame_id, "generate", prompt=prompt, model=frame["model"],
-                         seed=str(frame.get("seed")), cost=frame["cost"])
-    ws["spent"] += frame["cost"]
+    # THE APPROVED KEYFRAME IS THE FRAME. Reuse it rather than rendering a
+    # second still nobody has seen — that is the whole point of the hard gate,
+    # and it saves a paid image per shot as a side effect. Only for the BASE
+    # variant: a variant carries its own prompt, so its still legitimately
+    # differs from the approved one and has to be rendered.
+    approved = _approved_keyframe(ws, shot["slot"]) if spec is None else None
+    if approved:
+        frame_id = approved["asset_id"]
+        asset = approved["asset"]
+        frame = {"path": asset["path"], "url": _seed_url(frame_id, asset),
+                 "kind": asset["kind"], "cost": 0.0,
+                 "model": (asset.get("params") or {}).get("model"), "seed": None}
+        _working[thread_id] = f"using the approved keyframe for {slot}"
+        store.log_generation(thread_id, frame_id, "reuse_keyframe", prompt=prompt,
+                             model=str(frame["model"]), cost=0.0)
+    else:
+        _working[thread_id] = f"rendering {slot}"
+        # 'Use as reference' pins the seed as well as the text locks — that promise
+        # is only true if the seed actually rides here, not just on a re-roll.
+        seed = (ws.get("reference") or {}).get("seed")
+        frame = generate("image", prompt, ratio=ratio, tier="final",
+                         seed=int(seed) if seed is not None else None)
+        frame_id = store.add_asset(thread_id, key_slot, frame.get("kind", "image"), frame["path"],
+                                   {**_params(context, ws, prompt, frame, ratio, variant_id,
+                                              shot["slot"]), "url": frame.get("url")},
+                                   frame["cost"])
+        store.log_generation(thread_id, frame_id, "generate", prompt=prompt, model=frame["model"],
+                             seed=str(frame.get("seed")), cost=frame["cost"])
+        ws["spent"] += frame["cost"]
 
     if not is_video:
         item = {"asset_id": frame_id, "slot": slot, "kind": frame.get("kind", "image"),
@@ -3699,7 +3743,34 @@ def _canon_summary(sheets: list) -> str:
             f"${each * views:.2f}, and the views would only agree by luck.")
 
 
-def _canon_sheet_prompt(sheet: "CanonSheet", views: tuple[str, ...]) -> str:
+def _canon_anchor_prompt(sheet: "CanonSheet") -> str:
+    """ONE canonical view of the subject, rendered before the sheet.
+
+    A sheet asked for cold gives six panels that are six interpretations of a
+    description — the same words, six different shoes. The fix is to stop
+    describing and start REFERENCING: generate one image, then generate the
+    sheet with that image as its reference, so every panel is a view OF
+    something rather than a fresh guess at it (owner instruction 2026-08-26).
+
+    The anchor is deliberately plain — one subject, one angle, nothing to
+    interpret. Its job is to fix identity, not to be pretty.
+    """
+    view = {"character": "a straight-on full-figure front view",
+            "environment": "a wide establishing view",
+            }.get(sheet.kind, "a straight-on three-quarter front view")
+    parts = [f"{view} of {sheet.brief}.",
+             "Plain, evenly lit, neutral background, subject centred and fully in frame.",
+             "No text, no watermark, no logo that is not on the subject, no props."]
+    if sheet.locks:
+        parts.insert(1, "Must be exactly as described: " + "; ".join(sheet.locks) + ".")
+    if sheet.risk_notes:
+        parts.insert(1, "Reproduce precisely, these mutate between generations: "
+                     + "; ".join(sheet.risk_notes) + ".")
+    return " ".join(parts)
+
+
+def _canon_sheet_prompt(sheet: "CanonSheet", views: tuple[str, ...],
+                        anchored: bool = False) -> str:
     """One prompt for ONE image holding every required view as a labelled panel.
 
     The layout comes first and the NEGATIVES come second, which is the order the
@@ -3730,6 +3801,13 @@ def _canon_sheet_prompt(sheet: "CanonSheet", views: tuple[str, ...]) -> str:
         # instruction in every prompt that references it, not just extra views.
         parts.append("DO NOT CHANGE — these mutate between generations and must be "
                      "reproduced exactly as described: " + "; ".join(sheet.risk_notes) + ".")
+    if anchored:
+        # The reference is the subject, full stop. Without saying so the model
+        # treats a reference as inspiration and drifts anyway.
+        parts.insert(1, "The subject is the one in the reference image. Reproduce it EXACTLY "
+                        "in every panel — same proportions, same colours, same markings, same "
+                        "materials. Do not restyle, redesign or improve it; only change the "
+                        "camera angle.")
     parts.append(
         "CRITICAL — negatives. Any photographic artifact in a reference image "
         "(a diagonal stripe or band, an overlay, a watermark, a backdrop seam, a "
@@ -3772,10 +3850,29 @@ def _render_canon_views(thread_id: str, sheets: list, campaign_id: str,
 
         views = sheet.required_views()
         if views:
-            prompt = _canon_sheet_prompt(sheet, views)
             want = resolution or config.IMAGE_RESOLUTION_DEFAULT
+            # ANCHOR FIRST. One canonical view, then the sheet generated WITH it
+            # as a reference, so the panels are views of one subject rather than
+            # six independent readings of a sentence.
+            anchor_prompt = _canon_anchor_prompt(sheet)
+            anchor = generate("image", anchor_prompt, ratio="1:1",
+                              tier=config.CANON_SHEET_TIER, resolution=want)
+            anchor_id = store.add_asset(
+                thread_id, f"canon_{sheet.id}_anchor", anchor.get("kind", "image"),
+                anchor["path"],
+                {"model": anchor["model"], "prompt": anchor_prompt, "canon_id": sheet.id,
+                 "ratio": "1:1", "resolution": want, "role": "anchor",
+                 "url": anchor.get("url")},
+                anchor["cost"])
+            store.log_generation(thread_id, anchor_id, "generate", prompt=anchor_prompt,
+                                 model=anchor["model"], seed=str(anchor.get("seed")),
+                                 cost=anchor["cost"])
+            anchor_url = _seed_url(anchor_id, store.get_asset(anchor_id) or {})
+
+            prompt = _canon_sheet_prompt(sheet, views, anchored=bool(anchor_url))
             frame = generate("image", prompt, ratio="16:9",
-                             tier=config.CANON_SHEET_TIER, resolution=want)
+                             tier=config.CANON_SHEET_TIER, resolution=want,
+                             image_urls=[anchor_url] if anchor_url else [])
             asset_id = store.add_asset(
                 thread_id, f"canon_{sheet.id}", frame.get("kind", "image"), frame["path"],
                 {"model": frame["model"], "prompt": prompt, "canon_id": sheet.id,
@@ -3787,7 +3884,10 @@ def _render_canon_views(thread_id: str, sheets: list, campaign_id: str,
             store.log_generation(thread_id, asset_id, "generate", prompt=prompt,
                                  model=frame["model"], seed=str(frame.get("seed")),
                                  cost=frame["cost"])
-            sheet.asset_ids = [asset_id]
+            # The anchor rides in asset_ids too: it is the identity the sheet
+            # was built from, and deleting it would make the sheet unexplainable.
+            sheet.asset_ids = [asset_id, anchor_id]
+            sheet.anchor_asset_id = anchor_id
             sheet.sheet_asset_id = asset_id
             sheet.sheet_url = frame.get("url")
             # Composed, not detected. The canon gate is where a human confirms

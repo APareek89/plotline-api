@@ -194,6 +194,93 @@ def _mock_video(prompt: str, ratio: str, duration_s: float, dest: Path) -> Path:
 # ---------------------------------------------------------------- generate --
 
 
+
+# Per-model video capability table, read from fal's LIVE OpenAPI on 2026-08-26:
+#   GET https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=<model>
+#
+# These models do NOT share a parameter set, and the differences decide which
+# one a shot can even use:
+#
+#   model                              ref field(s)              durations
+#   seedance/v1/pro/image-to-video     image_url + end_image_url "2".."12"  <- any
+#   veo3.1/image-to-video              image_url                 "4s","6s","8s"
+#   veo3.1/reference-to-video          image_urls[]  (ARRAY)     free string
+#   kling-video/v2.1/master/i2v        image_url                 "5","10"
+#   kling-video/v1.6/pro/i2v           image_url + tail_image_url "5","10"
+#   kling-video/v1.6/pro/elements      input_image_urls[] (ARRAY) "5","10"
+#   minimax/hailuo-02/standard/i2v     image_url + end_image_url "6","10"
+#   pixverse/v4.5/image-to-video       image_url                 "5","8"
+#   wan-i2v                            image_url                 num_frames
+#
+# Note veo3.1 spells its durations WITH the unit ("4s") and everyone else
+# without ("4"). Sending the wrong spelling is a 422 that reads like an outage,
+# which is the dishonest-error class this codebase keeps stamping out.
+#
+# `end_field` matters for stitching: a shot whose clip ends ON the next shot's
+# approved keyframe cuts without a jump. Available, deliberately not automatic —
+# whether two beats should morph or cut is a creative call, not a wiring one.
+_FAL_VIDEO_CAPS: dict[str, dict[str, Any]] = {
+    "fal-ai/bytedance/seedance/v1/pro/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": "end_image_url",
+        "durations": {"2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"},
+        "unit": "", "ratios": {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "auto"},
+        "resolution_field": "resolution", "resolutions": {"480p", "720p", "1080p"},
+    },
+    "fal-ai/veo3.1/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": None,
+        "durations": {"4", "6", "8"}, "unit": "s",
+        "ratios": {"auto", "16:9", "9:16"},
+        "resolution_field": "resolution", "resolutions": {"720p", "1080p", "4k"},
+    },
+    "fal-ai/veo3.1/fast/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": None,
+        "durations": {"4", "6", "8"}, "unit": "s",
+        "ratios": {"auto", "16:9", "9:16"},
+        "resolution_field": "resolution", "resolutions": {"720p", "1080p", "4k"},
+    },
+    "fal-ai/veo3.1/reference-to-video": {
+        "image_field": "image_urls", "array": True, "end_field": None,
+        "durations": {"4", "6", "8"}, "unit": "s",
+        "ratios": {"16:9", "9:16"}, "resolution_field": None, "resolutions": set(),
+    },
+    "fal-ai/kling-video/v2.1/master/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": None,
+        "durations": {"5", "10"}, "unit": "",
+        "ratios": {"16:9", "9:16", "1:1"}, "resolution_field": None, "resolutions": set(),
+    },
+    "fal-ai/kling-video/v1.6/pro/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": "tail_image_url",
+        "durations": {"5", "10"}, "unit": "",
+        "ratios": {"16:9", "9:16", "1:1"}, "resolution_field": None, "resolutions": set(),
+    },
+    "fal-ai/minimax/hailuo-02/standard/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": "end_image_url",
+        "durations": {"6", "10"}, "unit": "",
+        "ratios": set(), "resolution_field": None, "resolutions": set(),
+    },
+    "fal-ai/pixverse/v4.5/image-to-video": {
+        "image_field": "image_url", "array": False, "end_field": None,
+        "durations": {"5", "8"}, "unit": "",
+        "ratios": set(), "resolution_field": None, "resolutions": set(),
+    },
+    "fal-ai/kling-video/v1.6/pro/elements": {
+        "image_field": "input_image_urls", "array": True, "end_field": None,
+        "durations": {"5", "10"}, "unit": "",
+        "ratios": {"16:9", "9:16", "1:1"}, "resolution_field": None, "resolutions": set(),
+    },
+    "fal-ai/wan-i2v": {
+        "image_field": "image_url", "array": False, "end_field": None,
+        "durations": set(), "unit": "",
+        "ratios": {"auto", "16:9", "9:16", "1:1"}, "resolution_field": None, "resolutions": set(),
+    },
+}
+
+
+def _nearest(value: float, allowed: set[str]) -> str:
+    """Nearest allowed duration, as the STRING its enum declares."""
+    return min(allowed, key=lambda d: abs(int(d) - value))
+
+
 def _generate_fal(
     kind: str, prompt: str, *, ratio: str, duration_s: float, tier: str,
     voice: Optional[str], image_urls: list[str], seed: Optional[int],
@@ -230,11 +317,33 @@ def _generate_fal(
             raise MediaError(f"{model} returned no audio: {json.dumps(out)[:200]}")
     else:
         model = config.MEDIA_MODELS["video"]
-        payload = {"prompt": prompt, "duration": f"{int(duration_s)}s", "aspect_ratio": ratio}
+        caps = _FAL_VIDEO_CAPS.get(model)
+        if caps is None:
+            raise MediaError(
+                f"{model} is not in the fal video capability table — its parameter set is "
+                "unknown, and a guessed parameter is a 422 that reads like an outage. "
+                "Read its schema from fal's OpenAPI and add a row.")
+        payload = {"prompt": prompt}
+        if caps["ratios"]:
+            payload["aspect_ratio"] = ratio if ratio in caps["ratios"] else "9:16"
+        if caps["durations"]:
+            payload["duration"] = _nearest(duration_s, caps["durations"]) + caps["unit"]
+        if caps["resolutions"]:
+            payload[caps["resolution_field"]] = "720p"
         if image_urls:
-            payload["image_url"] = image_urls[0]
-            dropped += [{"url": u, "why": f"{model} seeds from ONE image_url"}
-                        for u in image_urls[1:]]
+            if caps["array"]:
+                payload[caps["image_field"]] = list(image_urls)
+            else:
+                payload[caps["image_field"]] = image_urls[0]
+                extra = image_urls[1:]
+                if extra and caps["end_field"]:
+                    # A second reference is the END frame on models that take
+                    # one. Not a drop: it is the other half of the shot.
+                    payload[caps["end_field"]] = extra[0]
+                    extra = extra[1:]
+                dropped += [{"url": u, "why": f"{model} seeds from one start frame"
+                                              + (" and one end frame" if caps["end_field"] else "")}
+                            for u in extra]
         out = _submit_and_wait(model, payload, timeout_s=600)
         url = out.get("video", {}).get("url")
         if not url:
