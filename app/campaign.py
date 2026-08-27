@@ -3279,14 +3279,39 @@ def _board_turn(thread_id: str, campaign_id: str) -> None:
         _working.pop(thread_id, None)
 
 
+def _board_binds_its_product(board: ShotBoard, context: CampaignContext) -> list[str]:
+    """A board with a product and no product_refs has no consistency at all.
+
+    Found live: every one of eight shots came back with empty cast/product/env
+    refs. The prompt described the reference BUDGET — a ceiling — and never said
+    to create references, so a board attaching none was fully compliant. Canon
+    then planned a sheet nothing referenced and was rejected for it, and even
+    had it not been, the sheets would have conditioned nothing: `_render_keyframe`
+    seeds from the canon ids a shot BINDS, and there were none.
+
+    The rule that mattered was never stated, only its limit.
+    """
+    if context.product is None:
+        return []
+    if any(shot.product_refs for shot in board.shots):
+        return []
+    return ["this campaign has a product and not one shot references it. Give the "
+            "product a canon id (@slug) and put it in product_refs on every shot "
+            "that shows it — without that the approved product sheet conditions "
+            "nothing and each shot invents its own version of the product"]
+
+
 def _validate_board(board: ShotBoard, campaign_id: str, style: dict[str, Any]) -> ShotBoard:
     """Server-side: claims, costs, the style-block injection, then the lints."""
     context = _context_of(campaign_id)
+    errors = _board_binds_its_product(board, context)
     unmapped = _unmapped_claims(board.claims_used, context)
     if unmapped:
-        raise AgentValidationError([
+        errors.append(
             f"claims_used {unmapped} are NOT in the confirmed approved_claims — an unmapped "
-            "claim is a kill flag, not a stretch"])
+            "claim is a kill flag, not a stretch")
+    if errors:
+        raise AgentValidationError(errors)
 
     # The style block is injected HERE, verbatim, not by the model. A model that
     # paraphrases the style is a model that breaks consistency between shots.

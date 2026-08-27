@@ -10,6 +10,7 @@ council, real store.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -3219,7 +3220,12 @@ def test_per_stage_models_default_to_the_slot_they_already_used(monkeypatch):
     and pass or fail depending on whose machine it ran on. A test that consults
     local configuration is not a test.
     """
-    monkeypatch.delenv("PLOTLINE_MODEL_BOARD", raising=False)
+    # Clear EVERY per-stage override, not the two that happened to be set when
+    # this was written. Naming them one by one meant a new key in someone's
+    # .env broke the test — which is the very thing the docstring above warns
+    # about, arriving through the door it left open.
+    for key in [k for k in os.environ if k.startswith("PLOTLINE_MODEL_")]:
+        monkeypatch.delenv(key, raising=False)
     assert config._stage_model("board", "planner-x") == "planner-x"
     assert config._stage_model("options", "planner-x") == "planner-x"
     assert config._stage_model("intake", "intake-x") == "intake-x"
@@ -4232,3 +4238,61 @@ def test_the_refine_pass_is_told_to_return_the_schema_it_is_validated_against():
     assert "BYTE-IDENTICAL" in refine.upper(), "the untouched-options rule is not stated"
     assert f"{cap} characters" in refine, (
         "the length cap is not injected from the schema — a hand-copied number drifts")
+
+
+def test_a_board_that_names_no_canon_has_no_consistency_and_is_refused():
+    """Found on a live run: all eight shots came back with empty cast/product/
+    env refs. The prompt described the reference BUDGET — a ceiling — and never
+    said to CREATE references, so a board attaching none was fully compliant.
+
+    Canon then planned a sheet nothing referenced and was rejected for it; and
+    even if it had not been, the sheets would have conditioned nothing, because
+    a keyframe is seeded from the canon ids its shot BINDS. The whole v5
+    consistency chain was inert on real output while the mock — whose board
+    fixture does carry refs — showed it working.
+    """
+    from app.schemas import CampaignContext, ProductBlock
+
+    context = CampaignContext(name="C", product=ProductBlock(name="Shoe", description="a shoe"))
+    board = _board_with(product_refs=[])
+    assert campaign._board_binds_its_product(board, context), (
+        "a product campaign whose shots reference nothing was accepted")
+
+    bound = _board_with(product_refs=["@shoe"])
+    assert campaign._board_binds_its_product(bound, context) == []
+
+    # no product declared → nothing to bind, and demanding it would be noise
+    assert campaign._board_binds_its_product(board, CampaignContext(name="C")) == []
+
+
+def test_the_board_prompt_asks_for_canon_ids_not_only_their_budget():
+    """The prompt and the check have to agree about what is required, not just
+    about the ceiling — the R2/B3 lesson, a third time."""
+    from app.agents.runner import build_system
+    from app.validators import ref_slots_text
+
+    system, version = build_system("shot_board", {"ref_slots": ref_slots_text()}, None)
+    # Prompts are hard-wrapped, so a phrase can span a newline. Normalising is
+    # the difference between asserting on the INSTRUCTION and asserting on the
+    # line width someone happened to use.
+    flat = " ".join(system.lower().split())
+    assert "product_refs" in flat and "@slug" in flat, (
+        "the board is never told to NAME the recurring things, only not to exceed "
+        "a budget for naming them")
+    assert "at least one shot must reference it" in flat
+
+
+def _board_with(product_refs):
+    """Minimal ShotBoard for reference-binding checks."""
+    from app.schemas import BoardShot, BoardLints, LintResult, ShotBoard
+    shot = BoardShot(
+        slot="shot_01", duration_s=3.0, beat="a beat", action="an action",
+        camera="static", shot_size="MS", emotion="calm",
+        product_refs=list(product_refs),
+        keyframe_prompt="p", motion_prompt="m", model_route="video",
+        route_reason="motion", slots_used=len(product_refs), est_cost_usd=0.3)
+    ok = LintResult(status="pass")
+    return ShotBoard(creative_type="video", shots=[shot], copy_primary="c", cta="x",
+                     claims_used=[], style_block_id="s",
+                     lints=BoardLints(runtime=ok, beats=ok, slots=ok, motion=ok),
+                     est_total_usd=0.3)

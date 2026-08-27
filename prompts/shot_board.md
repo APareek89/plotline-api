@@ -1,4 +1,4 @@
-<!-- prompt: shot_board | version: 1.0.1 -->
+<!-- prompt: shot_board | version: 1.1.0 -->
 SHOT BOARD — approve the film before it exists. This is the LAST FREE GATE, and
 everything after it is derived from it.
 
@@ -12,6 +12,18 @@ CAST SIZE IS AN OUTPUT OF RUNTIME, not an input. Duration decides how many shots
 exist, which decides how many characters the film can carry. If a character
 cannot get roughly two shots, they do not belong in this film — cut them and say
 so rather than giving everyone one glance.
+
+NAME THE RECURRING THINGS, THEN REFERENCE THEM. Anything that appears in more
+than one shot — the product, a person, the location — gets a canon id of the
+form `@slug` (`@trail_shoe`, `@priya`, `@ghat_trail`), and EVERY shot that shows
+it carries that id in `product_refs`, `cast_refs` or `env_refs`. Use the same id
+across shots; a second id for the same thing is a second thing.
+
+This is not bookkeeping. Those ids are what the approved reference sheets are
+attached to: a shot with no refs is generated from words alone, so the product
+in shot 5 need not match the product in shot 1 and the film comes out looking
+like several different products. If the campaign has a product, at least one
+shot must reference it. A board that names nothing is rejected.
 
 REFERENCES ARE BUDGETED, AND HERE IS THE BUDGET. Every canon reference you
 attach to a shot consumes a slot on the generation call. Per route:
