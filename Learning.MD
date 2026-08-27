@@ -524,3 +524,46 @@ only as good as the set of X it visits, so it has to assert the SIZE and REACH
 of that set, not just the property. Two of the last three dead ends in this
 project were at a gate no test had ever walked to — the rule was never wrong,
 the itinerary was.
+
+## 2026-08-27 — The rule that mattered was never stated, only its limit
+
+**Symptom.** First real-media run. The shot board returned eight shots with EMPTY
+`cast_refs`, `product_refs` and `env_refs` on every one. `canon_plan` then proposed
+`@trail_shoe`, `_validate_canon_plan` rejected it as "planned but the board never
+references them", and the run escalated blaming the canon agent.
+
+**Why-chain.**
+1. Why did canon fail? It planned a sheet the board did not reference.
+2. Why did the board reference nothing? Nothing told it to. The prompt's
+   reference section is titled "REFERENCES ARE BUDGETED, AND HERE IS THE BUDGET"
+   and describes only a CEILING — a board attaching zero references satisfies
+   every word of it.
+3. Why did that matter beyond canon? A keyframe is seeded from the canon ids its
+   shot BINDS. With no binds, every sheet conditions nothing, and the entire v5
+   consistency chain — the whole point of the phase — was inert on real output.
+4. Why did nothing catch it? The MOCK board fixture carries refs. Six zero-spend
+   walks showed the chain working perfectly because the fixture was doing the
+   thing the real model was never asked to do.
+5. **Deepest why: `design`** — a constraint was written where a requirement
+   belonged. "Do not exceed N" and "produce at least one" are different
+   instructions, and only one of them was given.
+
+**Action (aimed at why-5).** shot_board 1.1.0 says to give each recurring subject
+an `@slug` id, put it on every shot that shows it, and states the consequence in
+the prompt: a shot with no refs is generated from words alone, so the product in
+shot 5 need not match shot 1. `_board_binds_its_product` refuses a board that
+declares a product and references it nowhere, so the failure lands on the board
+with a fixable message instead of on canon two stages later.
+
+**Preventive action for the class.** When a prompt describes a budget, a cap or a
+limit, check that something also states the FLOOR. A ceiling with no floor reads
+as complete and is satisfied by doing nothing. And a mock fixture that is richer
+than real model output does not de-risk a feature — it hides whether the feature
+exists, and the more walks it passes the more confident everyone gets.
+
+**Second lesson.** Four live runs were needed to reach the first video, and every
+one of the four failures was a prompt/contract disagreement rather than a bug:
+refine told to return a CampaignDetail while validated as CampaignOptions; Haiku
+unable to hold a byte-identical copy rule; the board never asked for refs; the
+provider silently snapping 2.5s beats to 4s. All four were invisible to 200
+passing tests and to six MOCK walks.

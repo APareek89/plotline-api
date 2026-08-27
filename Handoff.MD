@@ -1,5 +1,5 @@
 # Handoff.MD — Plotline Marketing Studio (plotline-api + plotline-web)
-last-synced: `e9112af` (plotline-api) · `3bfbda4` (plotline-web)
+last-synced: `847f1c4` (plotline-api) · `3bfbda4` (plotline-web)
 > AGENT: read this fully at session start. FIRST run `git log --oneline <last-synced>..HEAD`
 > in BOTH repos (~/Documents/plotline-api, ~/Documents/plotline-web) and reconcile before
 > trusting anything below. Then open with the pending points.
@@ -68,7 +68,7 @@ in full detail. **167 tests green** (floor was 83).
 
 ## v5 — IN FLIGHT (`docs/v5-MASTER-PROMPT.md` + the owner's addendum)
 Seven stages, a Code QA gate after each, Stage 7 (paid) gated on a morning go-ahead.
-Owner's visual target is `~/Documents/Reference material/`. **Floor: 200 tests.**
+Owner's visual target is `~/Documents/Reference material/`. **Floor: 208 tests.**
 
 - ✅ **Stage 0** — 183 tests green at `7a806ce`, typecheck clean, `MOCK_MEDIA=1`,
   `/observability` renders both lenses (agents 300 · media 51 · $1.52 lifetime).
@@ -114,16 +114,30 @@ Owner's visual target is `~/Documents/Reference material/`. **Floor: 200 tests.*
   a cleared qc declared `deliver` and posted `question=None`, so the CTA was never lifted
   and the read-only panel gave no second way in. The guard for that failure existed and
   was correct — it walked four gates short. It now walks to `done`.
-- 🔴 **STAGE 7 BLOCKER — the approved keyframe is NOT the frame the film is made from.**
-  `_render_slot` never reads `ws["keyframes"]`: it re-renders a fresh still from
-  `_visual_prompt` and seeds the clip from THAT. So the hard gate approves a frame that
-  is then discarded, which is a gate protecting nothing — and it costs one extra paid
-  image per shot. Left UNFIXED on purpose: changing the generate path immediately before
-  a one-attempt paid run, untested against a real provider, is the wrong moment. Owner's
-  call. Two extra credits in the plan below assume it stays as-is.
-- 🔴 **Veo 3.1 has no 3-second duration.** `_CAPS["veo31_generate"]["durations"]` is
-  {4,6,8} and `_snap_duration` rounds 3 → 4. The requested "two 3s clips → one 6s film"
-  will actually be two 4s clips → an 8s film, at whatever 4s costs.
+### ✅ LIVE END-TO-END ON REAL MEDIA — 2026-08-27 (`MOCK_MEDIA=0`, owner instruction)
+`Live QA v4` walked name → 3 fragments → brief → options → script → board (3 shots,
+binding `@trail_shoe` + `@ghat_trail`) → canon → keyframes → generate → creative → qc →
+Deliver → **done**. Ad Card delivered a 12.0s film joined from 3 clips, `missing=[]`.
+23 real PixelBin renders, $1.68 total across all four attempts. The product in the film
+is visibly the product on the sheet.
+- ✅ **Keyframes now ARE the film's frames** — 3 × `reuse_keyframe` at $0.00 in the log
+  and zero stills re-rendered at generate time. The hard gate approves what ships.
+- ✅ **Sheets are ANCHOR-FIRST** (owner instruction). One canonical view renders, then
+  the sheet is generated WITH it as reference and the prompt names it as the subject.
+  Real output: 9 labelled panels, one shoe. NOTE it produced a duplicate "RIGHT PROFILE"
+  panel — which is exactly why coverage says COMPOSED, not verified.
+- ✅ **`_FAL_VIDEO_CAPS`** read from fal's live OpenAPI: seedance (any 2-12s +
+  `end_image_url`), veo3.1 (4/6/8, spelled "4s"), kling (5/10), hailuo, pixverse, wan,
+  and the two ARRAY-reference models. fal's video default is now seedance.
+- 🟠 **ROUTING DECISION FOR THE OWNER.** PixelBin's veo31 cannot make a beat shorter
+  than 4s, so the board's 2.5/2.0/1.5s beats were all snapped to 4 and a 6-second film
+  came out 12 seconds long. Durations are now probed and reported honestly. **Seedance
+  accepts any duration 2-12s and would honour the board as written** — it is in the
+  capability table and one env var away (`PLOTLINE_MEDIA_PROVIDER=fal`). Switching
+  providers is the owner's call, not a wiring fix.
+- ⚠️ `.env` now has `MOCK_MEDIA=0` (owner instruction, for QA) and
+  `PLOTLINE_MODEL_OPTIONS=claude-sonnet-4-6`. Haiku burned 3/3 attempts on the refine
+  contract twice live — same species as script and board.
 - 🔴 **MOCK_LLM=1 cannot complete an intake** — found driving Stage 2. `mock_campaign_intake`
   never learned `assume_mode`, and the assume pass sends `message: ""`, so the mock
   returns the context unchanged; `_assume_and_proceed` then offers **Start**
