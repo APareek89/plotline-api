@@ -3597,13 +3597,18 @@ def test_a_fal_fallback_says_which_references_it_cannot_carry(monkeypatch):
     """The FALLBACK provider has different limits from the primary, and a
     failover that quietly renders something else is worse than a failure.
 
-    fal's video model seeds from ONE image_url. Two references may pass the
-    slot budget and still not survive the provider, so the provider's own drop
-    is reported the same way the budget's is.
+    veo3.1 seeds from ONE image_url and has no tail frame. Two references may
+    pass the slot budget and still not survive the provider, so the provider's
+    own drop is reported the same way the budget's is.
+
+    The model is PINNED here rather than taken from config: the default moved to
+    seedance, which DOES accept an end frame, and a test whose subject changes
+    with a config default is testing the default, not the behaviour.
     """
     from app import media
 
     monkeypatch.setitem(config.MEDIA_REF_SLOTS, "video", 2)
+    monkeypatch.setitem(config.MEDIA_MODELS, "video", "fal-ai/veo3.1/image-to-video")
     monkeypatch.setattr(config, "MOCK_MEDIA", False)
     monkeypatch.setattr(config, "MEDIA_PROVIDER", "fal_only")
     monkeypatch.setattr(config, "FAL_KEY", "k")
